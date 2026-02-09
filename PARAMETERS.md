@@ -80,7 +80,7 @@ Controls KV cache usage during conversation.
 
 ---
 
-### kv_cache_mode
+### prompt_cache_mode
 Controls prompt evaluation cache.
 
 - disk (recommended)

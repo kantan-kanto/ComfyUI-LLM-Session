@@ -3,7 +3,7 @@
 
 ---
 
-**Version:** 1.0.0  
+**Version:** 1.0.1
 **License:** GPL-3.0
 
 **ComfyUI 上だけで動作するローカル LLM 実行環境**です。  
@@ -22,15 +22,6 @@ llama.cpp を通じて GGUF モデルをサポートしており、Qwen、Llama�
 - **複数ターン会話を保持**できる ComfyUI ノード群
 - モデルの挙動・収束・破綻を観察するための実験環境
 - サーバーやデーモンを必要としない、ComfyUI 内完結構成
-
----
-
-## このプロジェクトが目的としていないこと
-
-- チャット UI ではありません
-- API サーバーではありません
-- Ollama の代替ではありません
-- 一般ユーザー向けアプリケーションではありません
 
 ---
 
@@ -123,6 +114,21 @@ examples/example_workflow.json
 3. `history_dir` を任意のディレクトリに設定
 4. 1 回目を実行（Turn 1）
 5. テキスト入力を Turn 2 のプロンプトに差し替えて再実行
+
+### Turn 1 Prompt (ワークフローに入力済み)
+
+```
+Please prepare an explanation about the key points
+to consider when using a local LLM in real-world scenarios.
+Do not output the explanation yet.
+```
+
+### Turn 2 Prompt (プロンプトを入れ替えてください)
+
+```
+それでは、先ほど用意していただいた説明をお願いします。 
+明確な日本語で書き、内容を段落に分けてください。
+```
 
 2 回目の出力は、1 回目の実行内容に依存します。
 

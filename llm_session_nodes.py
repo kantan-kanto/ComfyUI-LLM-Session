@@ -1,4 +1,3 @@
-import hashlib
 # ComfyUI-LLM-Session
 # Copyright (C) 2026 kantan-kanto (https://github.com/kantan-kanto)
 #
@@ -18,8 +17,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import re
-
 import folder_paths
+import hashlib
 
 
 # ============================================================================
@@ -166,25 +165,96 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 # llama-cpp-python imports
 try:
+    # Qwen2.5-VL and Qwen3-VL vision support via Qwen2VLChatHandler / Qwen3VLChatHandler
     from llama_cpp import Llama
-    from llama_cpp.llama_chat_format import Qwen25VLChatHandler
-    
-    # Qwen2.5-VL and Qwen3-VL vision support via Qwen2VLChatHandler / Qwen25VLChatHandler
+
+    try:
+        from llama_cpp.llama_chat_format import Qwen25VLChatHandler
+        QWEN2_AVAILABLE = True
+    except ImportError:
+        QWEN2_AVAILABLE = False   
+
     try:
         from llama_cpp.llama_chat_format import Qwen3VLChatHandler
         QWEN3_AVAILABLE = True
     except ImportError:
         QWEN3_AVAILABLE = False
     
+    # LLaVA vision support (llava-v1.5/1.6 etc.) via Llava* chat handler
+    # (class names vary across forks/versions; keep it best-effort)
+    try:
+        from llama_cpp.llama_chat_format import Llava15ChatHandler
+        LLAVA_AVAILABLE = True
+    except ImportError:
+        LLAVA_AVAILABLE = False
+        Llava15ChatHandler = None  # type: ignore 
+
+    # Llama vision support (llama-3.2 etc.) via Llama* chat handler
+    # (class names vary across forks/versions; keep it best-effort)
+    try:
+        from llama_cpp.llama_chat_format import Llama3VisionAlphaChatHandler
+        LLAMA_AVAILABLE = True
+    except ImportError:
+        LLAMA_AVAILABLE = False
+        Llama3VisionAlphaChatHandler = None  # type: ignore 
+
+    # Gemma 3 vision support via Gemma3ChatHandler (in upstream llama-cpp-python it subclasses Llava15ChatHandler)
+    # Ref: upstream PR shows Gemma3ChatHandler(Llava15ChatHandler). :contentReference[oaicite:0]{index=0}
+    try:
+        from llama_cpp.llama_chat_format import Gemma3ChatHandler
+        GEMMA3_AVAILABLE = True
+    except ImportError:
+        GEMMA3_AVAILABLE = False
+        Gemma3ChatHandler = None  # type: ignore
+
+    # GLM-4.6V vision support via GLM46VChatHandler
+    try:
+        from llama_cpp.llama_chat_format import GLM46VChatHandler
+        GLM46V_AVAILABLE = True
+    except ImportError:
+        GLM46V_AVAILABLE = False
+        GLM46VChatHandler = None  # type: ignore
+
     LLAMA_CPP_AVAILABLE = True
 except ImportError:
     LLAMA_CPP_AVAILABLE = False
+    QWEN2_AVAILABLE = False
     QWEN3_AVAILABLE = False
+    LLAVA_AVAILABLE = False
+    LLAMA_AVAILABLE = False
+    GEMMA3_AVAILABLE = False
+    GLM46V_AVAILABLE = False
     print("[LLM Session] Warning: llama-cpp-python not available")
 
 # ============================================================================
 # Utility Functions
 # ============================================================================
+
+def _list_gguf_recursive(models_dir: str) -> tuple[list[str], list[str]]:
+    """
+    models_dir 配下を再帰的に探索し、.gguf を相対パスで返す。
+    - model: mmproj 以外
+    - mmproj: ファイル名が mmproj で始まるもの
+    """
+    base = Path(models_dir)
+    if not base.exists():
+        return [], []
+
+    models: list[str] = []
+    mmprojs: list[str] = []
+
+    for p in base.rglob("*.gguf"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(base).as_posix()  # サブフォルダを含む相対パス
+        if p.name.startswith("mmproj"):
+            mmprojs.append(rel)
+        else:
+            models.append(rel)
+
+    models.sort(key=str.lower)
+    mmprojs.sort(key=str.lower)
+    return models, mmprojs
 
 def encode_image_base64(pil_image: Image.Image, max_pixels: int = 262144) -> str:
     """
@@ -304,7 +374,6 @@ def _now_iso_jst() -> str:
     """Return current time in ISO8601 with JST offset."""
     # Avoid depending on system tz; format explicitly as +09:00
     return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
-
 
 def _make_suppress_backend_logs(suppress: bool):
     """Return a context manager that suppresses stdout/stderr if suppress is True."""
@@ -499,8 +568,6 @@ def build_chat_messages(history: Dict[str, Any],
     return messages
 
 
-
-
 # ============================================================================
 # Chat completion compatibility helpers
 # ============================================================================
@@ -561,7 +628,6 @@ def _fold_system_into_user_messages(messages: List[Dict[str, Any]]) -> List[Dict
     # No user message exists; prepend one
     return [{"role": "user", "content": sys_text}] + out
 
-
 def _create_chat_completion_robust(llm: "Llama", messages: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
     """create_chat_completion with a fallback for models that do not support system role."""
     try:
@@ -608,14 +674,12 @@ def _make_summary_prompt(existing_summary: str, turns_chunk: list) -> list:
         {"role": "user", "content": user_text}
     ]
 
-
 def _summarize_with_model(model: "Llama", existing_summary: str, turns_chunk: list,
                          temperature: float, max_tokens: int, suppress_logs: bool = False) -> str:
     msgs = _make_summary_prompt(existing_summary, turns_chunk)
     with _make_suppress_backend_logs(suppress_logs):
         resp = _create_chat_completion_robust(model, msgs, temperature=float(temperature), max_tokens=int(max_tokens))
     return (resp["choices"][0]["message"]["content"] or "").strip()
-
 
 def maybe_compact_summary(model: "Llama",
                           history: Dict[str, Any],
@@ -651,7 +715,6 @@ def maybe_compact_summary(model: "Llama",
     history["summary"]["text"] = compact
     history["summary"]["updated_at"] = _now_iso_jst()
     return history
-
 
 def maybe_summarize_history(model: "Llama",
                            history: Dict[str, Any],
@@ -721,7 +784,6 @@ def maybe_summarize_history(model: "Llama",
     return history
 
 
-
 class GGUFModelManager:
     """GGUF model manager class
 
@@ -751,48 +813,107 @@ class GGUFModelManager:
             return None
         return os.path.normpath(p)
 
+    def _infer_is_qwen2(self, model_path: str) -> bool:
+        model_name_lower = os.path.basename(model_path).lower()
+        return "qwen2" in model_name_lower
+
     def _infer_is_qwen3(self, model_path: str) -> bool:
         model_name_lower = os.path.basename(model_path).lower()
         return "qwen3" in model_name_lower
 
-    def _auto_detect_mmproj(self, model_path: str) -> Optional[str]:
-        """Auto-detect an mmproj file that matches the selected model.
+    def _infer_is_llava(self, model_path: str) -> bool:
+        model_name_lower = os.path.basename(model_path).lower()
+        # Accept common naming patterns: llava-v1.6-*, llava-*, llava1.6, etc.
+        return "llava" in model_name_lower
 
-        Prefer mmproj names derived from the model base name; only fall back to other
-        mmproj-*.gguf in the same directory if nothing matches.
+    def _infer_is_llama(self, model_path: str) -> bool:
+        model_name_lower = os.path.basename(model_path).lower()
+        # Accept common naming patterns: llama-3.2, etc.
+        return "llama" in model_name_lower
+
+    def _infer_is_gemma3(self, model_path: str) -> bool:
+        model_name_lower = os.path.basename(model_path).lower()
+        # Common: gemma-3-*, gemma3-*, gemma_3_*
+        return ("gemma-3" in model_name_lower) or ("gemma3" in model_name_lower) or ("gemma_3" in model_name_lower)
+
+    def _infer_is_glm46v(self, model_path: str) -> bool:
+        model_name_lower = os.path.basename(model_path).lower()
+        # Common: glm-4.6v, glm-4.6v-flash, glm_4.6v, glm4.6v
+        return "glm-4" in model_name_lower
+
+    def _auto_detect_mmproj(self, model_path: str) -> Optional[str]:
+        """
+        Auto-detect mmproj by "family prefix" match.
+
+        Rule:
+        - Determine model family by basename(model).startswith one of:
+            qwen2, qwen3, llava, llama, gemma-3, glm-4
+        - In the same directory, scan mmproj-*.gguf
+        - Keep only those whose mmproj_name (after 'mmproj-') startswith the same family keyword
+        - If exactly one match -> return it
+        - Else (0 or >1) -> raise ValueError
         """
         model_dir = os.path.dirname(model_path)
-        base_name = os.path.basename(model_path)
+        base = os.path.basename(model_path)
+        name = base[:-5] if base.lower().endswith(".gguf") else base
+        name_l = name.lower()
 
-        # Strip common suffixes
-        if base_name.lower().endswith(".gguf"):
-            base_name = base_name[:-5]
+        # Model family keywords (startswith)
+        families = ["qwen2", "qwen3", "llava", "llama", "gemma-3", "glm-4"]
+        family = next((k for k in families if name_l.startswith(k)), None)
 
-        # Candidates in preferred order (most specific first)
-        preferred = [
-            f"mmproj-{base_name}.gguf",
-            f"mmproj-{base_name}-F16.gguf",
-            f"mmproj-{base_name}-Q8_0.gguf",
+        if family is None:
+            raise ValueError(
+                "mmproj auto-detect failed: model name does not start with any supported family prefix.\n"
+                f"model: {base}\n"
+                f"supported prefixes: {', '.join(families)}"
+            )
+
+        if not os.path.exists(model_dir):
+            raise ValueError(
+                "mmproj auto-detect failed: model directory does not exist.\n"
+                f"dir: {model_dir}"
+            )
+
+        # Collect mmproj-*.gguf in the same dir
+        mmproj_files = [
+            f for f in os.listdir(model_dir)
+            if f.startswith("mmproj-") and f.endswith(".gguf")
         ]
 
-        for fname in preferred:
+        # Filter by family prefix on mmproj_name
+        matches = []
+        for f in mmproj_files:
+            mmname = f[len("mmproj-"):-len(".gguf")]
+            if mmname.lower().startswith(family):
+                matches.append(f)
+
+        matches.sort(key=str.lower)
+
+        if len(matches) == 1:
+            fname = matches[0]
             cand = os.path.join(model_dir, fname)
-            if os.path.exists(cand):
-                print(f"[GGUFModelManager] Auto-detected mmproj (preferred): {fname}")
-                return self._normalize_path(cand)
+            print(f"[GGUFModelManager] Auto-detected mmproj (family={family}): {fname}")
+            return self._normalize_path(cand)
 
-        # Fallback: try any mmproj-*.gguf in the directory (stable sort for determinism)
-        if os.path.exists(model_dir):
-            mmprojs = sorted(
-                [f for f in os.listdir(model_dir) if f.startswith("mmproj") and f.endswith(".gguf")]
+        if len(matches) == 0:
+            raise ValueError(
+                "mmproj auto-detect failed: no mmproj matched the model family prefix.\n"
+                f"model: {base}\n"
+                f"family: {family}\n"
+                f"dir: {model_dir}\n"
+                f"mmproj candidates: {', '.join(sorted(mmproj_files, key=str.lower)) or '(none)'}"
             )
-            if mmprojs:
-                fname = mmprojs[0]
-                cand = os.path.join(model_dir, fname)
-                print(f"[GGUFModelManager] Auto-detected mmproj (fallback): {fname}")
-                return self._normalize_path(cand)
 
-        return None
+        # len(matches) > 1
+        raise ValueError(
+            "mmproj auto-detect failed: multiple mmproj files matched the model family prefix.\n"
+            f"model: {base}\n"
+            f"family: {family}\n"
+            f"dir: {model_dir}\n"
+            f"matched: {', '.join(matches)}\n"
+            "Please select mmproj manually."
+        )
 
     def _make_signature(
         self,
@@ -825,14 +946,39 @@ class GGUFModelManager:
         model_path = self._normalize_path(model_path)
 
         # Infer Qwen version from model name
+        is_qwen2 = self._infer_is_qwen2(model_path)
         is_qwen3 = self._infer_is_qwen3(model_path)
+        # Infer LLaVA from model name
+        is_llava = self._infer_is_llava(model_path)
+        # Infer Llama from model name
+        is_llama = self._infer_is_llama(model_path)
+        # Infer Gemma 3
+        is_gemma3 = self._infer_is_gemma3(model_path)
+        # Infer GLM-4.6V / GLM-4V family (heuristic)
+        is_glm46v = self._infer_is_glm46v(model_path)
 
-        # If user explicitly selected "(Not required)", force text-only even if the filename contains "qwen3".
-        # This prevents accidental Qwen3-VL handler selection and mmproj auto-detection for text-only Qwen3 models.
+        # If user explicitly selected "(Not required)", force text-only.
         force_no_mmproj = (mmproj_path == "(Not required)")
         if force_no_mmproj:
             mmproj_path = None
-# Qwen3-VL requires mmproj (unless explicitly disabled)
+
+        # Qwen25-VL requires mmproj (unless explicitly disabled)
+        if is_qwen2 and not force_no_mmproj:
+            if mmproj_path is None:
+                mmproj_path = self._auto_detect_mmproj(model_path)
+                if mmproj_path is None:
+                    model_dir = os.path.dirname(model_path)
+                    raise ValueError(
+                        "Qwen25-VL requires mmproj file!\n"
+                        "Please download mmproj file from the model's GGUF repo.\n"
+                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
+                    )
+            else:
+                mmproj_path = self._normalize_path(mmproj_path)
+
+            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+
+        # Qwen3-VL requires mmproj (unless explicitly disabled)
         if is_qwen3 and not force_no_mmproj:
             if mmproj_path is None:
                 mmproj_path = self._auto_detect_mmproj(model_path)
@@ -848,11 +994,90 @@ class GGUFModelManager:
 
             print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
 
+        # LLaVA requires mmproj to actually use vision (unless explicitly disabled)
+        if is_llava and not force_no_mmproj:
+            if mmproj_path is None:
+                mmproj_path = self._auto_detect_mmproj(model_path)
+                if mmproj_path is None:
+                    model_dir = os.path.dirname(model_path)
+                    raise ValueError(
+                        "LLaVA requires mmproj file for vision!\n"
+                        "Please download the matching mmproj file from the model's GGUF repo.\n"
+                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
+                    )
+            else:
+                mmproj_path = self._normalize_path(mmproj_path)
+
+            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+
+        # Llama requires mmproj to actually use vision (unless explicitly disabled)
+        if is_llama and not force_no_mmproj:
+            if mmproj_path is None:
+                mmproj_path = self._auto_detect_mmproj(model_path)
+                if mmproj_path is None:
+                    model_dir = os.path.dirname(model_path)
+                    raise ValueError(
+                        "Llama requires mmproj file for vision!\n"
+                        "Please download the matching mmproj file from the model's GGUF repo.\n"
+                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
+                    )
+            else:
+                mmproj_path = self._normalize_path(mmproj_path)
+
+            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+
+        # Gemma 3 vision: usually uses mmproj as well (unless explicitly disabled)
+        if is_gemma3 and not force_no_mmproj:
+            if mmproj_path is None:
+                mmproj_path = self._auto_detect_mmproj(model_path)
+                if mmproj_path is None:
+                    model_dir = os.path.dirname(model_path)
+                    raise ValueError(
+                        "Gemma-3 (vision) requires mmproj file for vision!\n"
+                        "Please download the matching mmproj file from the model's GGUF repo.\n"
+                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
+                    )
+            else:
+                mmproj_path = self._normalize_path(mmproj_path)
+
+            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+
+        # GLM-4.6V vision: many GGUF repos still ship a separate mmproj; require if using a vision handler.
+        if is_glm46v and not force_no_mmproj and GLM46V_AVAILABLE:
+            if mmproj_path is None:
+                mmproj_path = self._auto_detect_mmproj(model_path)
+                if mmproj_path is None:
+                    model_dir = os.path.dirname(model_path)
+                    raise ValueError(
+                        "GLM-4.6V (vision) requires mmproj file for vision (handler present)!\n"
+                        "Please download the matching mmproj file from the model's GGUF repo.\n"
+                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
+                    )
+            else:
+                mmproj_path = self._normalize_path(mmproj_path)
+
+            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+
         # Decide vision mode + initialize handler
         use_vision = False
         chat_handler = None
 
-        if is_qwen3 and (not force_no_mmproj) and QWEN3_AVAILABLE:
+        if is_qwen2 and (not force_no_mmproj) and QWEN2_AVAILABLE:
+            if mmproj_path is not None and os.path.exists(mmproj_path):
+                try:
+                    print(f"[GGUFModelManager] Qwen25-VL with mmproj: {mmproj_path}")
+                    chat_handler = Qwen25VLChatHandler(clip_model_path=mmproj_path)
+                    use_vision = True
+                except Exception as e:
+                    print(f"[GGUFModelManager] Warning: Failed to initialize Qwen25-VL chat handler: {e}")
+                    chat_handler = None
+                    use_vision = False
+            else:
+                print("[GGUFModelManager] Error: Qwen25-VL requires an existing mmproj file")
+                chat_handler = None
+                use_vision = False
+
+        elif is_qwen3 and (not force_no_mmproj) and QWEN3_AVAILABLE:
             if mmproj_path is not None and os.path.exists(mmproj_path):
                 try:
                     print(f"[GGUFModelManager] Qwen3-VL with mmproj: {mmproj_path}")
@@ -866,11 +1091,69 @@ class GGUFModelManager:
                 print("[GGUFModelManager] Error: Qwen3-VL requires an existing mmproj file")
                 chat_handler = None
                 use_vision = False
-        elif "qwen2.5" in os.path.basename(model_path).lower() or "qwen2_5" in os.path.basename(model_path).lower():
-            # Keep current behavior (text-only) to avoid changing features unexpectedly.
-            print("[GGUFModelManager] Qwen2.5-VL: running in text-only mode (no chat handler)")
-            chat_handler = None
-            use_vision = False
+
+        elif is_gemma3 and (not force_no_mmproj) and GEMMA3_AVAILABLE:
+            if mmproj_path is not None and os.path.exists(mmproj_path):
+                try:
+                    print(f"[GGUFModelManager] Gemma-3 with mmproj: {mmproj_path}")
+                    chat_handler = Gemma3ChatHandler(clip_model_path=mmproj_path)
+                    use_vision = True
+                except Exception as e:
+                    print(f"[GGUFModelManager] Warning: Failed to initialize Gemma-3 chat handler: {e}")
+                    chat_handler = None
+                    use_vision = False
+            else:
+                print("[GGUFModelManager] Error: Gemma-3 requires an existing mmproj file for vision")
+                chat_handler = None
+                use_vision = False
+
+        elif is_llava and (not force_no_mmproj) and LLAVA_AVAILABLE:
+            if mmproj_path is not None and os.path.exists(mmproj_path):
+                try:
+                    print(f"[GGUFModelManager] LLaVA with mmproj: {mmproj_path}")
+                    # Llava15ChatHandler is used for llava-v1.5/v1.6 style models in many builds
+                    chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
+                    use_vision = True
+                except Exception as e:
+                    print(f"[GGUFModelManager] Warning: Failed to initialize LLaVA chat handler: {e}")
+                    chat_handler = None
+                    use_vision = False
+            else:
+                print("[GGUFModelManager] Error: LLaVA requires an existing mmproj file for vision")
+                chat_handler = None
+                use_vision = False
+
+        elif is_llama and (not force_no_mmproj) and LLAMA_AVAILABLE:
+            if mmproj_path is not None and os.path.exists(mmproj_path):
+                try:
+                    print(f"[GGUFModelManager] Llama with mmproj: {mmproj_path}")
+                    # Llama3VisionAlphaChatHandler is used for llava-3.2 style models in many builds
+                    chat_handler = Llama3VisionAlphaChatHandler(clip_model_path=mmproj_path)
+                    use_vision = True
+                except Exception as e:
+                    print(f"[GGUFModelManager] Warning: Failed to initialize Llama chat handler: {e}")
+                    chat_handler = None
+                    use_vision = False
+            else:
+                print("[GGUFModelManager] Error: Llama requires an existing mmproj file for vision")
+                chat_handler = None
+                use_vision = False
+
+        elif is_glm46v and (not force_no_mmproj) and GLM46V_AVAILABLE:
+            if mmproj_path is not None and os.path.exists(mmproj_path):
+                try:
+                    print(f"[GGUFModelManager] GLM-4.6V with mmproj: {mmproj_path}")
+                    chat_handler = GLM46VChatHandler(clip_model_path=mmproj_path)  # type: ignore[misc]
+                    use_vision = True
+                except Exception as e:
+                    print(f"[GGUFModelManager] Warning: Failed to initialize GLM-4.6V chat handler: {e}")
+                    chat_handler = None
+                    use_vision = False
+            else:
+                print("[GGUFModelManager] Error: GLM-4.6V requires an existing mmproj file for vision (handler present)")
+                chat_handler = None
+                use_vision = False
+
         else:
             print("[GGUFModelManager] Using text-only mode")
             chat_handler = None
@@ -909,7 +1192,8 @@ class GGUFModelManager:
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 verbose=verbose,
-                logits_all=True,  # required by some vision chat handlers
+                # Vision models often need this; safe default for vision path.
+                logits_all=True,
             )
         else:
             print("[GGUFModelManager] Loading in text-only mode")
@@ -932,7 +1216,7 @@ class GGUFModelManager:
         Compute a stable cache directory for prompt/KV cache.
         We key by model+mmproj+n_ctx so caches are not mixed across incompatible settings.
         """
-        base = (self.prompt_cache_dir_override or os.path.join(folder_paths.get_output_directory(), "llm_session_sessions", "prompt_cache"))
+        base = (self.prompt_cache_dir_override or os.path.join(_safe_output_dir(), "llm_session_sessions", "prompt_cache"))
         os.makedirs(base, exist_ok=True)
         key_src = f"{os.path.abspath(model_path)}|{os.path.abspath(mmproj_path or '')}|n_ctx={int(n_ctx)}"
         key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
@@ -1082,16 +1366,7 @@ class LLMSessionChatSimpleNode:
     def INPUT_TYPES(cls):
         models_dir = os.path.join(folder_paths.models_dir, "LLM")
 
-        available_models = []
-        available_mmprojs = []
-
-        if os.path.exists(models_dir):
-            for file in os.listdir(models_dir):
-                if file.endswith(".gguf"):
-                    if file.startswith("mmproj"):
-                        available_mmprojs.append(file)
-                    else:
-                        available_models.append(file)
+        available_models, available_mmprojs = _list_gguf_recursive(models_dir)
 
         mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
         if not available_mmprojs:
@@ -1105,7 +1380,7 @@ class LLMSessionChatSimpleNode:
                 "user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "User message for this turn"}),
                 "session_id": ("STRING", {"default": "default", "tooltip": "Session ID (maps to a history file). Same ID continues the chat."}),
                 "model": (available_models, {"default": available_models[0], "tooltip": "GGUF model file in models/LLM/"}),
-                "mmproj": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for Qwen3-VL. Auto-detect is recommended."}),
+                "mmproj": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "Manual selection is recommended."}),
                 "history_dir": ("STRING", {"default": "", "tooltip": "Optional directory for history/caches. Empty uses output/llm_session_sessions/."}),
             },
             "optional": {
@@ -1175,11 +1450,11 @@ class LLMDialogueCycleSimpleNode:
     def INPUT_TYPES(cls):
         models_dir = os.path.join(folder_paths.models_dir, "LLM")
 
-        available_models = []
-        if os.path.exists(models_dir):
-            for file in os.listdir(models_dir):
-                if file.endswith(".gguf") and not file.startswith("mmproj"):
-                    available_models.append(file)
+        available_models, available_mmprojs = _list_gguf_recursive(models_dir)
+
+        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
+        if not available_mmprojs:
+            mmproj_options = ["(Auto-detect)", "(Not required)"]
 
         if not available_models:
             available_models = ["(No GGUF models found in models/LLM/)"]
@@ -1238,7 +1513,7 @@ class LLMDialogueCycleSimpleNode:
                 }),
                 "force_text_only": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "Force text-only mode for both models (disables mmproj auto-detect). Enable for text-only Qwen3 models."
+                    "tooltip": "Force text-only mode for both models (disables mmproj auto-detect)."
                 }),
                 "reset_session": ("BOOLEAN", {
                     "default": False,
@@ -1313,7 +1588,7 @@ class LLMDialogueCycleSimpleNode:
 
         # mmproj handling:
         # - Default is auto-detect for both roles.
-        # - Force text-only disables mmproj auto-detect (useful for text-only Qwen3 models).
+        # - Force text-only disables mmproj auto-detect.
         mmprojA = "(Not required)" if force_text_only else "(Auto-detect)"
         mmprojB = "(Not required)" if force_text_only else "(Auto-detect)"
 
@@ -1373,16 +1648,7 @@ class LLMSessionChatNode:
     def INPUT_TYPES(cls):
         models_dir = os.path.join(folder_paths.models_dir, "LLM")
 
-        available_models = []
-        available_mmprojs = []
-
-        if os.path.exists(models_dir):
-            for file in os.listdir(models_dir):
-                if file.endswith(".gguf"):
-                    if file.startswith("mmproj"):
-                        available_mmprojs.append(file)
-                    else:
-                        available_models.append(file)
+        available_models, available_mmprojs = _list_gguf_recursive(models_dir)
 
         mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
         if not available_mmprojs:
@@ -1408,7 +1674,7 @@ class LLMSessionChatNode:
                 }),
                 "mmproj": (mmproj_options, {
                     "default": "(Auto-detect)",
-                    "tooltip": "mmproj GGUF for Qwen3-VL. Auto-detect is recommended."
+                    "tooltip": "Manual selection is recommended."
                 }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
@@ -1572,7 +1838,8 @@ class LLMSessionChatNode:
              prompt_cache_mode: str = "disk",
              repeat_penalty: float = 1.12,
              repeat_last_n: int = 256,
-             rewrite_continue: bool = True,             kv_state_mode: str = "memory",
+             rewrite_continue: bool = True,
+             kv_state_mode: str = "memory",
              log_level: str = "timing",
              suppress_backend_logs: bool = True,
              history_dir: str = "",
@@ -1833,7 +2100,7 @@ class LLMSessionChatNode:
             _log_total("Finished (error)")
             return ("",)
 
-                # Update history (do not persist image; keep image_note empty in phase 1)
+        # Update history (do not persist image; keep image_note empty in phase 1)
         history.setdefault("turns", []).append({
             "t": _now_iso_jst(),
             "user": {
@@ -1842,10 +2109,41 @@ class LLMSessionChatNode:
             },
             "assistant": {
                 "text": assistant_text or ""
+            },
+            # Added: Save parameters used in this execution
+            "params": {
+                # parameters (required values)
+                "max_tokens_req": int(max_tokens),
+                "temperature": float(temperature),
+                "top_p": float(top_p),
+                "repeat_penalty": float(repeat_penalty) if repeat_penalty is not None else None,
+                "repeat_last_n": int(repeat_last_n) if repeat_last_n is not None else None,
+
+                # Retained actually used values , if dynamic degeneracy is effective
+                "dynamic_max_tokens": bool(dynamic_max_tokens),
+                "max_tokens_used": int(gen_tokens),
+                "turns_limit_used": int(turns_limit) if turns_limit is not None else None,
+
+                # Record the use of images
+                "image_used": (image is not None),
             }
         })
-
         history.setdefault("meta", {})["updated_at"] = _now_iso_jst()
+        # Save only the latest execution parameters (overwrite each time)
+        history.setdefault("meta", {})["last_params"] = {
+            # Runtime context/load system
+            "prompt_cache_mode": (prompt_cache_mode or "off"),
+            "kv_state_mode": (kv_state_mode or "off"),
+
+            # History control
+            "max_turns": int(max_turns) if max_turns is not None else None,
+            "summarize_old_history": bool(summarize_old_history),
+            "summary_chunk_turns": int(summary_chunk_turns),
+            "max_tokens_summary": int(max_tokens_summary),
+            "summary_max_chars": int(summary_max_chars),
+
+            "saved_at": _now_iso_jst(),
+        }
         history["system_prompt"] = system_prompt or history.get("system_prompt", "")
 
         # Summarize overflow + trim turns (if enabled)
@@ -1924,29 +2222,34 @@ def _transcript_path(session_id: str, history_dir: Optional[str] = None) -> str:
     _ensure_dir(base)
     return os.path.join(base, f"{safe}.txt")
 
-
 def _append_transcript_lines(path: str, lines: List[str]) -> None:
     _ensure_dir(os.path.dirname(path))
     with open(path, "a", encoding="utf-8", newline="\n") as f:
         for ln in lines:
             f.write(ln.rstrip("\n") + "\n")
 
+def _safe_join_under(base_dir: str, rel_path: str) -> str:
+    base = Path(base_dir).resolve()
+    p = (base / rel_path).resolve()
+    # パストラバーサル対策：base 配下に解決されることを保証
+    if base != p and base not in p.parents:
+        raise ValueError(f"Invalid path (outside models_dir): {rel_path}")
+    return str(p)
 
 def _resolve_model_and_mmproj(models_dir: str, model: str, mmproj: str) -> tuple[str, Optional[str]]:
-    model_path = os.path.join(models_dir, model)
+    model_path = _safe_join_under(models_dir, model)
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model not found: {model_path}")
 
     mmproj_path = None
     if mmproj == "(Not required)":
-        mmproj_path = "(Not required)"  # sentinel (forces text-only in GGUFModelManager)
+        mmproj_path = "(Not required)"  # sentinel
     elif mmproj != "(Auto-detect)":
-        mmproj_path = os.path.normpath(os.path.join(models_dir, mmproj))
+        mmproj_path = _safe_join_under(models_dir, mmproj)
         if not os.path.exists(mmproj_path):
-            # fall back to auto-detect
-            mmproj_path = None
-    return model_path, mmproj_path
+            mmproj_path = None  # fall back to auto-detect
 
+    return model_path, mmproj_path
 
 def _chat_one_turn(
     *,
@@ -2195,9 +2498,36 @@ def _chat_one_turn(
     history.setdefault("turns", []).append({
         "t": _now_iso_jst(),
         "user": {"text": user_text or "", "image_note": ""},
-        "assistant": {"text": assistant_text or ""},
+        "assistant": {"text": assistant_text or ""},   
     })
     history.setdefault("meta", {})["updated_at"] = _now_iso_jst()
+    # Save only the latest execution parameters (overwrite each time)
+    history.setdefault("meta", {})["last_params"] = {
+        # parameters (required values)
+        "max_tokens_req": int(max_tokens),
+        "temperature": float(temperature),
+        "top_p": float(top_p),
+        "repeat_penalty": float(repeat_penalty) if repeat_penalty is not None else None,
+        "repeat_last_n": int(repeat_last_n) if repeat_last_n is not None else None,
+
+        # Runtime context/load system
+        "prompt_cache_mode": (prompt_cache_mode or "off"),
+        "kv_state_mode": (kv_state_mode or "off"),
+
+        # History control
+        "max_turns": int(max_turns) if max_turns is not None else None,
+        "summarize_old_history": bool(summarize_old_history),
+        "summary_chunk_turns": int(summary_chunk_turns),
+        "max_tokens_summary": int(max_tokens_summary),
+        "summary_max_chars": int(summary_max_chars),
+
+        # Retained actually used values , if dynamic degeneracy is effective
+        "dynamic_max_tokens": bool(dynamic_max_tokens),
+        "max_tokens_used": int(gen_tokens),
+        "turns_limit_used": int(turns_limit) if turns_limit is not None else None,
+
+        "saved_at": _now_iso_jst(),
+    }
     history["system_prompt"] = system_prompt or history.get("system_prompt", "")
 
     # Summarize overflow
@@ -2265,16 +2595,7 @@ class LLMDialogueCycleNode:
     def INPUT_TYPES(cls):
         models_dir = os.path.join(folder_paths.models_dir, "LLM")
 
-        available_models = []
-        available_mmprojs = []
-
-        if os.path.exists(models_dir):
-            for file in os.listdir(models_dir):
-                if file.endswith(".gguf"):
-                    if file.startswith("mmproj"):
-                        available_mmprojs.append(file)
-                    else:
-                        available_models.append(file)
+        available_models, available_mmprojs = _list_gguf_recursive(models_dir)
 
         mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
         if not available_mmprojs:
@@ -2290,10 +2611,10 @@ class LLMDialogueCycleNode:
                 "cycles": ("INT", {"default": 1, "min": 1, "max": 50, "step": 1, "tooltip": "Number of round trips. 1 = A then B."}),
 
                 "modelA": (available_models, {"default": available_models[0], "tooltip": "GGUF model for role A"}),
-                "mmprojA": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for modelA (Qwen3-VL)"}),
+                "mmprojA": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for modelA"}),
 
                 "modelB": (available_models, {"default": available_models[0], "tooltip": "GGUF model for role B"}),
-                "mmprojB": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for modelB (Qwen3-VL)"}),
+                "mmprojB": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for modelB"}),
 
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant.", "tooltip": "Shared system prompt for both roles"}),
                 "system_prompt_A": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),
@@ -2484,6 +2805,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LLMSessionChatNode": "LLM Session Chat",
     "LLMDialogueCycleNode": "LLM Dialogue Cycle",
 }
+
 
 # ============================================================================
 # Cleanup on module unload

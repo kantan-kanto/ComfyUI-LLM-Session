@@ -1,14 +1,14 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.0.0
+**Version:** 1.0.1
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
 without external runtimes such as Ollama.
 
 Supports GGUF models via llama.cpp, including many popular open-weight LLMs
-such as Qwen, Llama, Mistral NeMo, Gemma, and Phi-3 Mini.
+such as Llama, Mistral, Qwen, DeepSeek, GLM, Gemma, LLaVA and gpt-oss.
 
 In addition to user–model chat, it also supports model-to-model dialogue
 for **observation, experimentation, and analysis**.
@@ -21,15 +21,6 @@ for **observation, experimentation, and analysis**.
 - A set of ComfyUI nodes for **persistent multi-turn conversations**
 - A tool for **observing model behavior**, convergence, and failure modes
 - Fully self-contained inside ComfyUI (no server, no daemon)
-
----
-
-## What This Project Is NOT
-
-- Not a chat UI
-- Not an API server
-- Not an Ollama replacement
-- Not an end-user application
 
 ---
 
@@ -178,13 +169,17 @@ The following GGUF instruction models have been tested.
 
 ### Text Chat (Confirmed)
 
-- Llama 3.1 (8B / 70B)
-- Qwen 2.5 (7B / 14B)
-- Qwen3-VL (4B / 8B)
+- DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Mistral NeMo 12B
-- Phi-3 Mini
+- gpt-oss
+- Llama 3.1 Instruct (8B / 70B)
+- llava
+- Mistral NeMo 12B Instruct
+- Phi-3 Mini Instruct
+- Qwen3-VL (4B / 8B)
+- Qwen2.5-VL-7B
+- Qwen 2.5 Instruct (7B / 14B)
 - Shisa v2
 
 ### MoE Models
@@ -265,5 +260,16 @@ Areas needing help:
 ---
 
 ## Release Notes
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+
+### 1.0.1
+
+- Fixed issue where non-Qwen3-VL vision models were always loaded in text-only mode even when a valid mmproj file was specified
+- Improved mmproj auto-detection logic
+- Added recursive GGUF discovery under `models/LLM`
+- Expanded parameter snapshot recording in session history
+
 ### 1.0.0
+
 - Initial release

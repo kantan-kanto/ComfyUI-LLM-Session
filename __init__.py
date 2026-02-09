@@ -6,7 +6,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 from .llm_session_nodes import NODE_CLASS_MAPPINGS as sNODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as sNODE_DISPLAY_NAME_MAPPINGS
 
