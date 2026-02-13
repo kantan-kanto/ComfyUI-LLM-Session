@@ -56,6 +56,7 @@ _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
     "repeat_last_n": 256,
     "rewrite_continue": True,
     "reset_session": False,
+    "stream_to_console": False,
 }
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
@@ -156,6 +157,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["suppress_backend_logs"] = _as_bool(defaults.get("suppress_backend_logs"), True)
     defaults["rewrite_continue"] = _as_bool(defaults.get("rewrite_continue"), True)
     defaults["reset_session"] = _as_bool(defaults.get("reset_session"), False)
+    defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), False)
 
     # System prompt
     sp = defaults.get("system_prompt")
@@ -198,6 +200,14 @@ try:
         LLAMA_AVAILABLE = False
         Llama3VisionAlphaChatHandler = None  # type: ignore 
 
+    # MiniCPM-V 2.6 vision support via MiniCPMv26ChatHandler
+    try:
+        from llama_cpp.llama_chat_format import MiniCPMv26ChatHandler
+        MINICPM26_AVAILABLE = True
+    except ImportError:
+        MINICPM26_AVAILABLE = False
+        MiniCPMv26ChatHandler = None  # type: ignore
+
     # Gemma 3 vision support via Gemma3ChatHandler (in upstream llama-cpp-python it subclasses Llava15ChatHandler)
     # Ref: upstream PR shows Gemma3ChatHandler(Llava15ChatHandler). :contentReference[oaicite:0]{index=0}
     try:
@@ -222,6 +232,7 @@ except ImportError:
     QWEN3_AVAILABLE = False
     LLAVA_AVAILABLE = False
     LLAMA_AVAILABLE = False
+    MINICPM26_AVAILABLE = False
     GEMMA3_AVAILABLE = False
     GLM46V_AVAILABLE = False
     print("[LLM Session] Warning: llama-cpp-python not available")
@@ -640,6 +651,35 @@ def _create_chat_completion_robust(llm: "Llama", messages: List[Dict[str, Any]],
         folded = _fold_system_into_user_messages(messages)
         return llm.create_chat_completion(messages=folded, **kwargs)
 
+def _iter_chat_completion_robust(llm: "Llama", messages: List[Dict[str, Any]], **kwargs):
+    """Streaming create_chat_completion with system-role fallback."""
+    try:
+        return llm.create_chat_completion(messages=messages, stream=True, **kwargs)
+    except Exception as e:
+        s = str(e)
+        if "System role not supported" not in s and "system role not supported" not in s:
+            raise
+        folded = _fold_system_into_user_messages(messages)
+        return llm.create_chat_completion(messages=folded, stream=True, **kwargs)
+
+def _extract_stream_content(chunk: Any) -> str:
+    """Best-effort extraction of streamed text from llama-cpp-python chunks."""
+    try:
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        if not choices:
+            return ""
+        choice = choices[0] or {}
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            return delta.get("content") or ""
+        msg = choice.get("message")
+        if isinstance(msg, dict):
+            return msg.get("content") or ""
+        txt = choice.get("text")
+        return txt or ""
+    except Exception:
+        return ""
+
 def _make_summary_prompt(existing_summary: str, turns_chunk: list) -> list:
     """
     Build messages for summarizing a chunk of turns.
@@ -831,6 +871,11 @@ class GGUFModelManager:
         # Accept common naming patterns: llama-3.2, etc.
         return "llama" in model_name_lower
 
+    def _infer_is_minicpm2(self, model_path: str) -> bool:
+        model_name_lower = os.path.basename(model_path).lower()
+        # Accept common naming patterns: llama-3.2, etc.
+        return "minicpm-v-2_6" in model_name_lower
+
     def _infer_is_gemma3(self, model_path: str) -> bool:
         model_name_lower = os.path.basename(model_path).lower()
         # Common: gemma-3-*, gemma3-*, gemma_3_*
@@ -847,7 +892,7 @@ class GGUFModelManager:
 
         Rule:
         - Determine model family by basename(model).startswith one of:
-            qwen2, qwen3, llava, llama, gemma-3, glm-4
+            qwen2, qwen3, llava, llama, minicpm-v-2_6, gemma-3, glm-4
         - In the same directory, scan mmproj-*.gguf
         - Keep only those whose mmproj_name (after 'mmproj-') startswith the same family keyword
         - If exactly one match -> return it
@@ -859,7 +904,7 @@ class GGUFModelManager:
         name_l = name.lower()
 
         # Model family keywords (startswith)
-        families = ["qwen2", "qwen3", "llava", "llama", "gemma-3", "glm-4"]
+        families = ["qwen2", "qwen3", "llava", "llama", "minicpm-v-2_6", "gemma-3", "glm-4"]
         family = next((k for k in families if name_l.startswith(k)), None)
 
         if family is None:
@@ -952,6 +997,8 @@ class GGUFModelManager:
         is_llava = self._infer_is_llava(model_path)
         # Infer Llama from model name
         is_llama = self._infer_is_llama(model_path)
+        # Infer MiniCPM-V 2.6
+        is_minicpm26 = self._infer_is_gemma3(model_path)
         # Infer Gemma 3
         is_gemma3 = self._infer_is_gemma3(model_path)
         # Infer GLM-4.6V / GLM-4V family (heuristic)
@@ -1026,6 +1073,22 @@ class GGUFModelManager:
 
             print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
 
+        # MiniCPM-V 2.6 vision: usually uses mmproj as well (unless explicitly disabled)
+        if is_minicpm26 and not force_no_mmproj:
+            if mmproj_path is None:
+                mmproj_path = self._auto_detect_mmproj(model_path)
+                if mmproj_path is None:
+                    model_dir = os.path.dirname(model_path)
+                    raise ValueError(
+                        "MiniCPM-V 2.6 (vision) requires mmproj file for vision!\n"
+                        "Please download the matching mmproj file from the model's GGUF repo.\n"
+                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
+                    )
+            else:
+                mmproj_path = self._normalize_path(mmproj_path)
+
+            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+
         # Gemma 3 vision: usually uses mmproj as well (unless explicitly disabled)
         if is_gemma3 and not force_no_mmproj:
             if mmproj_path is None:
@@ -1091,7 +1154,16 @@ class GGUFModelManager:
                 print("[GGUFModelManager] Error: Qwen3-VL requires an existing mmproj file")
                 chat_handler = None
                 use_vision = False
-
+        elif is_minicpm26 and (not force_no_mmproj) and MINICPM26_AVAILABLE:
+            if mmproj_path is not None and os.path.exists(mmproj_path):
+                try:
+                    print(f"[GGUFModelManager] Gemma-3 with mmproj: {mmproj_path}")
+                    chat_handler = Gemma3ChatHandler(clip_model_path=mmproj_path)
+                    use_vision = True
+                except Exception as e:
+                    print(f"[GGUFModelManager] Warning: Failed to initialize Gemma-3 chat handler: {e}")
+                    chat_handler = None
+                    use_vision = False
         elif is_gemma3 and (not force_no_mmproj) and GEMMA3_AVAILABLE:
             if mmproj_path is not None and os.path.exists(mmproj_path):
                 try:
@@ -1391,16 +1463,26 @@ class LLMSessionChatSimpleNode:
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("assistant_text",)
-    FUNCTION = "chat"
+    FUNCTION = "chat_stream"
     CATEGORY = "LLM/Session"
     DESCRIPTION = "Minimal entry node for persistent local GGUF chat sessions (config-driven defaults)."
 
-    def chat(self, user_text: str, session_id: str, model: str, mmproj: str, history_dir: str, image=None, config_path: str = "") -> tuple:
+    def chat_stream(
+        self,
+        user_text: str,
+        session_id: str,
+        model: str,
+        mmproj: str,
+        history_dir: str,
+        image=None,
+        config_path: str = "",
+        stream_to_console: bool = True,
+    ) -> tuple:
         defaults = _load_simple_defaults(config_path=config_path)
 
         # Delegate to the full node implementation
         node = LLMSessionChatNode()
-        return node.chat(
+        return node.chat_stream(
             user_text=user_text,
             session_id=session_id,
             model=model,
@@ -1429,8 +1511,99 @@ class LLMSessionChatSimpleNode:
             suppress_backend_logs=bool(defaults["suppress_backend_logs"]),
             history_dir=history_dir or "",
             reset_session=bool(defaults["reset_session"]),
+            stream_to_console=bool(defaults["stream_to_console"]),
         )
 
+
+# =============================================================================
+# LLM Session Chat (Simple, Streaming)
+# =============================================================================
+
+class LLMSessionChatSimpleStreamingNode:
+    """LLM Session Chat (Simple, Streaming)
+
+    Minimal UI inputs with config-driven defaults.
+    Streams tokens to console while returning the final assistant text.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        roots = _get_llm_model_roots()
+        available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
+
+        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
+        if not available_mmprojs:
+            mmproj_options = ["(Auto-detect)", "(Not required)"]
+
+        if not available_models:
+            available_models = ["(No GGUF models found in models/LLM/)"]
+
+        return {
+            "required": {
+                "user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "User message for this turn"}),
+                "session_id": ("STRING", {"default": "default", "tooltip": "Session ID (maps to a history file). Same ID continues the chat."}),
+                "model": (available_models, {"default": available_models[0], "tooltip": "GGUF model file in models/LLM/"}),
+                "mmproj": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "Manual selection is recommended."}),
+                "history_dir": ("STRING", {"default": "", "tooltip": "Optional directory for history/caches. Empty uses output/llm_session_sessions/."}),
+            },
+            "optional": {
+                "image": ("IMAGE", {"tooltip": "Optional image input for this turn only (never saved to history)"}),
+                "config_path": ("STRING", {"default": "", "tooltip": "Optional override path to simple_defaults.json (advanced)."}),
+                "stream_to_console": ("BOOLEAN", {"default": True, "tooltip": "Stream tokens to console while generating."}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("assistant_text",)
+    FUNCTION = "chat_stream"
+    CATEGORY = "LLM/Session"
+    DESCRIPTION = "Minimal entry node for persistent local GGUF chat sessions (streaming to console)."
+
+    def chat_stream(
+        self,
+        user_text: str,
+        session_id: str,
+        model: str,
+        mmproj: str,
+        history_dir: str,
+        image=None,
+        config_path: str = "",
+        stream_to_console: bool = True,
+    ) -> tuple:
+        defaults = _load_simple_defaults(config_path=config_path)
+
+        node = LLMSessionChatStreamingNode()
+        return node.chat_stream(
+            user_text=user_text,
+            session_id=session_id,
+            model=model,
+            mmproj=mmproj,
+            system_prompt=defaults["system_prompt"],
+            max_tokens=int(defaults["max_tokens"]),
+            temperature=float(defaults["temperature"]),
+            top_p=float(defaults["top_p"]),
+            n_gpu_layers=int(defaults["n_gpu_layers"]),
+            n_ctx=int(defaults["n_ctx"]),
+            image=image,
+            max_turns=int(defaults["max_turns"]),
+            summarize_old_history=bool(defaults["summarize_old_history"]),
+            summary_chunk_turns=int(defaults["summary_chunk_turns"]),
+            max_tokens_summary=int(defaults["max_tokens_summary"]),
+            summary_max_chars=int(defaults["summary_max_chars"]),
+            dynamic_max_tokens=bool(defaults["dynamic_max_tokens"]),
+            min_generation_tokens=int(defaults["min_generation_tokens"]),
+            safety_margin_tokens=int(defaults["safety_margin_tokens"]),
+            prompt_cache_mode=str(defaults["prompt_cache_mode"]),
+            repeat_penalty=float(defaults["repeat_penalty"]),
+            repeat_last_n=int(defaults["repeat_last_n"]),
+            rewrite_continue=bool(defaults["rewrite_continue"]),
+            kv_state_mode=str(defaults["kv_state_mode"]),
+            log_level=str(defaults["log_level"]),
+            suppress_backend_logs=bool(defaults["suppress_backend_logs"]),
+            history_dir=history_dir or "",
+            reset_session=bool(defaults["reset_session"]),
+            stream_to_console=bool(stream_to_console),
+        )
 
 # =============================================================================
 # LLM Session Chat - file-based hidden history (Phase 1)
@@ -1626,6 +1799,7 @@ class LLMDialogueCycleSimpleNode:
             suppress_backend_logs=bool(suppress_backend_logs),
             history_dir=history_dir or "",
             reset_session=bool(reset_session),
+            stream_to_console=bool(defaults.get("stream_to_console") or False),
         )
 
 
@@ -1806,16 +1980,20 @@ class LLMSessionChatNode:
                     "default": False,
                     "tooltip": "If true, overwrite existing session history file with a fresh session."
                 }),
+                "stream_to_console": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Stream tokens to console while generating."
+                }),
             }
         }
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("assistant_text",)
-    FUNCTION = "chat"
+    FUNCTION = "chat_stream"
     CATEGORY = "LLM/Session"
     DESCRIPTION = "Persistent multi-turn chat with local GGUF models using file-based history."
 
-    def chat(self,
+    def chat_stream(self,
              user_text: str,
              session_id: str,
              model: str,
@@ -1843,7 +2021,8 @@ class LLMSessionChatNode:
              log_level: str = "timing",
              suppress_backend_logs: bool = True,
              history_dir: str = "",
-             reset_session: bool = False) -> tuple:
+             reset_session: bool = False,
+             stream_to_console: bool = False) -> tuple:
         global _model_manager
         _t_total = time.perf_counter()
         def _log_total(status: str):
@@ -1992,6 +2171,10 @@ class LLMSessionChatNode:
                     _summary_txt = history.get("summary", {}).get("text", "") or ""
                 _effective_system = (system_prompt or history.get("system_prompt", "") or "").strip()
                 _kv_prefix_material = json.dumps({
+                    "model_path": os.path.abspath(model_path) if model_path else "",
+                    "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
+                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                    "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
                     "system": _effective_system,
                     "summary": _summary_txt,
                     "turns": _turns_ctx,
@@ -2037,17 +2220,39 @@ class LLMSessionChatNode:
                     _kwargs["repeat_last_n"] = int(repeat_last_n)
                 if repeat_penalty and float(repeat_penalty) != 1.0:
                     _kwargs["repeat_penalty"] = float(repeat_penalty)
-                
+
                 with _make_suppress_backend_logs(bool(suppress_backend_logs) and (log_level != "debug")):
-                    try:
-                        resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
-                    except TypeError:
-                        # Older builds may not accept repetition kwargs
-                        _kwargs.pop("repeat_last_n", None)
-                        _kwargs.pop("repeat_penalty", None)
-                        _kwargs.pop("top_p", None)
-                        resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
-                assistant_text = resp["choices"][0]["message"]["content"]
+                    if stream_to_console:
+                        pieces: List[str] = []
+                        out = sys.__stdout__
+                        try:
+                            stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        except TypeError:
+                            _kwargs.pop("repeat_last_n", None)
+                            _kwargs.pop("repeat_penalty", None)
+                            _kwargs.pop("top_p", None)
+                            stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        for chunk in stream_iter:
+                            token = _extract_stream_content(chunk)
+                            if not token:
+                                continue
+                            pieces.append(token)
+                            try:
+                                out.write(token)
+                                out.flush()
+                            except Exception:
+                                pass
+                        assistant_text = "".join(pieces)
+                    else:
+                        try:
+                            resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        except TypeError:
+                            # Older builds may not accept repetition kwargs
+                            _kwargs.pop("repeat_last_n", None)
+                            _kwargs.pop("repeat_penalty", None)
+                            _kwargs.pop("top_p", None)
+                            resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        assistant_text = resp["choices"][0]["message"]["content"]
                 _dt = time.perf_counter() - _t_attempt
                 print(f"[LLM Session Chat] Generation attempt {attempts+1} succeeded in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit})")
                 break
@@ -2126,6 +2331,7 @@ class LLMSessionChatNode:
 
                 # Record the use of images
                 "image_used": (image is not None),
+                "streamed": bool(stream_to_console),
             }
         })
         history.setdefault("meta", {})["updated_at"] = _now_iso_jst()
@@ -2192,6 +2398,10 @@ class LLMSessionChatNode:
                         _summary_txt2 = history.get("summary", {}).get("text", "") or ""
                     _effective_system2 = (system_prompt or history.get("system_prompt", "") or "").strip()
                     _kv_prefix_material2 = json.dumps({
+                        "model_path": os.path.abspath(model_path) if model_path else "",
+                        "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
+                        "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                        "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
                         "system": _effective_system2,
                         "summary": _summary_txt2,
                         "turns": _turns_ctx2,
@@ -2205,6 +2415,562 @@ class LLMSessionChatNode:
                     print(f"[LLM Session Chat] KV state save skipped: {e}")
         _log_total("Finished")
 
+        return (assistant_text,)
+
+
+# =============================================================================
+# LLM Session Chat - Streaming
+# =============================================================================
+
+class LLMSessionChatStreamingNode:
+    """
+    LLM Session Chat - Streaming variant.
+
+    Streams tokens to console while returning the final assistant text.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        roots = _get_llm_model_roots()
+        available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
+
+        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
+        if not available_mmprojs:
+            mmproj_options = ["(Auto-detect)", "(Not required)"]
+
+        if not available_models:
+            available_models = ["(No GGUF models found in models/LLM/)"]
+
+        return {
+            "required": {
+                "user_text": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "tooltip": "User message for this turn"
+                }),
+                "session_id": ("STRING", {
+                    "default": "default",
+                    "tooltip": "Session ID (maps to a history file). Same ID continues the chat."
+                }),
+                "model": (available_models, {
+                    "default": available_models[0],
+                    "tooltip": "GGUF model file in models/LLM/"
+                }),
+                "mmproj": (mmproj_options, {
+                    "default": "(Auto-detect)",
+                    "tooltip": "Manual selection is recommended."
+                }),
+                "system_prompt": ("STRING", {
+                    "multiline": True,
+                    "default": "You are a helpful assistant.",
+                    "tooltip": "System prompt (conversation policy). Saved into the history file."
+                }),
+                "max_tokens": ("INT", {
+                    "default": 512,
+                    "min": 1,
+                    "max": 8192,
+                    "tooltip": "Maximum tokens to generate for this turn"
+                }),
+                "temperature": ("FLOAT", {
+                    "default": 0.7,
+                    "min": 0.0,
+                    "max": 2.0,
+                    "step": 0.05,
+                    "tooltip": "Sampling temperature"
+                }),
+                "top_p": ("FLOAT", {
+                    "default": 0.9,
+                    "min": 0.05,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "tooltip": "Nucleus sampling (top_p). Lower = safer/more conservative."
+                }),
+                "n_gpu_layers": ("INT", {
+                    "default": 0,
+                    "min": -1,
+                    "max": 200,
+                    "step": 1,
+                    "tooltip": "Number of layers to offload to GPU. 0=CPU. -1=all."
+                }),
+                "n_ctx": ("INT", {
+                    "default": 4096,
+                    "min": 512,
+                    "max": 131072,
+                    "step": 256,
+                    "tooltip": "Context length (must be supported by the model)"
+                }),
+            },
+            "optional": {
+                "image": ("IMAGE", {
+                    "tooltip": "Optional image input for this turn only (never saved to history)"
+                }),
+                "prompt_cache_mode": (["disk", "memory", "off"], {
+                    "default": "disk",
+                    "tooltip": "Enable llama.cpp prompt/KV caching to speed up repeated prefixes (best effort). 'disk' persists under output/llm_session_sessions/prompt_cache/."
+                }),
+                "kv_state_mode": (["memory", "off"], {
+                    "default": "memory",
+                    "tooltip": "Enable in-memory llama-cpp-python save_state/load_state cache per session."
+                }),
+                "log_level": (["minimal", "timing", "debug"], {
+                    "default": "timing",
+                    "tooltip": "Console logging verbosity for LLM Session Chat."
+                }),
+                "suppress_backend_logs": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Suppress backend stdout/stderr during generation."
+                }),
+                "repeat_penalty": ("FLOAT", {
+                    "default": 1.12,
+                    "min": 1.0,
+                    "max": 2.0,
+                    "step": 0.01,
+                    "tooltip": "Repetition penalty to reduce looping outputs (especially on continue)."
+                }),
+                "repeat_last_n": ("INT", {
+                    "default": 256,
+                    "min": 0,
+                    "max": 4096,
+                    "tooltip": "Apply repeat_penalty over the last N tokens. 0 disables."
+                }),
+                "rewrite_continue": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "If user says 'continue', rewrite prompt to avoid repetition."
+                }),
+                "max_turns": ("INT", {
+                    "default": 12,
+                    "min": 0,
+                    "max": 200,
+                    "tooltip": "How many previous turns to include in the prompt. 0 = none (stateless)."
+                }),
+                "summarize_old_history": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Summarize overflow turns into a rolling summary when turns exceed max_turns."
+                }),
+                "summary_chunk_turns": ("INT", {
+                    "default": 3,
+                    "min": 1,
+                    "max": 50,
+                    "tooltip": "Summarize overflow in chunks of this many turns (reduces summary frequency)."
+                }),
+                "max_tokens_summary": ("INT", {
+                    "default": 128,
+                    "min": 16,
+                    "max": 2048,
+                    "tooltip": "Max tokens for summary generation (kept small for speed)."
+                }),
+                "summary_max_chars": ("INT", {
+                    "default": 1500,
+                    "min": 200,
+                    "max": 20000,
+                    "tooltip": "If the rolling summary exceeds this size, it will be re-summarized to stay compact."
+                }),
+                "dynamic_max_tokens": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Dynamically shrink max_tokens (and/or turns) when prompt would exceed n_ctx."
+                }),
+                "min_generation_tokens": ("INT", {
+                    "default": 96,
+                    "min": 1,
+                    "max": 4096,
+                    "tooltip": "Minimum tokens to allow for generation when dynamic_max_tokens is enabled."
+                }),
+                "safety_margin_tokens": ("INT", {
+                    "default": 64,
+                    "min": 0,
+                    "max": 2048,
+                    "tooltip": "Token margin reserved to reduce the chance of exceeding n_ctx."
+                }),
+                "history_dir": ("STRING", {
+                    "default": "",
+                    "tooltip": "Optional directory for history files. Empty uses output/llm_session_sessions/"
+                }),
+                "reset_session": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "If true, overwrite existing session history file with a fresh session."
+                }),
+                "stream_to_console": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Stream tokens to console while generating."
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("assistant_text",)
+    FUNCTION = "chat_stream"
+    CATEGORY = "LLM/Session"
+    DESCRIPTION = "Persistent multi-turn chat with local GGUF models (streaming to console)."
+
+    def chat_stream(self,
+             user_text: str,
+             session_id: str,
+             model: str,
+             mmproj: str,
+             system_prompt: str,
+             max_tokens: int,
+             temperature: float,
+             top_p: float,
+             n_gpu_layers: int,
+             n_ctx: int,
+             image=None,
+             max_turns: int = 12,
+             summarize_old_history: bool = True,
+             summary_chunk_turns: int = 3,
+             max_tokens_summary: int = 128,
+             summary_max_chars: int = 1500,
+             dynamic_max_tokens: bool = True,
+             min_generation_tokens: int = 96,
+             safety_margin_tokens: int = 64,
+             prompt_cache_mode: str = "disk",
+             repeat_penalty: float = 1.12,
+             repeat_last_n: int = 256,
+             rewrite_continue: bool = True,
+             kv_state_mode: str = "memory",
+             log_level: str = "timing",
+             suppress_backend_logs: bool = True,
+             history_dir: str = "",
+             reset_session: bool = False,
+             stream_to_console: bool = True) -> tuple:
+        global _model_manager
+        _t_total = time.perf_counter()
+        def _log_total(status: str):
+            dt = time.perf_counter() - _t_total
+            print(f"[LLM Session Chat:Stream] {status} in {dt:.2f} seconds")
+
+        if not LLAMA_CPP_AVAILABLE:
+            print("[LLM Session Chat:Stream] Error: llama-cpp-python not available")
+            _log_total("Finished (error)")
+            return ("",)
+
+        if "(No GGUF models found" in model:
+            print("[LLM Session Chat:Stream] Error: No GGUF models found in models/LLM/")
+            _log_total("Finished (error)")
+            return ("",)
+
+        # Resolve paths
+        roots = _get_llm_model_roots()
+        model_path = _resolve_llm_relpath(model, roots=roots)
+        if not os.path.exists(model_path):
+            print(f"[LLM Session Chat:Stream] Error: Model not found: {model_path}")
+            _log_total("Finished (error)")
+            return ("",)
+
+        mmproj_path = None
+        if mmproj == "(Not required)":
+            mmproj_path = "(Not required)"
+        elif mmproj != "(Auto-detect)":
+            mmproj_path = os.path.normpath(_resolve_llm_relpath(mmproj, roots=roots))
+            if not os.path.exists(mmproj_path):
+                print(f"[LLM Session Chat:Stream] Warning: mmproj not found: {mmproj_path}")
+                mmproj_path = None
+        model_sig = {
+            "model_file": os.path.basename(model_path),
+            "mmproj_file": os.path.basename(mmproj_path) if mmproj_path else "",
+            "n_ctx": int(n_ctx),
+            "n_gpu_layers": int(n_gpu_layers),
+        }
+
+        history, hist_path = load_history(
+            session_id=session_id,
+            history_dir=(history_dir or None),
+            system_prompt=system_prompt,
+            model_sig=model_sig,
+            reset_session=bool(reset_session),
+        )
+
+        _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
+        user_text_for_model = user_text or ""
+        if rewrite_continue and _is_continue:
+            detected_lang = _detect_history_language(history)
+            CONTINUE_PROMPTS = {
+                "zh": (
+                    "从最后一个完整的句子继续。"
+                    "不要重复之前的短语、列表、标题或段落。"
+                    "如果你开始重复词语或地名，立即停止并写一个一句话摘要。"
+                ),
+                "ja": (
+                    "最後の完全な文から続けてください。"
+                    "以前のフレーズ、リスト、見出し、セクションを繰り返さないでください。"
+                    "単語や地名を繰り返し始めたら、すぐに停止して1文の要約を書いてください。"
+                ),
+                "en": (
+                    "Continue from the last complete sentence. "
+                    "Do not repeat previous phrases, lists, headings, or sections. "
+                    "If you start repeating words or place names, stop immediately and write a 1-sentence summary instead."
+                ),
+            }
+            user_text_for_model = CONTINUE_PROMPTS.get(
+                detected_lang,
+                "Continue from the last complete sentence. Do not repeat previous content."
+            )
+            if log_level == "debug":
+                print(f"[LLM Session Chat:Stream] Continue detected, language: {detected_lang}")
+
+        try:
+            _model_manager.prompt_cache_dir_override = os.path.join(os.path.dirname(hist_path), "prompt_cache")
+            os.makedirs(_model_manager.prompt_cache_dir_override, exist_ok=True)
+        except Exception:
+            _model_manager.prompt_cache_dir_override = None
+
+        img_tensor = image if image is not None else None
+
+        if _model_manager is None:
+            _model_manager = GGUFModelManager()
+
+        try:
+            llm = _model_manager.load_model(
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(n_ctx),
+                n_gpu_layers=int(n_gpu_layers),
+                verbose=False,
+            )
+        except Exception as e:
+            print(f"[LLM Session Chat:Stream] Error loading model: {e}")
+            _log_total("Finished (error)")
+            return ("",)
+
+        try:
+            _model_manager.configure_prompt_cache(
+                llm,
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(n_ctx),
+                cache_mode=prompt_cache_mode,
+            )
+        except Exception as e:
+            print(f"[LLM Session Chat:Stream] Prompt cache setup warning: {e}")
+
+        messages = build_chat_messages(
+            history=history,
+            user_text=user_text_for_model or "",
+            image_tensor=img_tensor,
+            max_turns=int(max_turns) if max_turns is not None else None,
+            summarize_old_history=bool(summarize_old_history),
+            system_prompt=system_prompt or "",
+        )
+
+        if (kv_state_mode or "off").lower() == "memory" and image is None:
+            try:
+                _turns_ctx = (history.get("turns") or [])
+                _mt = int(max_turns) if (max_turns is not None) else None
+                if _mt is not None and _mt >= 0:
+                    _turns_ctx = _turns_ctx[-_mt:] if _mt > 0 else []
+                _summary_txt = ""
+                if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
+                    _summary_txt = history.get("summary", {}).get("text", "") or ""
+                _effective_system = (system_prompt or history.get("system_prompt", "") or "").strip()
+                _kv_prefix_material = json.dumps({
+                    "model_path": os.path.abspath(model_path) if model_path else "",
+                    "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
+                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                    "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
+                    "system": _effective_system,
+                    "summary": _summary_txt,
+                    "turns": _turns_ctx,
+                }, ensure_ascii=False, sort_keys=True)
+                _kv_sig = hashlib.sha256(_kv_prefix_material.encode("utf-8")).hexdigest()
+                entry = _MEM_KV_STATE.get(session_id)
+                if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
+                    llm.load_state(entry.get("state"))
+                    if log_level != "minimal":
+                        print("[LLM Session Chat:Stream] KV state: HIT (memory)")
+                else:
+                    if log_level != "minimal":
+                        reason = "no state" if not entry else "prefix changed"
+                        print(f"[LLM Session Chat:Stream] KV state: MISS ({reason})")
+            except Exception as e:
+                if log_level == "debug":
+                    print(f"[LLM Session Chat:Stream] KV state: DISABLED ({e})")
+
+        assistant_text = ""
+        gen_tokens = int(max_tokens)
+        turns_limit = int(max_turns) if max_turns is not None else None
+
+        def _is_ctx_error(err: Exception) -> bool:
+            s = str(err)
+            return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
+
+        attempts = 0
+        last_err = None
+        while attempts < 6:
+            try:
+                _t_attempt = time.perf_counter()
+                _kwargs = {
+                    "messages": messages,
+                    "temperature": float(temperature),
+                    "top_p": float(top_p),
+                    "max_tokens": int(gen_tokens),
+                }
+                if repeat_last_n and int(repeat_last_n) > 0:
+                    _kwargs["repeat_last_n"] = int(repeat_last_n)
+                if repeat_penalty and float(repeat_penalty) != 1.0:
+                    _kwargs["repeat_penalty"] = float(repeat_penalty)
+
+                pieces: List[str] = []
+                out = sys.__stdout__
+                with _make_suppress_backend_logs(bool(suppress_backend_logs) and (log_level != "debug")):
+                    try:
+                        stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                    except TypeError:
+                        _kwargs.pop("repeat_last_n", None)
+                        _kwargs.pop("repeat_penalty", None)
+                        _kwargs.pop("top_p", None)
+                        stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                    for chunk in stream_iter:
+                        token = _extract_stream_content(chunk)
+                        if not token:
+                            continue
+                        pieces.append(token)
+                        if stream_to_console:
+                            try:
+                                out.write(token)
+                                out.flush()
+                            except Exception:
+                                pass
+
+                assistant_text = "".join(pieces)
+                _dt = time.perf_counter() - _t_attempt
+                print(f"[LLM Session Chat:Stream] Generation attempt {attempts+1} succeeded in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit})")
+                break
+            except Exception as e:
+                _dt = time.perf_counter() - _t_attempt
+                print(f"[LLM Session Chat:Stream] Generation attempt {attempts+1} failed in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit}): {e}")
+                last_err = e
+                assistant_text = ""
+                if dynamic_max_tokens and _is_ctx_error(e):
+                    if gen_tokens > int(min_generation_tokens):
+                        gen_tokens = max(int(min_generation_tokens), gen_tokens // 2)
+                    else:
+                        if turns_limit is not None and turns_limit > 0:
+                            turns_limit = max(0, turns_limit - 1)
+                        else:
+                            if summarize_old_history:
+                                try:
+                                    history = maybe_compact_summary(
+                                        model=llm,
+                                        history=history,
+                                        summary_max_chars=int(summary_max_chars),
+                                        temperature=0.2,
+                                        max_tokens_summary=int(max_tokens_summary),
+                                        suppress_logs=(log_level != "debug"),
+                                    )
+                                except Exception:
+                                    pass
+
+                    messages = build_chat_messages(
+                        history=history,
+                        user_text=user_text_for_model or "",
+                        image_tensor=img_tensor,
+                        max_turns=turns_limit,
+                        summarize_old_history=bool(summarize_old_history),
+                        system_prompt=system_prompt or "",
+                    )
+                    attempts += 1
+                    continue
+
+                print(f"[LLM Session Chat:Stream] Error during generation: {e}")
+                _log_total("Finished (error)")
+                return ("",)
+
+        if not assistant_text:
+            print(f"[LLM Session Chat:Stream] Error during generation: {last_err}")
+            _log_total("Finished (error)")
+            return ("",)
+
+        history.setdefault("turns", []).append({
+            "t": _now_iso_jst(),
+            "user": {
+                "text": user_text or "",
+                "image_note": ""
+            },
+            "assistant": {
+                "text": assistant_text or ""
+            },
+            "params": {
+                "max_tokens_req": int(max_tokens),
+                "temperature": float(temperature),
+                "top_p": float(top_p),
+                "repeat_penalty": float(repeat_penalty) if repeat_penalty is not None else None,
+                "repeat_last_n": int(repeat_last_n) if repeat_last_n is not None else None,
+                "dynamic_max_tokens": bool(dynamic_max_tokens),
+                "max_tokens_used": int(gen_tokens),
+                "turns_limit_used": int(turns_limit) if turns_limit is not None else None,
+                "image_used": (image is not None),
+                "streamed": True,
+            }
+        })
+        history.setdefault("meta", {})["updated_at"] = _now_iso_jst()
+        history.setdefault("meta", {})["last_params"] = {
+            "prompt_cache_mode": (prompt_cache_mode or "off"),
+            "kv_state_mode": (kv_state_mode or "off"),
+            "max_turns": int(max_turns) if max_turns is not None else None,
+            "summarize_old_history": bool(summarize_old_history),
+            "summary_chunk_turns": int(summary_chunk_turns),
+            "max_tokens_summary": int(max_tokens_summary),
+            "summary_max_chars": int(summary_max_chars),
+            "saved_at": _now_iso_jst(),
+        }
+        history["system_prompt"] = system_prompt or history.get("system_prompt", "")
+
+        if summarize_old_history and max_turns is not None:
+            try:
+                _t_sum = time.perf_counter()
+                history = maybe_summarize_history(
+                    model=llm,
+                    history=history,
+                    max_turns=int(max_turns),
+                    summarize_old_history=bool(summarize_old_history),
+                    summary_chunk_turns=int(summary_chunk_turns),
+                    temperature=0.2,
+                    max_tokens_summary=int(max_tokens_summary),
+                    summary_max_chars=int(summary_max_chars),
+                    suppress_logs=(log_level != "debug"),
+                )
+                _dt_sum = time.perf_counter() - _t_sum
+                if log_level != "minimal":
+                    print(f"[LLM Session Chat:Stream] Summarization step finished in {_dt_sum:.2f} seconds")
+            except Exception as e:
+                _dt_sum = time.perf_counter() - _t_sum
+                if log_level != "minimal":
+                    print(f"[LLM Session Chat:Stream] Summarization step failed in {_dt_sum:.2f} seconds: {e}")
+                pass
+
+        try:
+            _atomic_write_json(hist_path, history)
+        except Exception as e:
+            print(f"[LLM Session Chat:Stream] Warning: failed to save history: {e}")
+
+        if (kv_state_mode or "off").lower() == "memory" and image is None:
+            try:
+                if hasattr(llm, "save_state"):
+                    _turns_ctx2 = (history.get("turns") or [])
+                    _mt2 = int(max_turns) if (max_turns is not None) else None
+                    if _mt2 is not None and _mt2 >= 0:
+                        _turns_ctx2 = _turns_ctx2[-_mt2:] if _mt2 > 0 else []
+                    _summary_txt2 = ""
+                    if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
+                        _summary_txt2 = history.get("summary", {}).get("text", "") or ""
+                    _effective_system2 = (system_prompt or history.get("system_prompt", "") or "").strip()
+                    _kv_prefix_material2 = json.dumps({
+                        "model_path": os.path.abspath(model_path) if model_path else "",
+                        "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
+                        "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                        "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
+                        "system": _effective_system2,
+                        "summary": _summary_txt2,
+                        "turns": _turns_ctx2,
+                    }, ensure_ascii=False, sort_keys=True)
+                    _sig2 = hashlib.sha256(_kv_prefix_material2.encode("utf-8")).hexdigest()
+                    _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": llm.save_state()}
+                    if log_level == "debug":
+                        print("[LLM Session Chat:Stream] KV state: SAVED (memory)")
+            except Exception as e:
+                if log_level == "debug":
+                    print(f"[LLM Session Chat:Stream] KV state save skipped: {e}")
+
+        _log_total("Finished")
         return (assistant_text,)
 
 
@@ -2280,6 +3046,7 @@ def _chat_one_turn(
     suppress_backend_logs: bool = True,
     history_dir: str = "",
     reset_session: bool = False,
+    stream_to_console: bool = False,
 ) -> str:
     """
     One chat turn using the same history/summary logic as LLMSessionChatNode,
@@ -2399,6 +3166,10 @@ def _chat_one_turn(
                 _summary_txt = history.get("summary", {}).get("text", "") or ""
             _effective_system = (system_prompt or history.get("system_prompt", "") or "").strip()
             _kv_prefix_material = json.dumps({
+                "model_path": os.path.abspath(model_path) if model_path else "",
+                "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
+                "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
                 "system": _effective_system,
                 "summary": _summary_txt,
                 "turns": _turns_ctx,
@@ -2442,15 +3213,37 @@ def _chat_one_turn(
                 _kwargs["repeat_penalty"] = float(repeat_penalty)
 
             with _make_suppress_backend_logs(bool(suppress_backend_logs) and (log_level != "debug")):
-                try:
-                    resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
-                except TypeError:
-                    _kwargs.pop("repeat_last_n", None)
-                    _kwargs.pop("repeat_penalty", None)
-                    _kwargs.pop("top_p", None)
-                    resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                if stream_to_console:
+                    pieces: List[str] = []
+                    out = sys.__stdout__
+                    try:
+                        stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                    except TypeError:
+                        _kwargs.pop("repeat_last_n", None)
+                        _kwargs.pop("repeat_penalty", None)
+                        _kwargs.pop("top_p", None)
+                        stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                    for chunk in stream_iter:
+                        token = _extract_stream_content(chunk)
+                        if not token:
+                            continue
+                        pieces.append(token)
+                        try:
+                            out.write(token)
+                            out.flush()
+                        except Exception:
+                            pass
+                    assistant_text = "".join(pieces).strip()
+                else:
+                    try:
+                        resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                    except TypeError:
+                        _kwargs.pop("repeat_last_n", None)
+                        _kwargs.pop("repeat_penalty", None)
+                        _kwargs.pop("top_p", None)
+                        resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
 
-            assistant_text = (resp["choices"][0]["message"]["content"] or "").strip()
+                    assistant_text = (resp["choices"][0]["message"]["content"] or "").strip()
             break
         except Exception as e:
             last_err = e
@@ -2565,6 +3358,10 @@ def _chat_one_turn(
                     _summary_txt2 = history.get("summary", {}).get("text", "") or ""
                 _effective_system2 = (system_prompt or history.get("system_prompt", "") or "").strip()
                 _kv_prefix_material2 = json.dumps({
+                    "model_path": os.path.abspath(model_path) if model_path else "",
+                    "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
+                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                    "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
                     "system": _effective_system2,
                     "summary": _summary_txt2,
                     "turns": _turns_ctx2,
@@ -2648,6 +3445,7 @@ class LLMDialogueCycleNode:
 
                 "history_dir": ("STRING", {"default": "", "tooltip": "Optional history directory. Empty => output/llm_session_sessions/"}),
                 "reset_session": ("BOOLEAN", {"default": False, "tooltip": "If true, resets both {id}_A and {id}_B histories (transcript file is not deleted)."}),
+                "stream_to_console": ("BOOLEAN", {"default": False, "tooltip": "Stream tokens to console while generating."}),
             }
         }
 
@@ -2691,6 +3489,7 @@ class LLMDialogueCycleNode:
         suppress_backend_logs: bool = True,
         history_dir: str = "",
         reset_session: bool = False,
+        stream_to_console: bool = False,
     ) -> tuple:
         base_id = (session_id or "default").strip() or "default"
         sidA = f"{base_id}_A"
@@ -2742,6 +3541,7 @@ class LLMDialogueCycleNode:
                 suppress_backend_logs=suppress_backend_logs,
                 history_dir=history_dir,
                 reset_session=reset,
+                stream_to_console=bool(stream_to_console),
             )
             lineA = f"[{_now_iso_jst()}] A: {lastA}"
             _append_transcript_lines(tpath, [lineA])
@@ -2779,6 +3579,7 @@ class LLMDialogueCycleNode:
                 suppress_backend_logs=suppress_backend_logs,
                 history_dir=history_dir,
                 reset_session=False,
+                stream_to_console=bool(stream_to_console),
             )
             lineB = f"[{_now_iso_jst()}] B: {lastB}"
             _append_transcript_lines(tpath, [lineB])
@@ -2794,15 +3595,19 @@ class LLMDialogueCycleNode:
 
 NODE_CLASS_MAPPINGS = {
     "LLMSessionChatSimpleNode": LLMSessionChatSimpleNode,
+    "LLMSessionChatSimpleStreamingNode": LLMSessionChatSimpleStreamingNode,
     "LLMDialogueCycleSimpleNode": LLMDialogueCycleSimpleNode,
     "LLMSessionChatNode": LLMSessionChatNode,
+    "LLMSessionChatStreamingNode": LLMSessionChatStreamingNode,
     "LLMDialogueCycleNode": LLMDialogueCycleNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LLMSessionChatSimpleNode": "LLM Session Chat (Simple)",
+    "LLMSessionChatSimpleStreamingNode": "LLM Session Chat (Simple, Streaming)",
     "LLMDialogueCycleSimpleNode": "LLM Dialogue Cycle (Simple)",
     "LLMSessionChatNode": "LLM Session Chat",
+    "LLMSessionChatStreamingNode": "LLM Session Chat (Streaming)",
     "LLMDialogueCycleNode": "LLM Dialogue Cycle",
 }
 

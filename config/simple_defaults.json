@@ -21,5 +21,6 @@
   "repeat_penalty": 1.12,
   "repeat_last_n": 256,
   "rewrite_continue": true,
-  "reset_session": false
+  "reset_session": false,
+  "stream_to_console": true
 }
