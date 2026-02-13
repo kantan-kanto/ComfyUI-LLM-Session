@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.0.1
+**Version:** 1.0.2
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -95,6 +95,22 @@ ComfyUI/models/LLM/
 └── ...
 ```
 
+**Notes for Vision models**
+
+When using Vision-capable models, please follow these rules:
+
+- Place the **model** and **mmproj** GGUF files in the **same folder**.
+- The model filename must start with one of the following prefixes and end with `.gguf`:
+
+  ```
+  qwen2, qwen3, llava, llama, minicpm-v-2_6, gemma-3, glm-4
+  ```
+- The mmproj filename must start with `mmproj-` and end with `.gguf`.
+- If exactly one file matching
+  `mmproj-[qwen2|qwen3|llava|llama|minicpm-v-2_6|gemma-3|glm-4].gguf`
+  exists in the folder, it can be selected automatically via Auto-detect.
+- Filename matching is **case-insensitive**.
+
 ---
 
 ### Simple Node Settings (Quick Notes)
@@ -102,6 +118,7 @@ ComfyUI/models/LLM/
 - **history_dir**: Conversations persist as long as the same directory is used.
 - **config_path**: Optional JSON file to override internal defaults in Simple nodes.
 - **force_text_only** (Dialogue Cycle Simple): Forces pure text mode to avoid mmproj / vision handler differences and improve reproducibility.
+- **reset_session** (Dialogue Cycle Simple): Overwrites the cache, history and summary files associated with the session name.
 
 See [PARAMETERS.md](PARAMETERS.md) for the full list of settings and advanced usage.
 
@@ -172,15 +189,18 @@ The following GGUF instruction models have been tested.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
+- GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
-- llava
+- LLaVA
+- MiniCPM-V 2.6
 - Mistral NeMo 12B Instruct
 - Phi-3 Mini Instruct
+- Phi-4*
+- Qwen2.5 Instruct (7B / 14B)
+- Qwen2.5-VL (3B / 7B)
+- Qwen3-30B-A3B
 - Qwen3-VL (4B / 8B)
-- Qwen2.5-VL-7B
-- Qwen 2.5 Instruct (7B / 14B)
-- Shisa v2
 
 ### MoE Models
 
@@ -263,13 +283,9 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### 1.0.1
+### Current Version: 1.0.2
 
-- Fixed issue where non-Qwen3-VL vision models were always loaded in text-only mode even when a valid mmproj file was specified
-- Improved mmproj auto-detection logic
-- Added recursive GGUF discovery under `models/LLM`
-- Expanded parameter snapshot recording in session history
-
-### 1.0.0
-
-- Initial release
+- Include model configuration fields in KV cache signature to prevent cross-model state reuse.
+- Add configurable console streaming support across session nodes
+- Support GGUF model discovery from extra `LLM` paths via `extra_model_paths.yaml`
+- Fix import-time failures for llama-cpp and improve registry compatibility

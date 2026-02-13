@@ -15,6 +15,9 @@ Directory used to store:
 
 Using the same `history_dir` allows conversations to persist across executions.
 
+### reset_session
+Overwrites the cache, history and summary files associated with the session name.
+
 ---
 
 ## Generation Parameters
@@ -150,6 +153,10 @@ Answer (English, ~800 words):
 ```
 
 This clearly signals the start of the assistant response and reduces echo.
+
+### stream_to_console
+
+Streams the LLM output to the console in real time.
 
 ### Additional Helpful Settings
 

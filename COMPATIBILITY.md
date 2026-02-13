@@ -23,13 +23,14 @@ This document summarizes empirical compatibility results obtained during develop
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
 - LLaVA
+- MiniCPM-V 2.6
 - Mistral NeMo 12B Instruct
 - Phi-3 Mini Instruct
 - Phi-4*
 - Qwen2.5 Instruct (7B / 14B)
-- Qwen2.5-VL-7B
+- Qwen2.5-VL (3B / 7B)
+- Qwen3-30B-A3B
 - Qwen3-VL (4B / 8B)
-- Shisa v2
 
 **Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash` and `Phi-4` fail to load
 
@@ -55,7 +56,7 @@ Mixtral failures occur at model load time and are likely backend-related.
 
 **Important:** Model compatibility varies by llama-cpp-python version. Based on my testing environment:
 
-| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> (Vision) | Qwen3-VL <br> Gemma 3 <br> GLM-4.6V <br> (Vision) |
+| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> (Vision) | Qwen3-VL <br> Gemma 3 <br> GLM-4.6V <br> (Vision) |
 |---------|-------------------|-------------------|-------------------|
 | 0.3.16 (official) | ✅* | ✅ | ❌ |
 | 0.3.21+ (JamePeng fork) | ✅ | ✅ | ✅ |
