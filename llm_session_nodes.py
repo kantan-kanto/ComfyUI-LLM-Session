@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import re
+import shutil
 import folder_paths
 import hashlib
 
@@ -1124,8 +1125,6 @@ class GGUFModelManager:
         mmproj_path: Optional[str] = None,
         n_ctx: int = 4096,
         n_gpu_layers: int = 0,
-        # n_batch: int = 8192,
-        # n_ubatch: int = 1024,
         verbose: bool = False,
     ) -> Llama:
         """Load GGUF model."""
@@ -1221,6 +1220,7 @@ class GGUFModelManager:
                 n_gpu_layers=n_gpu_layers,
                 n_batch=1024,
                 n_ubatch=8192,
+                enable_thinking=False,
                 chat_format=self.chat_format,
                 verbose=verbose,
                 # Vision models often need this; safe default for vision path.
@@ -1233,8 +1233,6 @@ class GGUFModelManager:
                 chat_handler=self.chat_handler,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
-                # n_batch=1024,
-                # n_ubatch=8192,
                 chat_format=self.chat_format,
                 verbose=verbose,
                 # Vision models often need this; safe default for vision path.
@@ -1246,8 +1244,6 @@ class GGUFModelManager:
                 model_path=model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
-                # n_batch=n_batch,
-                # n_ubatch=n_ubatch,
                 # chat_format=self.chat_format,
                 verbose=verbose,
             )
@@ -1259,20 +1255,50 @@ class GGUFModelManager:
         print("[GGUFModelManager] Model loaded successfully")
         return self.model
 
-    def _default_prompt_cache_dir(self, model_path: str, mmproj_path: str, n_ctx: int) -> str:
+    def _runtime_cache_fingerprint(self) -> str:
+        """Best-effort runtime fingerprint to avoid reusing incompatible on-disk states."""
+        pkg_ver = "unknown"
+        backend_ver = "unknown"
+        try:
+            import llama_cpp  # type: ignore
+            pkg_ver = str(getattr(llama_cpp, "__version__", "unknown"))
+            try:
+                backend_fn = getattr(getattr(llama_cpp, "llama_cpp", None), "llama_cpp_version", None)
+                if callable(backend_fn):
+                    backend_ver = str(backend_fn())
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return f"llama_cpp_py={pkg_ver}|llama_cpp_backend={backend_ver}"
+
+    def _default_prompt_cache_dir(self, model_path: str, mmproj_path: str, n_ctx: int, n_gpu_layers: int = 0) -> str:
         """
         Compute a stable cache directory for prompt/KV cache.
         We key by model+mmproj+n_ctx so caches are not mixed across incompatible settings.
         """
         base = (self.prompt_cache_dir_override or os.path.join(_safe_output_dir(), "llm_session_sessions", "prompt_cache"))
         os.makedirs(base, exist_ok=True)
-        key_src = f"{os.path.abspath(model_path)}|{os.path.abspath(mmproj_path or '')}|n_ctx={int(n_ctx)}"
+        key_src = (
+            f"{os.path.abspath(model_path)}|{os.path.abspath(mmproj_path or '')}|"
+            f"n_ctx={int(n_ctx)}|n_gpu_layers={int(n_gpu_layers)}|"
+            f"chat_format={self.chat_format or ''}|use_vision={bool(self.chat_handler is not None)}|"
+            f"{self._runtime_cache_fingerprint()}"
+        )
         key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
         cache_dir = os.path.join(base, key)
         os.makedirs(cache_dir, exist_ok=True)
         return cache_dir
 
-    def configure_prompt_cache(self, llm, model_path: str, mmproj_path: str, n_ctx: int, cache_mode: str = "disk") -> None:
+    def configure_prompt_cache(
+        self,
+        llm,
+        model_path: str,
+        mmproj_path: str,
+        n_ctx: int,
+        n_gpu_layers: int = 0,
+        cache_mode: str = "disk",
+    ) -> None:
         """
         Enable llama-cpp-python prompt/KV caching when supported.
 
@@ -1302,7 +1328,7 @@ class GGUFModelManager:
                 return
 
             if cache_mode == "disk":
-                cache_dir = self._default_prompt_cache_dir(model_path, mmproj_path, n_ctx)
+                cache_dir = self._default_prompt_cache_dir(model_path, mmproj_path, n_ctx, n_gpu_layers=n_gpu_layers)
                 # Common class names across versions
                 if hasattr(llama_cpp, "LlamaDiskCache"):
                     cache_obj = llama_cpp.LlamaDiskCache(cache_dir)
@@ -1363,6 +1389,33 @@ class GGUFModelManager:
         except Exception as e:
             print(f"[GGUFModelManager] Prompt cache setup failed (mode={cache_mode}): {e}")
 
+    def invalidate_prompt_cache(self, llm, remove_disk_data: bool = False) -> None:
+        """
+        Best-effort invalidation for prompt cache after state mismatch.
+        - Detach cache from model
+        - Optionally remove disk cache directory
+        """
+        info = self._current_cache_info or {}
+        desc = str(info.get("desc", "") or "")
+        try:
+            if hasattr(llm, "set_cache"):
+                llm.set_cache(None)
+            elif hasattr(llm, "cache"):
+                llm.cache = None
+        except Exception:
+            pass
+
+        if remove_disk_data and desc.startswith("disk:"):
+            disk_dir = desc[len("disk:"):].strip()
+            if disk_dir:
+                try:
+                    shutil.rmtree(disk_dir, ignore_errors=True)
+                    os.makedirs(disk_dir, exist_ok=True)
+                except Exception:
+                    pass
+
+        self._current_cache_info = None
+
     def unload_model(self):
         """Unload model from memory."""
         if self.model is not None:
@@ -1392,6 +1445,30 @@ _model_manager = GGUFModelManager()
 
 # In-memory KV/state cache (session_id -> {signature:str, state:any})
 _MEM_KV_STATE = {}
+
+
+def _is_state_data_mismatch_error(err: Exception) -> bool:
+    s = str(err or "")
+    return "Failed to set llama state data" in s
+
+
+def _clear_kv_state_for_session(session_id: str) -> None:
+    try:
+        _MEM_KV_STATE.pop(session_id, None)
+    except Exception:
+        pass
+
+
+def _clear_prompt_cache_under_history_file(history_file_path: str) -> None:
+    """
+    Remove and recreate prompt cache root under the same base as history files.
+    """
+    try:
+        cache_root = os.path.join(os.path.dirname(history_file_path), "prompt_cache")
+        shutil.rmtree(cache_root, ignore_errors=True)
+        os.makedirs(cache_root, exist_ok=True)
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -1958,6 +2035,9 @@ class LLMSessionChatNode:
             model_sig=model_sig,
             reset_session=bool(reset_session),
         )
+        if bool(reset_session):
+            _clear_kv_state_for_session(session_id)
+            _clear_prompt_cache_under_history_file(hist_path)
 
         # Continue rewrite with language detection (improved version)
         _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
@@ -2029,6 +2109,7 @@ class LLMSessionChatNode:
                 model_path=model_path,
                 mmproj_path=mmproj_path,
                 n_ctx=int(n_ctx),
+                n_gpu_layers=int(n_gpu_layers),
                 cache_mode=prompt_cache_mode,
             )
         except Exception as e:
@@ -2090,9 +2171,21 @@ class LLMSessionChatNode:
                 _kv_sig = hashlib.sha256(_kv_prefix_material.encode("utf-8")).hexdigest()
                 entry = _MEM_KV_STATE.get(session_id)
                 if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
-                    llm.load_state(entry.get("state"))
-                    if log_level != "minimal":
-                        print("[LLM Session Chat] KV state: HIT (memory)")
+                    try:
+                        llm.load_state(entry.get("state"))
+                        if log_level != "minimal":
+                            print("[LLM Session Chat] KV state: HIT (memory)")
+                    except Exception as e:
+                        _clear_kv_state_for_session(session_id)
+                        if _is_state_data_mismatch_error(e):
+                            try:
+                                _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                            except Exception:
+                                pass
+                        if log_level != "minimal":
+                            print("[LLM Session Chat] KV state: INVALIDATED (load failed)")
+                        if log_level == "debug":
+                            print(f"[LLM Session Chat] KV state load failed: {e}")
                 else:
                     if log_level != "minimal":
                         reason = "no state" if not entry else "prefix changed"
@@ -2113,6 +2206,7 @@ class LLMSessionChatNode:
 
         attempts = 0
         last_err = None
+        state_cache_recovered = False
         while attempts < 6:
             try:
                 _t_attempt = time.perf_counter()
@@ -2129,8 +2223,9 @@ class LLMSessionChatNode:
                         _kwargs["top_k"] = 20
                         _kwargs["min_p"] = 0.0
                         _kwargs["presence_penalty"] = 1.5
-                        _kwargs["image_min_tokens"] = 1024
-                        _kwargs["chat_template_kwargs"] = {"enable_thinking": False}
+                        _kwargs["n_batch"] = 1024
+                        _kwargs["n_ubatch"] = 8192
+                        _kwargs["enable_thinking"] = False
                         _kwargs["reasoning_budget"] = 0
                     except Exception:
                         pass
@@ -2155,8 +2250,9 @@ class LLMSessionChatNode:
                                 _kwargs.pop("top_k", None)
                                 _kwargs.pop("min_p", None)
                                 _kwargs.pop("presence_penalty", None)
-                                _kwargs.pop("image_min_tokens", None)
-                                _kwargs.pop("chat_template_kwargs", None)
+                                _kwargs.pop("n_batch", None)
+                                _kwargs.pop("n_ubatch", None)
+                                _kwargs.pop("enable_thinking", None)
                                 _kwargs.pop("reasoning_budget", None)                            
                             stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
                         for chunk in stream_iter:
@@ -2183,8 +2279,9 @@ class LLMSessionChatNode:
                                 _kwargs.pop("top_k", None)
                                 _kwargs.pop("min_p", None)
                                 _kwargs.pop("presence_penalty", None)
-                                _kwargs.pop("image_min_tokens", None)
-                                _kwargs.pop("chat_template_kwargs", None)
+                                _kwargs.pop("n_batch", None)
+                                _kwargs.pop("n_ubatch", None)
+                                _kwargs.pop("enable_thinking", None)
                                 _kwargs.pop("reasoning_budget", None)                            
                             resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
                         assistant_text = resp["choices"][0]["message"]["content"]
@@ -2195,6 +2292,17 @@ class LLMSessionChatNode:
                 _dt = time.perf_counter() - _t_attempt
                 print(f"[LLM Session Chat] Generation attempt {attempts+1} failed in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit}): {e}")
                 last_err = e
+                if _is_state_data_mismatch_error(e) and not state_cache_recovered:
+                    state_cache_recovered = True
+                    _clear_kv_state_for_session(session_id)
+                    try:
+                        _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                    except Exception:
+                        pass
+                    if log_level != "minimal":
+                        print("[LLM Session Chat] Detected incompatible cache state; cache invalidated and retrying once.")
+                    attempts += 1
+                    continue
                 if dynamic_max_tokens and _is_ctx_error(e):
                     # 1) Shrink generation budget first
                     if gen_tokens > int(min_generation_tokens):
@@ -2454,6 +2562,9 @@ def _chat_one_turn(
         model_sig=model_sig,
         reset_session=bool(reset_session),
     )
+    if bool(reset_session):
+        _clear_kv_state_for_session(session_id)
+        _clear_prompt_cache_under_history_file(hist_path)
 
     # Continue rewrite (same behavior as LLMSessionChatNode)
     _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
@@ -2513,6 +2624,7 @@ def _chat_one_turn(
             model_path=model_path,
             mmproj_path=mmproj_path,
             n_ctx=int(n_ctx),
+            n_gpu_layers=int(n_gpu_layers),
             cache_mode=prompt_cache_mode,
         )
     except Exception:
@@ -2551,9 +2663,21 @@ def _chat_one_turn(
             _kv_sig = hashlib.sha256(_kv_prefix_material.encode("utf-8")).hexdigest()
             entry = _MEM_KV_STATE.get(session_id)
             if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
-                llm.load_state(entry.get("state"))
-                if log_level != "minimal":
-                    print("[LLM Dialogue Cycle] KV state: HIT (memory)")
+                try:
+                    llm.load_state(entry.get("state"))
+                    if log_level != "minimal":
+                        print("[LLM Dialogue Cycle] KV state: HIT (memory)")
+                except Exception as e:
+                    _clear_kv_state_for_session(session_id)
+                    if _is_state_data_mismatch_error(e):
+                        try:
+                            _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                        except Exception:
+                            pass
+                    if log_level != "minimal":
+                        print("[LLM Dialogue Cycle] KV state: INVALIDATED (load failed)")
+                    if log_level == "debug":
+                        print(f"[LLM Dialogue Cycle] KV state load failed: {e}")
             else:
                 if log_level != "minimal":
                     reason = "no state" if not entry else "prefix changed"
@@ -2573,6 +2697,7 @@ def _chat_one_turn(
 
     attempts = 0
     last_err = None
+    state_cache_recovered = False
     while attempts < 6:
         try:
             _kwargs = {
@@ -2586,8 +2711,9 @@ def _chat_one_turn(
                     _kwargs["top_k"] = 20
                     _kwargs["min_p"] = 0.0
                     _kwargs["presence_penalty"] = 1.5
-                    _kwargs["image_min_tokens"] = 1024
-                    _kwargs["chat_template_kwargs"] = {"enable_thinking": False}
+                    _kwargs["n_batch"] = 1024
+                    _kwargs["n_ubatch"] = 8192
+                    _kwargs["enable_thinking"] = False
                     _kwargs["reasoning_budget"] = 0
                 except Exception:
                     pass
@@ -2611,8 +2737,9 @@ def _chat_one_turn(
                             _kwargs.pop("top_k", None)
                             _kwargs.pop("min_p", None)
                             _kwargs.pop("presence_penalty", None)
-                            _kwargs.pop("image_min_tokens", None)
-                            _kwargs.pop("chat_template_kwargs", None)
+                            _kwargs.pop("n_batch", None)
+                            _kwargs.pop("n_ubatch", None)
+                            _kwargs.pop("enable_thinking", None)
                             _kwargs.pop("reasoning_budget", None)
                         stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
                     for chunk in stream_iter:
@@ -2647,6 +2774,17 @@ def _chat_one_turn(
             break
         except Exception as e:
             last_err = e
+            if _is_state_data_mismatch_error(e) and not state_cache_recovered:
+                state_cache_recovered = True
+                _clear_kv_state_for_session(session_id)
+                try:
+                    _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                except Exception:
+                    pass
+                if log_level != "minimal":
+                    print("[LLM Dialogue Cycle] Detected incompatible cache state; cache invalidated and retrying once.")
+                attempts += 1
+                continue
             if dynamic_max_tokens and _is_ctx_error(e):
                 # 1) shrink max_tokens
                 if gen_tokens > int(min_generation_tokens):
@@ -2898,6 +3036,10 @@ class LLMDialogueCycleNode:
         tpath = _transcript_path(base_id, history_dir or None)
 
         reset = bool(reset_session)
+        if reset:
+            _clear_kv_state_for_session(sidA)
+            _clear_kv_state_for_session(sidB)
+            _clear_prompt_cache_under_history_file(tpath)
 
         lastA = ""
         lastB = ""
@@ -2946,7 +3088,8 @@ class LLMDialogueCycleNode:
             _append_transcript_lines(tpath, [lineA])
             transcript_lines.append(lineA)
             msg = lastA or ""
-            reset = False  # reset only on first use
+            reset_for_b = reset
+            reset = False  # reset only on first cycle
 
             # B turn
             sysB = (system_prompt_B or "").strip() or (system_prompt or "")
@@ -2977,7 +3120,7 @@ class LLMDialogueCycleNode:
                 log_level=log_level,
                 suppress_backend_logs=suppress_backend_logs,
                 history_dir=history_dir,
-                reset_session=False,
+                reset_session=reset_for_b,
                 stream_to_console=bool(stream_to_console),
             )
             lineB = f"[{_now_iso_jst()}] B: {lastB}"
