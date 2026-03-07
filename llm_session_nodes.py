@@ -167,77 +167,159 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     return defaults
 
 # llama-cpp-python imports
+from importlib import import_module
+from collections import defaultdict
+from typing import Any, Callable
+
+# chat_format -> ChatHandler class name
+chat_handler_map = {
+    "llava-1-5": "Llava15ChatHandler",
+    "llava-1-6": "Llava16ChatHandler",
+    "moondream2": "MoondreamChatHandler",
+    "nanollava": "NanollavaChatHandler",
+    "llama-3-vision-alpha": "Llama3VisionAlphaChatHandler",
+    "minicpm-v-2.6": "MiniCPMv26ChatHandler",
+    "minicpm-v-4.0": "MiniCPMv26ChatHandler",
+    "minicpm-v-4.5": "MiniCPMv45ChatHandler",
+    "gemma3": "Gemma3ChatHandler",
+    "glm4.1v": "GLM41VChatHandler",
+    "glm4.6v": "GLM46VChatHandler",
+    "granite-docling": "GraniteDoclingChatHandler",
+    "lfm2-vl": "LFM2VLChatHandler",
+    "paddleocr": "PaddleOCRChatHandler",
+    "qwen2.5-vl": "Qwen25VLChatHandler",
+    "qwen3-vl": "Qwen3VLChatHandler",
+    "qwen3.5": "Qwen35ChatHandler",
+}
+
+# chat_format ごとの追加 kwargs
+CHAT_HANDLER_KWARGS_MAP = {
+    "llava-1-5": {},
+    "llava-1-6": {},
+    "moondream2": {},
+    "nanollava": {},
+    "llama-3-vision-alpha": {},
+    "minicpm-v-2.6": {},
+    "minicpm-v-4.0": {},
+    "minicpm-v-4.5": {},
+    "gemma3": {},
+    "glm4.1v": {},
+    "glm4.6v": {},
+    "granite-docling": {},
+    "lfm2-vl": {},
+    "paddleocr": {},
+    "qwen2.5-vl": {"image_min_tokens": 1024},
+    "qwen3-vl": {"image_min_tokens": 1024},
+    "qwen3.5": {"enable_thinking": False, "image_min_tokens": 1024},
+}
+
+normalized_chat_format_map = {
+    "llava-1-5": "llava-1-5",
+    "llava15": "llava-1-5",
+    "llava-v1.5": "llava-1-5",
+    "llava-1-6": "llava-1-6",
+    "llava16": "llava-1-6",
+    "llava-v1.6": "llava-1-6",
+    "moondream2": "moondream2",
+    "nanollava": "nanollava",
+    "llama-3": "llama-3-vision-alpha",
+    "llama3": "llama-3-vision-alpha",
+    "minicpm-v-2.6": "minicpm-v-2.6",
+    "minicpm-v-2_6": "minicpm-v-2.6",
+    "minicpmv26": "minicpm-v-2.6",
+    "minicpm-v-4.0": "minicpm-v-4.0",
+    "minicpm-v-4_0": "minicpm-v-4.0",
+    "minicpmv40": "minicpm-v-4.0",
+    "minicpm-v-4.5": "minicpm-v-4.5",
+    "minicpm-v-4_5": "minicpm-v-4.5", 
+    "minicpmv45": "minicpm-v-4.5",
+    "gemma3": "gemma3",
+    "gemma-3": "gemma3",
+    "glm4.1v": "glm4.1v",
+    "glm4_1v": "glm4.1v",
+    "glm41v": "glm4.1v",
+    "glm-4.1v": "glm4.1v",
+    "glm4.6v": "glm4.6v",
+    "glm4_6v": "glm4.6v",
+    "glm46v": "glm4.6v",
+    "glm-4.6v": "glm4.6v",
+    "granitedocling": "granite-docling",
+    "granite-docling": "granite-docling",
+    "lfm2-vl": "lfm2-vl",
+    "lfm2vl": "lfm2-vl",
+    "paddleocr": "paddleocr",
+    "qwen2.5-vl": "qwen2.5-vl",
+    "qwen2_5-vl": "qwen2.5-vl",
+    "qwen25vl": "qwen2.5-vl",
+    "qwen3-vl": "qwen3-vl",
+    "qwen3vl": "qwen3-vl",
+    "qwen3.5": "qwen3.5",
+    "qwen3_5": "qwen3.5",
+    "qwen35": "qwen3.5",
+}
+
+_LLAMA_CPP_IMPORT_ERROR = None
+chat_handler_factory_map: dict[str, Callable[[str], Any]] = {}
+
+
+def _group_formats_by_handler(handler_map: dict[str, str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for chat_format, handler_name in handler_map.items():
+        grouped[handler_name].append(chat_format)
+    return dict(grouped)
+
+
+def _make_chat_handler_factory(handler_cls: type, extra_kwargs: dict[str, Any]) -> Callable[[str], Any]:
+    def factory(mmproj_path: str) -> Any:
+        return handler_cls(clip_model_path=mmproj_path, **extra_kwargs)
+
+    return factory
+
+
+def _load_available_chat_handlers(
+    handler_map: dict[str, str],
+    handler_kwargs_map: dict[str, dict[str, Any]],
+    handler_module: Any,
+) -> tuple[dict[str, str], dict[str, Callable[[str], Any]]]:
+    handler_to_formats = _group_formats_by_handler(handler_map)
+
+    available_handler_map: dict[str, str] = {}
+    available_factory_map: dict[str, Callable[[str], Any]] = {}
+
+    for handler_name, chat_formats in handler_to_formats.items():
+        try:
+            handler_cls = getattr(handler_module, handler_name)
+            globals()[handler_name] = handler_cls
+        except AttributeError:
+            globals()[handler_name] = None
+            continue
+
+        for chat_format in chat_formats:
+            available_handler_map[chat_format] = handler_name
+            extra_kwargs = handler_kwargs_map.get(chat_format, {})
+            available_factory_map[chat_format] = _make_chat_handler_factory(
+                handler_cls,
+                extra_kwargs,
+            )
+
+    return available_handler_map, available_factory_map
+
+
+def _reset_chat_handlers(handler_map: dict[str, str]) -> None:
+    for handler_name in set(handler_map.values()):
+        globals()[handler_name] = None
+
+
 try:
-    # Qwen2.5-VL, Qwen3-VL and Qwen3.5 vision support
     from llama_cpp import Llama
 
-    try:
-        from llama_cpp.llama_chat_format import Qwen25VLChatHandler
-        QWEN2_AVAILABLE = True
-    except ImportError:
-        QWEN2_AVAILABLE = False   
+    llama_chat_format = import_module("llama_cpp.llama_chat_format")
 
-    try:
-        from llama_cpp.llama_chat_format import Qwen3VLChatHandler
-        QWEN3VL_AVAILABLE = True
-    except ImportError:
-        QWEN3VL_AVAILABLE = False
-    
-    try:
-        from llama_cpp.llama_chat_format import Qwen35ChatHandler
-        QWEN35_AVAILABLE = True
-    except ImportError:
-        QWEN35_AVAILABLE = False
-
-    # LLaVA vision support (llava-v1.5/1.6 etc.) via Llava* chat handler
-    # (class names vary across forks/versions; keep it best-effort)
-    try:
-        from llama_cpp.llama_chat_format import Llava16ChatHandler
-        LLAVA16_AVAILABLE = True
-    except ImportError:
-        LLAVA16_AVAILABLE = False
-        Llava16ChatHandler = None  # type: ignore 
-
-    # Llama vision support (llama-3.2 etc.) via Llama* chat handler
-    # (class names vary across forks/versions; keep it best-effort)
-    try:
-        from llama_cpp.llama_chat_format import Llama3VisionAlphaChatHandler
-        LLAMA_AVAILABLE = True
-    except ImportError:
-        LLAMA_AVAILABLE = False
-        Llama3VisionAlphaChatHandler = None  # type: ignore 
-
-    # MiniCPM-V 2.6 vision support via MiniCPMv26ChatHandler
-    try:
-        from llama_cpp.llama_chat_format import MiniCPMv26ChatHandler
-        MINICPM26_AVAILABLE = True
-    except ImportError:
-        MINICPM26_AVAILABLE = False
-        MiniCPMv26ChatHandler = None  # type: ignore
-
-    # MiniCPM-V 4.5 vision support via MiniCPMv45ChatHandler
-    try:
-        from llama_cpp.llama_chat_format import MiniCPMv45ChatHandler
-        MINICPM45_AVAILABLE = True
-    except ImportError:
-        MINICPM45_AVAILABLE = False
-        MiniCPMv45ChatHandler = None  # type: ignore
-
-    # Gemma 3 vision support via Gemma3ChatHandler
-    try:
-        from llama_cpp.llama_chat_format import Gemma3ChatHandler
-        GEMMA3_AVAILABLE = True
-    except ImportError:
-        GEMMA3_AVAILABLE = False
-        Gemma3ChatHandler = None  # type: ignore
-
-    # GLM-4.6V vision support via GLM46VChatHandler
-    try:
-        from llama_cpp.llama_chat_format import GLM46VChatHandler
-        GLM46V_AVAILABLE = True
-    except ImportError:
-        GLM46V_AVAILABLE = False
-        GLM46VChatHandler = None  # type: ignore
+    chat_handler_map, chat_handler_factory_map = _load_available_chat_handlers(
+        handler_map=chat_handler_map,
+        handler_kwargs_map=CHAT_HANDLER_KWARGS_MAP,
+        handler_module=llama_chat_format,
+    )
 
     LLAMA_CPP_AVAILABLE = True
     print("[DEBUG] Llama.__init__ args:", getattr(Llama, "__init__", None))
@@ -245,15 +327,11 @@ try:
 except Exception as e:
     LLAMA_CPP_AVAILABLE = False
     _LLAMA_CPP_IMPORT_ERROR = repr(e)
-    QWEN2_AVAILABLE = False
-    QWEN3VL_AVAILABLE = False
-    QWEN35_AVAILABLE = False
-    LLAVA16_AVAILABLE = False
-    LLAMA_AVAILABLE = False
-    MINICPM26_AVAILABLE = False
-    MINICPM45_AVAILABLE = False
-    GEMMA3_AVAILABLE = False
-    GLM46V_AVAILABLE = False
+
+    _reset_chat_handlers(chat_handler_map)
+    chat_handler_map = {}
+    chat_handler_factory_map = {}
+
     print(f"[LLM Session] Warning: llama-cpp-python not available: {_LLAMA_CPP_IMPORT_ERROR}")
 
 # ============================================================================
@@ -954,119 +1032,75 @@ class GGUFModelManager:
             return None
         return os.path.normpath(p)
 
-    def _infer_is_qwen2(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        return "qwen2" in model_name_lower
-
-    def _infer_is_qwen3vl(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        return ("qwen3vl" in model_name_lower) or ("qwen3-vl" in model_name_lower)
-
-    def _infer_is_qwen35(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        return "qwen35" in model_name_lower
-
-    def _infer_is_llava16(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        # Accept common naming patterns: llava-v1.6-*, llava-*, llava1.6, etc.
-        return "llava" in model_name_lower
-
-    def _infer_is_llama(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        # Accept common naming patterns: llama-3.2, etc.
-        return "llama" in model_name_lower
-
-    def _infer_is_minicpm26(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        return "minicpm-v-2_6" in model_name_lower
-
-    def _infer_is_minicpm45(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        return "minicpm-v-4_5" in model_name_lower
-
-    def _infer_is_gemma3(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        # Common: gemma-3-*, gemma3-*, gemma_3_*
-        return ("gemma-3" in model_name_lower) or ("gemma3" in model_name_lower) or ("gemma_3" in model_name_lower)
-
-    def _infer_is_glm46v(self, model_path: str) -> bool:
-        model_name_lower = os.path.basename(model_path).lower()
-        # Common: glm-4.6v, glm-4.6v-flash, glm_4.6v, glm4.6v
-        return "glm-4" in model_name_lower
-
-    def _auto_detect_mmproj(self, model_path: str) -> Optional[str]:
+    def _auto_detect_mmproj(self, model_path: str, model_family: str) -> Optional[str]:
         """
-        Auto-detect mmproj by "family prefix" match.
+        Auto-detect mmproj using normalized_chat_format_map.
 
         Rule:
-        - Determine model family by basename(model).startswith one of:
-            qwen2, qwen3vl, qwen35, llava, llama, minicpm-v-2_6, minicpm-v-4_5, gemma-3, glm-4
-        - In the same directory, scan mmproj-*.gguf
-        - Keep only those whose mmproj_name (after 'mmproj-') startswith the same family keyword
+        - Find the key in normalized_chat_format_map whose value == model_family
+        - In the model directory, scan mmproj-*.gguf
+        - Keep those whose name after 'mmproj-' starts with the detected family key
         - If exactly one match -> return it
-        - Else (0 or >1) -> raise ValueError
+        - If 0 or multiple -> return None
         """
+
         model_dir = os.path.dirname(model_path)
-        base = os.path.basename(model_path)
-        name = base[:-5] if base.lower().endswith(".gguf") else base
-        name_l = name.lower()
+        family_aliases = []
 
-        # Model family keywords (startswith)
-        families = ["qwen2", "qwen3vl", "qwen35", "llava", "llama", "minicpm-v-2_6", "minicpm-v-4_5", "gemma-3", "glm-4"]
-        family = next((k for k in families if name_l.startswith(k)), None)
+        if not os.path.isdir(model_dir):
+            print("[GGUFModelManager] mmproj auto-detect failed: model directory does not exist.\n"
+            f"dir: {model_dir}")
+            return None
 
-        if family is None:
-            raise ValueError(
-                "mmproj auto-detect failed: model name does not start with any supported family prefix.\n"
-                f"model: {base}\n"
-                f"supported prefixes: {', '.join(families)}"
-            )
+        # model_family → family key
+        for k, v in normalized_chat_format_map.items():
+            if v == model_family:
+                family_aliases.append(k)
 
-        if not os.path.exists(model_dir):
-            raise ValueError(
-                "mmproj auto-detect failed: model directory does not exist.\n"
-                f"dir: {model_dir}"
-            )
+        if not family_aliases:
+            print("mmproj auto-detect failed: no aliases found for model family.\n"
+            f"family: {model_family}")
+            return None                
 
-        # Collect mmproj-*.gguf in the same dir
-        mmproj_files = [
-            f for f in os.listdir(model_dir)
-            if f.startswith("mmproj-") and f.endswith(".gguf")
-        ]
+        mmproj_files = []
+        for f in os.listdir(model_dir):
+            fl = f.lower()
+            if fl.startswith("mmproj-") and fl.endswith(".gguf"):
+                mmproj_files.append(f)
 
-        # Filter by family prefix on mmproj_name
-        matches = []
+        matches = set()
         for f in mmproj_files:
             mmname = f[len("mmproj-"):-len(".gguf")]
-            if mmname.lower().startswith(family):
-                matches.append(f)
+            for k in family_aliases:
+                if k in mmname.lower():
+                        matches.add(f)
 
-        matches.sort(key=str.lower)
+        matches = sorted(matches, key=str.lower)
 
         if len(matches) == 1:
             fname = matches[0]
             cand = os.path.join(model_dir, fname)
-            print(f"[GGUFModelManager] Auto-detected mmproj (family={family}): {fname}")
+            print(f"Auto-detected mmproj (family={model_family}): {fname}")
             return self._normalize_path(cand)
-
-        if len(matches) == 0:
-            raise ValueError(
+        elif len(matches) == 0:
+            print(
                 "mmproj auto-detect failed: no mmproj matched the model family prefix.\n"
-                f"model: {base}\n"
-                f"family: {family}\n"
+                f"family: {model_family}\n"
+                f"aliases: {', '.join(sorted(family_aliases, key=str.lower))}\n"
                 f"dir: {model_dir}\n"
                 f"mmproj candidates: {', '.join(sorted(mmproj_files, key=str.lower)) or '(none)'}"
             )
+        else:
+            print(
+                "mmproj auto-detect failed: multiple mmproj files matched the model family prefix.\n"
+                f"family: {model_family}\n"
+                f"aliases: {', '.join(sorted(family_aliases, key=str.lower))}\n"
+                f"dir: {model_dir}\n"
+                f"matched: {', '.join(matches)}\n"
+                "Please select mmproj manually."
+            )
 
-        # len(matches) > 1
-        raise ValueError(
-            "mmproj auto-detect failed: multiple mmproj files matched the model family prefix.\n"
-            f"model: {base}\n"
-            f"family: {family}\n"
-            f"dir: {model_dir}\n"
-            f"matched: {', '.join(matches)}\n"
-            "Please select mmproj manually."
-        )
+        return None
 
     def _make_signature(
         self,
@@ -1103,353 +1137,51 @@ class GGUFModelManager:
 
         model_path = self._normalize_path(model_path)
 
-        # Infer Qwen version from model name
-        is_qwen2 = self._infer_is_qwen2(model_path)
-        is_qwen3vl = self._infer_is_qwen3vl(model_path)
-        is_qwen35 = self._infer_is_qwen35(model_path)
-        # Infer LLaVA from model name
-        is_llava16 = self._infer_is_llava16(model_path)
-        # Infer Llama from model name
-        is_llama = self._infer_is_llama(model_path)
-        # Infer MiniCPM-V 2.6
-        is_minicpm26 = self._infer_is_minicpm26(model_path)
-        # Infer MiniCPM-V 4.5
-        is_minicpm45 = self._infer_is_minicpm45(model_path)
-        # Infer Gemma 3
-        is_gemma3 = self._infer_is_gemma3(model_path)
-        # Infer GLM-4.6V / GLM-4V family (heuristic)
-        is_glm46v = self._infer_is_glm46v(model_path)
-
-        model_family = None
-        chat_format = None
-
-        if is_qwen2:
-            model_family = "qwen2"
-            chat_format = "qwen2.5-vl"
-        elif is_qwen3vl:
-            model_family = "qwen3vl"
-            chat_format = "qwen3-vl"
-        elif is_qwen35:
-            model_family = "qwen35"
-            chat_format = "qwen3.5"
-        elif is_llava16:
-            model_family = "llava"
-            chat_format = "llava-1-6"
-        elif is_llama:
-            model_family = "llama"
-            chat_format = "llama-3-vision-alpha"
-        elif is_minicpm26:
-            model_family = "minicpm-v-2_6"
-            chat_format = "minicpm-v-2.6"
-        elif is_minicpm45:
-            model_family = "minicpm-v-4_5"
-            chat_format = "minicpm-v-4.5"
-        elif is_gemma3:
-            model_family = "gemma-3"
-            chat_format = "gemma3"
-        elif is_glm46v:
-            model_family = "glm-4"
-            chat_format = "glm4.6v"
-
         # If user explicitly selected "(Not required)", force text-only.
         force_no_mmproj = (mmproj_path == "(Not required)")
         if force_no_mmproj:
             mmproj_path = None
 
-        # Qwen25-VL requires mmproj (unless explicitly disabled)
-        if model_family == "qwen2" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "Qwen25-VL requires mmproj file!\n"
-                        "Please download mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # Qwen3-VL requires mmproj (unless explicitly disabled)
-        if model_family == "qwen3vl" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "Qwen3-VL requires mmproj file!\n"
-                        "Please download mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # Qwen3.5 requires mmproj (unless explicitly disabled)
-        if model_family == "qwen35" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "Qwen3.5 requires mmproj file!\n"
-                        "Please download mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # LLaVA v1.6 requires mmproj to actually use vision (unless explicitly disabled)
-        if model_family == "llava" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "LLaVA v1.6 requires mmproj file for vision!\n"
-                        "Please download the matching mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # Llama requires mmproj to actually use vision (unless explicitly disabled)
-        if model_family == "llama" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "Llama requires mmproj file for vision!\n"
-                        "Please download the matching mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # MiniCPM-V 2.6 vision: usually uses mmproj as well (unless explicitly disabled)
-        if model_family == "minicpm-v-2_6" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "MiniCPM-V 2.6 (vision) requires mmproj file for vision!\n"
-                        "Please download the matching mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # MiniCPM-V 4.5 vision: usually uses mmproj as well (unless explicitly disabled)
-        if model_family == "minicpm-v-4_5" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "MiniCPM-V 4.5 (vision) requires mmproj file for vision!\n"
-                        "Please download the matching mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # Gemma 3 vision: usually uses mmproj as well (unless explicitly disabled)
-        if model_family == "gemma-3" and not force_no_mmproj:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "Gemma-3 (vision) requires mmproj file for vision!\n"
-                        "Please download the matching mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # GLM-4.6V vision: many GGUF repos still ship a separate mmproj; require if using a vision handler.
-        if model_family == "glm-4" and not force_no_mmproj and GLM46V_AVAILABLE:
-            if mmproj_path is None:
-                mmproj_path = self._auto_detect_mmproj(model_path)
-                if mmproj_path is None:
-                    model_dir = os.path.dirname(model_path)
-                    raise ValueError(
-                        "GLM-4.6V (vision) requires mmproj file for vision (handler present)!\n"
-                        "Please download the matching mmproj file from the model's GGUF repo.\n"
-                        f"Expected location: {model_dir}{os.sep}mmproj-*.gguf"
-                    )
-            else:
-                mmproj_path = self._normalize_path(mmproj_path)
-
-            print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
-
-        # Decide vision mode + initialize handler
-        use_vision = False
+        ### Load Chat Handler
         chat_handler = None
+        chat_format = None
+        use_vision = False
 
-        if model_family == "qwen2" and (not force_no_mmproj) and QWEN2_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] Qwen25-VL with mmproj: {mmproj_path}")
-                    chat_handler = Qwen25VLChatHandler(clip_model_path=mmproj_path, image_min_tokens=1024)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Qwen25-VL chat handler: {e}")
+        model_name_lower = os.path.basename(model_path).lower()
+
+        for k, v in normalized_chat_format_map.items():
+
+            if k in model_name_lower and v in chat_handler_factory_map:
+                model_family = v
+
+                if not force_no_mmproj:
+                    if mmproj_path is None:
+                        mmproj_path = self._auto_detect_mmproj(model_path, model_family)
+                        if mmproj_path is None:
+                            model_dir = os.path.dirname(model_path)
+                            print("[GGUFModelManager] Warning: Failed to auto_detect mmproj file.")
+                    else:
+                        mmproj_path = self._normalize_path(mmproj_path)
+                
+                if mmproj_path is not None:
+                    print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
+                    try:
+                        chat_handler = chat_handler_factory_map[model_family](mmproj_path)
+                        chat_format = model_family
+                        use_vision = True
+                    except Exception as e:
+                        print(f"[GGUFModelManager] Warning: Failed to initialize chat handler: {e}")
+                        chat_handler = None
+                        chat_format = None
+                        use_vision = False
+                else:
                     chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: Qwen25-VL requires an existing mmproj file")
-                chat_handler = None
-                use_vision = False
-
-        elif model_family == "qwen3vl" and (not force_no_mmproj) and QWEN3VL_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] Qwen3-VL with mmproj: {mmproj_path}")
-                    chat_handler = Qwen3VLChatHandler(clip_model_path=mmproj_path, image_min_tokens=1024)
                     chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Qwen3-VL chat handler: {e}")
-                    chat_handler = None
                     use_vision = False
-            else:
-                print("[GGUFModelManager] Error: Qwen3-VL requires an existing mmproj file")
-                chat_handler = None
-                use_vision = False
 
-        elif model_family == "qwen35" and (not force_no_mmproj) and QWEN35_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] Qwen3.5 with mmproj: {mmproj_path}")
-                    chat_handler = Qwen35ChatHandler(clip_model_path=mmproj_path,enable_thinking=False, image_min_tokens=1024)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Qwen3.5 chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: Qwen3.5 requires an existing mmproj file")
-                chat_handler = None
-                use_vision = False
+                break
 
-        elif model_family == "minicpm-v-2_6" and (not force_no_mmproj) and MINICPM26_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] MiniCPM-V 2.6 with mmproj: {mmproj_path}")
-                    chat_handler = MiniCPMv26ChatHandler(clip_model_path=mmproj_path)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Gemma-3 chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: MiniCPM-V 2.6 requires an existing mmproj file")
-                chat_handler = None
-                use_vision = False
-
-        elif model_family == "minicpm-v-4_5" and (not force_no_mmproj) and MINICPM45_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] MiniCPM-V 4.5 with mmproj: {mmproj_path}")
-                    chat_handler = MiniCPMv45ChatHandler(clip_model_path=mmproj_path)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Gemma-3 chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: MiniCPM-V 4.5 requires an existing mmproj file")
-                chat_handler = None
-                use_vision = False
-
-        elif model_family == "gemma-3" and (not force_no_mmproj) and GEMMA3_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] Gemma-3 with mmproj: {mmproj_path}")
-                    chat_handler = Gemma3ChatHandler(clip_model_path=mmproj_path)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Gemma-3 chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: Gemma-3 requires an existing mmproj file for vision")
-                chat_handler = None
-                use_vision = False
-
-        elif model_family == "llava" and (not force_no_mmproj) and LLAVA16_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] LLaVA v1.6 with mmproj: {mmproj_path}")
-                    # Llava16ChatHandler is used for llava-v1.6-34b style models in many builds
-                    chat_handler = Llava16ChatHandler(clip_model_path=mmproj_path)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize LLaVA v1.6 chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: LLaVA v1.6 requires an existing mmproj file for vision")
-                chat_handler = None
-                use_vision = False
-
-        elif model_family == "llama" and (not force_no_mmproj) and LLAMA_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] Llama with mmproj: {mmproj_path}")
-                    chat_handler = Llama3VisionAlphaChatHandler(clip_model_path=mmproj_path)
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize Llama chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: Llama requires an existing mmproj file for vision")
-                chat_handler = None
-                use_vision = False
-
-        elif model_family == "glm-4" and (not force_no_mmproj) and GLM46V_AVAILABLE:
-            if mmproj_path is not None and os.path.exists(mmproj_path):
-                try:
-                    print(f"[GGUFModelManager] GLM-4.6V with mmproj: {mmproj_path}")
-                    chat_handler = GLM46VChatHandler(clip_model_path=mmproj_path)  # type: ignore[misc]
-                    chat_format = None
-                    use_vision = True
-                except Exception as e:
-                    print(f"[GGUFModelManager] Warning: Failed to initialize GLM-4.6V chat handler: {e}")
-                    chat_handler = None
-                    use_vision = False
-            else:
-                print("[GGUFModelManager] Error: GLM-4.6V requires an existing mmproj file for vision (handler present)")
-                chat_handler = None
-                use_vision = False
-
-        else:
+        if not use_vision:
             print("[GGUFModelManager] Using text-only mode")
             chat_handler = None
             use_vision = False
@@ -1480,15 +1212,29 @@ class GGUFModelManager:
         self.chat_format = chat_format
 
         # Model loading
-        if use_vision and self.chat_handler is not None:
+        if use_vision and _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
+            print("[GGUFModelManager] Loading Qwen3.5 with vision support")
+            self.model = Llama(
+                model_path=model_path,
+                chat_handler=self.chat_handler,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                n_batch=1024,
+                n_ubatch=8192,
+                chat_format=self.chat_format,
+                verbose=verbose,
+                # Vision models often need this; safe default for vision path.
+                logits_all=True,
+            )
+        elif use_vision and self.chat_handler is not None:
             print("[GGUFModelManager] Loading with vision support")
             self.model = Llama(
                 model_path=model_path,
                 chat_handler=self.chat_handler,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
-                # n_batch=n_batch,
-                # n_ubatch=n_ubatch,
+                # n_batch=1024,
+                # n_ubatch=8192,
                 chat_format=self.chat_format,
                 verbose=verbose,
                 # Vision models often need this; safe default for vision path.
@@ -1502,7 +1248,7 @@ class GGUFModelManager:
                 n_gpu_layers=n_gpu_layers,
                 # n_batch=n_batch,
                 # n_ubatch=n_ubatch,
-                chat_format=self.chat_format,
+                # chat_format=self.chat_format,
                 verbose=verbose,
             )
 
