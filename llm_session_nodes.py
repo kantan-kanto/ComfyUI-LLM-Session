@@ -21,6 +21,7 @@ import re
 import shutil
 import folder_paths
 import hashlib
+import traceback
 
 
 # ============================================================================
@@ -59,6 +60,8 @@ _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
     "rewrite_continue": True,
     "reset_session": False,
     "stream_to_console": False,
+    "system_prompt_A": "",
+    "system_prompt_B": "",
 }
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
@@ -161,9 +164,13 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["reset_session"] = _as_bool(defaults.get("reset_session"), False)
     defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), False)
 
-    # System prompt
+    # System prompt(s)
     sp = defaults.get("system_prompt")
     defaults["system_prompt"] = str(sp) if sp is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt"]
+    sp_a = defaults.get("system_prompt_A")
+    defaults["system_prompt_A"] = str(sp_a) if sp_a is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt_A"]
+    sp_b = defaults.get("system_prompt_B")
+    defaults["system_prompt_B"] = str(sp_b) if sp_b is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt_B"]
 
     return defaults
 
@@ -315,6 +322,7 @@ try:
     from llama_cpp import Llama
 
     llama_chat_format = import_module("llama_cpp.llama_chat_format")
+    print("[DEBUG] llama_chat_format module:", getattr(llama_chat_format, "__file__", "(unknown)"))
 
     chat_handler_map, chat_handler_factory_map = _load_available_chat_handlers(
         handler_map=chat_handler_map,
@@ -732,11 +740,15 @@ def build_chat_messages(history: Dict[str, Any],
             turns = []
 
     messages: List[Dict[str, Any]] = []
-    if sys:
-        messages.append({"role": "system", "content": sys})
-    if summary.strip():
-        # Keep summary short and isolated; system is fine
-        messages.append({"role": "system", "content": f"Conversation summary:\n{summary.strip()}"})
+    if sys or summary.strip():
+        system_parts: List[str] = []
+        if sys:
+            system_parts.append(sys)
+        if summary.strip():
+            # Keep summary in system, but merge into one system message so
+            # templates that require a single leading system role still work.
+            system_parts.append(f"Conversation summary:\n{summary.strip()}")
+        messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
     for t in turns:
         u = ((t.get("user") or {}).get("text")) or ""
@@ -869,6 +881,53 @@ def _extract_stream_content(chunk: Any) -> str:
         return txt or ""
     except Exception:
         return ""
+
+def _strip_reasoning_output(text: str) -> str:
+    """Best-effort removal of exposed reasoning sections from model output."""
+    s = str(text or "")
+    if not s:
+        return s
+
+    # If a closing think tag exists, keep only the tail after the last one.
+    # Some models emit reasoning text without an opening <think> but still output </think>.
+    if "</think>" in s.lower():
+        idx = s.lower().rfind("</think>")
+        s = s[idx + len("</think>"):].strip()
+        if not s:
+            return s
+
+    # Remove explicit think tags first.
+    s = re.sub(r"<think>.*?</think>", "", s, flags=re.IGNORECASE | re.DOTALL).strip()
+    if not s:
+        return s
+
+    # Prefer explicit final-answer markers when present.
+    marker_patterns = [
+        r"(?is)\bfinal\s*answer\s*:\s*(.+)$",
+        r"(?is)最終回答\s*[:：]\s*(.+)$",
+        r"(?is)回答\s*[:：]\s*(.+)$",
+    ]
+    for pat in marker_patterns:
+        m = re.search(pat, s)
+        if m:
+            cand = (m.group(1) or "").strip()
+            if cand:
+                return cand
+
+    # Remove common leading reasoning headers if they are at the beginning.
+    lead_reasoning = re.match(
+        r"(?is)^\s*(thinking\s*process|reasoning|analysis)\s*[:：]\s*",
+        s,
+    )
+    if lead_reasoning:
+        tail = s[lead_reasoning.end():].strip()
+        # Heuristic: keep last non-empty paragraph as answer candidate.
+        parts = [p.strip() for p in re.split(r"\n\s*\n", tail) if p.strip()]
+        if parts:
+            return parts[-1]
+        return ""
+
+    return s
 
 def _make_summary_prompt(existing_summary: str, turns_chunk: list) -> list:
     """
@@ -1019,6 +1078,7 @@ class GGUFModelManager:
     def __init__(self):
         self.model: Optional[Llama] = None
         self.chat_handler = None
+        self._current_cache_info = None
 
         # Keep a full signature of what's currently loaded
         self._signature: Optional[tuple] = None
@@ -1125,7 +1185,7 @@ class GGUFModelManager:
         mmproj_path: Optional[str] = None,
         n_ctx: int = 4096,
         n_gpu_layers: int = 0,
-        verbose: bool = False,
+        verbose: bool = True,
     ) -> Llama:
         """Load GGUF model."""
         if not LLAMA_CPP_AVAILABLE:
@@ -1211,22 +1271,7 @@ class GGUFModelManager:
         self.chat_format = chat_format
 
         # Model loading
-        if use_vision and _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-            print("[GGUFModelManager] Loading Qwen3.5 with vision support")
-            self.model = Llama(
-                model_path=model_path,
-                chat_handler=self.chat_handler,
-                n_ctx=n_ctx,
-                n_gpu_layers=n_gpu_layers,
-                n_batch=1024,
-                n_ubatch=8192,
-                enable_thinking=False,
-                chat_format=self.chat_format,
-                verbose=verbose,
-                # Vision models often need this; safe default for vision path.
-                logits_all=True,
-            )
-        elif use_vision and self.chat_handler is not None:
+        if use_vision and self.chat_handler is not None:
             print("[GGUFModelManager] Loading with vision support")
             self.model = Llama(
                 model_path=model_path,
@@ -1395,7 +1440,7 @@ class GGUFModelManager:
         - Detach cache from model
         - Optionally remove disk cache directory
         """
-        info = self._current_cache_info or {}
+        info = getattr(self, "_current_cache_info", None) or {}
         desc = str(info.get("desc", "") or "")
         try:
             if hasattr(llm, "set_cache"):
@@ -1469,6 +1514,67 @@ def _clear_prompt_cache_under_history_file(history_file_path: str) -> None:
         os.makedirs(cache_root, exist_ok=True)
     except Exception:
         pass
+
+
+def _kv_state_debug_info(state: Any) -> str:
+    """Return a compact debug string for llama state payload."""
+    try:
+        stype = type(state).__name__
+    except Exception:
+        stype = "(unknown)"
+    size = "n/a"
+    llama_state_size = "n/a"
+    try:
+        size = str(len(state))
+    except Exception:
+        try:
+            nbytes = getattr(state, "nbytes", None)
+            if nbytes is not None:
+                size = str(int(nbytes))
+        except Exception:
+            pass
+    try:
+        lss = getattr(state, "llama_state_size", None)
+        if lss is not None:
+            llama_state_size = str(int(lss))
+    except Exception:
+        pass
+    return f"type={stype}, size={size}, llama_state_size={llama_state_size}"
+
+
+def _saved_llama_state_size(state: Any) -> Optional[int]:
+    """Best-effort extraction of llama_state_size from LlamaState-like payload."""
+    try:
+        lss = getattr(state, "llama_state_size", None)
+        if lss is not None:
+            return int(lss)
+    except Exception:
+        pass
+    try:
+        raw = getattr(state, "llama_state", None)
+        if raw is not None:
+            return int(len(raw))
+    except Exception:
+        pass
+    return None
+
+
+def _current_llama_state_size(llm: Any) -> Optional[int]:
+    """Best-effort query of current backend state size for compatibility pre-check."""
+    try:
+        import llama_cpp  # type: ignore
+        capi = getattr(llama_cpp, "llama_cpp", None)
+        if capi is None:
+            return None
+        fn = getattr(capi, "llama_state_get_size", None) or getattr(capi, "llama_get_state_size", None)
+        if not callable(fn):
+            return None
+        ctx_obj = getattr(getattr(llm, "_ctx", None), "ctx", None)
+        if ctx_obj is None:
+            return None
+        return int(fn(ctx_obj))
+    except Exception:
+        return None
 
 
 # ============================================================================
@@ -2095,7 +2201,7 @@ class LLMSessionChatNode:
                 mmproj_path=mmproj_path,
                 n_ctx=int(n_ctx),
                 n_gpu_layers=int(n_gpu_layers),
-                verbose=False,
+                verbose=True,
             )
         except Exception as e:
             print(f"[LLM Session Chat] Error loading model: {e}")
@@ -2172,9 +2278,36 @@ class LLMSessionChatNode:
                 entry = _MEM_KV_STATE.get(session_id)
                 if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
                     try:
-                        llm.load_state(entry.get("state"))
-                        if log_level != "minimal":
-                            print("[LLM Session Chat] KV state: HIT (memory)")
+                        _state_payload = entry.get("state")
+                        _saved_size = _saved_llama_state_size(_state_payload)
+                        _current_size = _current_llama_state_size(llm)
+                        _skip_load = (
+                            _saved_size is not None
+                            and _current_size is not None
+                            and _saved_size != _current_size
+                        )
+                        if _skip_load:
+                            _clear_kv_state_for_session(session_id)
+                            if log_level != "minimal":
+                                print("[LLM Session Chat] KV state: INVALIDATED (incompatible state size)")
+                            if log_level == "debug":
+                                print(
+                                    "[LLM Session Chat] KV precheck mismatch: "
+                                    f"session_id={session_id}, sig={_kv_sig[:12]}, "
+                                    f"saved_size={_saved_size}, current_size={_current_size}, "
+                                    f"model={os.path.basename(model_path)}"
+                                )
+                        else:
+                            if log_level == "debug":
+                                print(
+                                    "[LLM Session Chat] KV load attempt: "
+                                    f"session_id={session_id}, sig={_kv_sig[:12]}, "
+                                    f"{_kv_state_debug_info(_state_payload)}, "
+                                    f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
+                                )
+                            llm.load_state(_state_payload)
+                            if log_level != "minimal":
+                                print("[LLM Session Chat] KV state: HIT (memory)")
                     except Exception as e:
                         _clear_kv_state_for_session(session_id)
                         if _is_state_data_mismatch_error(e):
@@ -2185,11 +2318,22 @@ class LLMSessionChatNode:
                         if log_level != "minimal":
                             print("[LLM Session Chat] KV state: INVALIDATED (load failed)")
                         if log_level == "debug":
+                            print(
+                                "[LLM Session Chat] KV load context: "
+                                f"session_id={session_id}, sig={_kv_sig[:12]}, "
+                                f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
+                            )
                             print(f"[LLM Session Chat] KV state load failed: {e}")
                 else:
                     if log_level != "minimal":
                         reason = "no state" if not entry else "prefix changed"
                         print(f"[LLM Session Chat] KV state: MISS ({reason})")
+                    if log_level == "debug" and entry:
+                        print(
+                            "[LLM Session Chat] KV miss details: "
+                            f"session_id={session_id}, stored_sig={str(entry.get('signature', ''))[:12]}, "
+                            f"current_sig={_kv_sig[:12]}, { _kv_state_debug_info(entry.get('state')) }"
+                        )
             except Exception as e:
                 if log_level == "debug":
                     print(f"[LLM Session Chat] KV state: DISABLED ({e})")
@@ -2198,6 +2342,9 @@ class LLMSessionChatNode:
         # Generate (with optional dynamic fallback when n_ctx is exceeded)
         assistant_text = ""
         gen_tokens = int(max_tokens)
+        # Reserve a generation margin up front to reduce n_ctx overflow retries.
+        if bool(dynamic_max_tokens):
+            gen_tokens = max(1, gen_tokens - max(0, int(safety_margin_tokens)))
         turns_limit = int(max_turns) if max_turns is not None else None
 
         def _is_ctx_error(err: Exception) -> bool:
@@ -2217,18 +2364,6 @@ class LLMSessionChatNode:
                     "top_p": float(top_p),
                     "max_tokens": int(gen_tokens),
                 }
-                # 追加（Qwen3.5 対策）
-                if _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-                    try:
-                        _kwargs["top_k"] = 20
-                        _kwargs["min_p"] = 0.0
-                        _kwargs["presence_penalty"] = 1.5
-                        _kwargs["n_batch"] = 1024
-                        _kwargs["n_ubatch"] = 8192
-                        _kwargs["enable_thinking"] = False
-                        _kwargs["reasoning_budget"] = 0
-                    except Exception:
-                        pass
                 # Repetition controls (supported by many llama-cpp-python builds)
                 if repeat_last_n and int(repeat_last_n) > 0:
                     _kwargs["repeat_last_n"] = int(repeat_last_n)
@@ -2245,15 +2380,6 @@ class LLMSessionChatNode:
                             _kwargs.pop("repeat_last_n", None)
                             _kwargs.pop("repeat_penalty", None)
                             _kwargs.pop("top_p", None)
-                            # 追加（Qwen3.5 対策）
-                            if _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-                                _kwargs.pop("top_k", None)
-                                _kwargs.pop("min_p", None)
-                                _kwargs.pop("presence_penalty", None)
-                                _kwargs.pop("n_batch", None)
-                                _kwargs.pop("n_ubatch", None)
-                                _kwargs.pop("enable_thinking", None)
-                                _kwargs.pop("reasoning_budget", None)                            
                             stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
                         for chunk in stream_iter:
                             token = _extract_stream_content(chunk)
@@ -2274,15 +2400,6 @@ class LLMSessionChatNode:
                             _kwargs.pop("repeat_last_n", None)
                             _kwargs.pop("repeat_penalty", None)
                             _kwargs.pop("top_p", None)
-                            # 追加（Qwen3.5 対策）
-                            if _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-                                _kwargs.pop("top_k", None)
-                                _kwargs.pop("min_p", None)
-                                _kwargs.pop("presence_penalty", None)
-                                _kwargs.pop("n_batch", None)
-                                _kwargs.pop("n_ubatch", None)
-                                _kwargs.pop("enable_thinking", None)
-                                _kwargs.pop("reasoning_budget", None)                            
                             resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
                         assistant_text = resp["choices"][0]["message"]["content"]
                 _dt = time.perf_counter() - _t_attempt
@@ -2291,6 +2408,8 @@ class LLMSessionChatNode:
             except Exception as e:
                 _dt = time.perf_counter() - _t_attempt
                 print(f"[LLM Session Chat] Generation attempt {attempts+1} failed in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit}): {e}")
+                if log_level == "debug":
+                    traceback.print_exc()
                 last_err = e
                 if _is_state_data_mismatch_error(e) and not state_cache_recovered:
                     state_cache_recovered = True
@@ -2343,6 +2462,7 @@ class LLMSessionChatNode:
                 _log_total("Finished (error)")
                 return ("",)
 
+        assistant_text = _strip_reasoning_output(assistant_text)
         if not assistant_text:
             print(f"[LLM Session Chat] Error during generation: {last_err}")
             _log_total("Finished (error)")
@@ -2450,9 +2570,14 @@ class LLMSessionChatNode:
                         "turns": _turns_ctx2,
                     }, ensure_ascii=False, sort_keys=True)
                     _sig2 = hashlib.sha256(_kv_prefix_material2.encode("utf-8")).hexdigest()
-                    _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": llm.save_state()}
+                    _saved_state = llm.save_state()
+                    _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": _saved_state}
                     if log_level == "debug":
-                        print("[LLM Session Chat] KV state: SAVED (memory)")
+                        print(
+                            "[LLM Session Chat] KV state: SAVED (memory) "
+                            f"session_id={session_id}, sig={_sig2[:12]}, "
+                            f"{_kv_state_debug_info(_saved_state)}"
+                        )
             except Exception as e:
                 if log_level == "debug":
                     print(f"[LLM Session Chat] KV state save skipped: {e}")
@@ -2526,18 +2651,24 @@ def _chat_one_turn(
     history_dir: str = "",
     reset_session: bool = False,
     stream_to_console: bool = False,
+    model_manager: Optional[GGUFModelManager] = None,
 ) -> str:
     """
     One chat turn using the same history/summary logic as LLMSessionChatNode,
     but returns assistant_text only.
     """
-    global _model_manager
-
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
         if "_LLAMA_CPP_IMPORT_ERROR" in globals():
             msg += f" ({_LLAMA_CPP_IMPORT_ERROR})"
         raise RuntimeError(msg)
+
+    mgr = model_manager
+    if mgr is None:
+        global _model_manager
+        if _model_manager is None:
+            _model_manager = GGUFModelManager()
+        mgr = _model_manager
 
     if "(No GGUF models found" in model:
         return ""
@@ -2597,29 +2728,25 @@ def _chat_one_turn(
 
     # Store prompt-cache under the same directory as the history file
     try:
-        _model_manager.prompt_cache_dir_override = os.path.join(os.path.dirname(hist_path), "prompt_cache")
-        os.makedirs(_model_manager.prompt_cache_dir_override, exist_ok=True)
+        mgr.prompt_cache_dir_override = os.path.join(os.path.dirname(hist_path), "prompt_cache")
+        os.makedirs(mgr.prompt_cache_dir_override, exist_ok=True)
     except Exception:
-        _model_manager.prompt_cache_dir_override = None
-
-    # Load model
-    if _model_manager is None:
-        _model_manager = GGUFModelManager()
+        mgr.prompt_cache_dir_override = None
 
     try:
-        llm = _model_manager.load_model(
+        llm = mgr.load_model(
             model_path=model_path,
             mmproj_path=mmproj_path,
             n_ctx=int(n_ctx),
             n_gpu_layers=int(n_gpu_layers),
-            verbose=False,
+            verbose=True,
         )
     except Exception:
         return ""
 
     # Best-effort prompt/KV cache
     try:
-        _model_manager.configure_prompt_cache(
+        mgr.configure_prompt_cache(
             llm,
             model_path=model_path,
             mmproj_path=mmproj_path,
@@ -2664,24 +2791,61 @@ def _chat_one_turn(
             entry = _MEM_KV_STATE.get(session_id)
             if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
                 try:
-                    llm.load_state(entry.get("state"))
-                    if log_level != "minimal":
-                        print("[LLM Dialogue Cycle] KV state: HIT (memory)")
+                    _state_payload = entry.get("state")
+                    _saved_size = _saved_llama_state_size(_state_payload)
+                    _current_size = _current_llama_state_size(llm)
+                    _skip_load = (
+                        _saved_size is not None
+                        and _current_size is not None
+                        and _saved_size != _current_size
+                    )
+                    if _skip_load:
+                        _clear_kv_state_for_session(session_id)
+                        if log_level != "minimal":
+                            print("[LLM Dialogue Cycle] KV state: INVALIDATED (incompatible state size)")
+                        if log_level == "debug":
+                            print(
+                                "[LLM Dialogue Cycle] KV precheck mismatch: "
+                                f"session_id={session_id}, sig={_kv_sig[:12]}, "
+                                f"saved_size={_saved_size}, current_size={_current_size}, "
+                                f"model={os.path.basename(model_path)}"
+                            )
+                    else:
+                        if log_level == "debug":
+                            print(
+                                "[LLM Dialogue Cycle] KV load attempt: "
+                                f"session_id={session_id}, sig={_kv_sig[:12]}, "
+                                f"{_kv_state_debug_info(_state_payload)}, "
+                                f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
+                            )
+                        llm.load_state(_state_payload)
+                        if log_level != "minimal":
+                            print("[LLM Dialogue Cycle] KV state: HIT (memory)")
                 except Exception as e:
                     _clear_kv_state_for_session(session_id)
                     if _is_state_data_mismatch_error(e):
                         try:
-                            _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                            mgr.invalidate_prompt_cache(llm, remove_disk_data=True)
                         except Exception:
                             pass
                     if log_level != "minimal":
-                        print("[LLM Dialogue Cycle] KV state: INVALIDATED (load failed)")
+                        print(f"[LLM Dialogue Cycle] KV state: INVALIDATED (load failed: {e})")
                     if log_level == "debug":
-                        print(f"[LLM Dialogue Cycle] KV state load failed: {e}")
+                        print(
+                            "[LLM Dialogue Cycle] KV load context: "
+                            f"session_id={session_id}, sig={_kv_sig[:12]}, "
+                            f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
+                        )
             else:
                 if log_level != "minimal":
                     reason = "no state" if not entry else "prefix changed"
                     print(f"[LLM Dialogue Cycle] KV state: MISS ({reason})")
+                if log_level == "debug" and entry:
+                    print(
+                        "[LLM Dialogue Cycle] KV miss details: "
+                        f"session_id={session_id}, stored_sig={str(entry.get('signature', ''))[:12]}, "
+                        f"current_sig={_kv_sig[:12]}, { _kv_state_debug_info(entry.get('state')) }"
+                    )
         except Exception as e:
             if log_level == "debug":
                 print(f"[LLM Dialogue Cycle] KV state: DISABLED ({e})")
@@ -2689,6 +2853,9 @@ def _chat_one_turn(
     # Generate with dynamic fallback on n_ctx overflow (same pattern)
     assistant_text = ""
     gen_tokens = int(max_tokens)
+    # Reserve a generation margin up front to reduce n_ctx overflow retries.
+    if bool(dynamic_max_tokens):
+        gen_tokens = max(1, gen_tokens - max(0, int(safety_margin_tokens)))
     turns_limit = int(max_turns) if max_turns is not None else None
 
     def _is_ctx_error(err: Exception) -> bool:
@@ -2706,17 +2873,6 @@ def _chat_one_turn(
                 "top_p": float(top_p),
                 "max_tokens": int(gen_tokens),
             }
-            if _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-                try:
-                    _kwargs["top_k"] = 20
-                    _kwargs["min_p"] = 0.0
-                    _kwargs["presence_penalty"] = 1.5
-                    _kwargs["n_batch"] = 1024
-                    _kwargs["n_ubatch"] = 8192
-                    _kwargs["enable_thinking"] = False
-                    _kwargs["reasoning_budget"] = 0
-                except Exception:
-                    pass
             if repeat_last_n and int(repeat_last_n) > 0:
                 _kwargs["repeat_last_n"] = int(repeat_last_n)
             if repeat_penalty and float(repeat_penalty) != 1.0:
@@ -2732,15 +2888,6 @@ def _chat_one_turn(
                         _kwargs.pop("repeat_last_n", None)
                         _kwargs.pop("repeat_penalty", None)
                         _kwargs.pop("top_p", None)
-                        # 追加（Qwen3.5 対策）
-                        if _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-                            _kwargs.pop("top_k", None)
-                            _kwargs.pop("min_p", None)
-                            _kwargs.pop("presence_penalty", None)
-                            _kwargs.pop("n_batch", None)
-                            _kwargs.pop("n_ubatch", None)
-                            _kwargs.pop("enable_thinking", None)
-                            _kwargs.pop("reasoning_budget", None)
                         stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
                     for chunk in stream_iter:
                         token = _extract_stream_content(chunk)
@@ -2760,25 +2907,19 @@ def _chat_one_turn(
                         _kwargs.pop("repeat_last_n", None)
                         _kwargs.pop("repeat_penalty", None)
                         _kwargs.pop("top_p", None)
-                        # 追加（Qwen3.5 対策）
-                        if _model_manager.chat_handler.__class__.__name__ == "Qwen35ChatHandler":
-                            _kwargs.pop("top_k", None)
-                            _kwargs.pop("min_p", None)
-                            _kwargs.pop("presence_penalty", None)
-                            _kwargs.pop("image_min_tokens", None)
-                            _kwargs.pop("chat_template_kwargs", None)
-                            _kwargs.pop("reasoning_budget", None)                        
                         resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
 
                     assistant_text = (resp["choices"][0]["message"]["content"] or "").strip()
             break
         except Exception as e:
+            if log_level == "debug":
+                traceback.print_exc()
             last_err = e
             if _is_state_data_mismatch_error(e) and not state_cache_recovered:
                 state_cache_recovered = True
                 _clear_kv_state_for_session(session_id)
                 try:
-                    _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                    mgr.invalidate_prompt_cache(llm, remove_disk_data=True)
                 except Exception:
                     pass
                 if log_level != "minimal":
@@ -2820,6 +2961,7 @@ def _chat_one_turn(
                 continue
             return ""
 
+    assistant_text = _strip_reasoning_output(assistant_text)
     if not assistant_text:
         if log_level == "debug":
             print(f"[LLM Dialogue Cycle] generation failed: {last_err}")
@@ -2905,9 +3047,14 @@ def _chat_one_turn(
                     "turns": _turns_ctx2,
                 }, ensure_ascii=False, sort_keys=True)
                 _sig2 = hashlib.sha256(_kv_prefix_material2.encode("utf-8")).hexdigest()
-                _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": llm.save_state()}
+                _saved_state = llm.save_state()
+                _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": _saved_state}
                 if log_level != "minimal":
-                    print("[LLM Dialogue Cycle] KV state: SAVED (memory)")
+                    print(
+                        "[LLM Dialogue Cycle] KV state: SAVED (memory) "
+                        f"session_id={session_id}, sig={_sig2[:12]}, "
+                        f"{_kv_state_debug_info(_saved_state)}"
+                    )
             else:
                 if log_level != "minimal":
                     print("[LLM Dialogue Cycle] KV state: UNSUPPORTED (no save_state)")
@@ -3044,89 +3191,114 @@ class LLMDialogueCycleNode:
         lastA = ""
         lastB = ""
         transcript_lines: List[str] = []
+        managerA = GGUFModelManager()
+        managerB = GGUFModelManager()
+        kv_memory_enabled = (kv_state_mode or "off").lower() == "memory"
 
-        first = initial_user_text or ""
-        line0 = f"[{_now_iso_jst()}] USER → A: {first}"
-        _append_transcript_lines(tpath, [line0])
-        transcript_lines.append(line0)
+        try:
+            first = initial_user_text or ""
+            line0 = f"[{_now_iso_jst()}] USER → A: {first}"
+            _append_transcript_lines(tpath, [line0])
+            transcript_lines.append(line0)
 
-        msg = first
-        for _ in range(int(max(1, cycles))):
-            # A turn
-            sysA = (system_prompt_A or "").strip() or (system_prompt or "")
-            lastA = _chat_one_turn(
-                user_text=msg,
-                session_id=sidA,
-                model=modelA,
-                mmproj=mmprojA,
-                system_prompt=sysA,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                n_gpu_layers=n_gpu_layers,
-                n_ctx=n_ctx,
-                max_turns=max_turns,
-                summarize_old_history=summarize_old_history,
-                summary_chunk_turns=summary_chunk_turns,
-                max_tokens_summary=max_tokens_summary,
-                summary_max_chars=summary_max_chars,
-                dynamic_max_tokens=dynamic_max_tokens,
-                min_generation_tokens=min_generation_tokens,
-                safety_margin_tokens=safety_margin_tokens,
-                prompt_cache_mode=prompt_cache_mode,
-                repeat_penalty=repeat_penalty,
-                repeat_last_n=repeat_last_n,
-                rewrite_continue=rewrite_continue,
-                kv_state_mode=kv_state_mode,
-                log_level=log_level,
-                suppress_backend_logs=suppress_backend_logs,
-                history_dir=history_dir,
-                reset_session=reset,
-                stream_to_console=bool(stream_to_console),
-            )
-            lineA = f"[{_now_iso_jst()}] A: {lastA}"
-            _append_transcript_lines(tpath, [lineA])
-            transcript_lines.append(lineA)
-            msg = lastA or ""
-            reset_for_b = reset
-            reset = False  # reset only on first cycle
+            msg = first
+            for _ in range(int(max(1, cycles))):
+                # A turn
+                sysA = (system_prompt_A or "").strip() or (system_prompt or "")
+                lastA = _chat_one_turn(
+                    user_text=msg,
+                    session_id=sidA,
+                    model=modelA,
+                    mmproj=mmprojA,
+                    system_prompt=sysA,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    n_gpu_layers=n_gpu_layers,
+                    n_ctx=n_ctx,
+                    max_turns=max_turns,
+                    summarize_old_history=summarize_old_history,
+                    summary_chunk_turns=summary_chunk_turns,
+                    max_tokens_summary=max_tokens_summary,
+                    summary_max_chars=summary_max_chars,
+                    dynamic_max_tokens=dynamic_max_tokens,
+                    min_generation_tokens=min_generation_tokens,
+                    safety_margin_tokens=safety_margin_tokens,
+                    prompt_cache_mode=prompt_cache_mode,
+                    repeat_penalty=repeat_penalty,
+                    repeat_last_n=repeat_last_n,
+                    rewrite_continue=rewrite_continue,
+                    kv_state_mode=kv_state_mode,
+                    log_level=log_level,
+                    suppress_backend_logs=suppress_backend_logs,
+                    history_dir=history_dir,
+                    reset_session=reset,
+                    stream_to_console=bool(stream_to_console),
+                    model_manager=managerA,
+                )
+                lineA = f"[{_now_iso_jst()}] A: {lastA}"
+                _append_transcript_lines(tpath, [lineA])
+                transcript_lines.append(lineA)
+                msg = lastA or ""
+                if not kv_memory_enabled:
+                    try:
+                        managerA.unload_model()
+                    except Exception:
+                        pass
+                reset_for_b = reset
+                reset = False  # reset only on first cycle
 
-            # B turn
-            sysB = (system_prompt_B or "").strip() or (system_prompt or "")
-            lastB = _chat_one_turn(
-                user_text=msg,
-                session_id=sidB,
-                model=modelB,
-                mmproj=mmprojB,
-                system_prompt=sysB,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                n_gpu_layers=n_gpu_layers,
-                n_ctx=n_ctx,
-                max_turns=max_turns,
-                summarize_old_history=summarize_old_history,
-                summary_chunk_turns=summary_chunk_turns,
-                max_tokens_summary=max_tokens_summary,
-                summary_max_chars=summary_max_chars,
-                dynamic_max_tokens=dynamic_max_tokens,
-                min_generation_tokens=min_generation_tokens,
-                safety_margin_tokens=safety_margin_tokens,
-                prompt_cache_mode=prompt_cache_mode,
-                repeat_penalty=repeat_penalty,
-                repeat_last_n=repeat_last_n,
-                rewrite_continue=rewrite_continue,
-                kv_state_mode=kv_state_mode,
-                log_level=log_level,
-                suppress_backend_logs=suppress_backend_logs,
-                history_dir=history_dir,
-                reset_session=reset_for_b,
-                stream_to_console=bool(stream_to_console),
-            )
-            lineB = f"[{_now_iso_jst()}] B: {lastB}"
-            _append_transcript_lines(tpath, [lineB])
-            transcript_lines.append(lineB)
-            msg = lastB or ""
+                # B turn
+                sysB = (system_prompt_B or "").strip() or (system_prompt or "")
+                lastB = _chat_one_turn(
+                    user_text=msg,
+                    session_id=sidB,
+                    model=modelB,
+                    mmproj=mmprojB,
+                    system_prompt=sysB,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    n_gpu_layers=n_gpu_layers,
+                    n_ctx=n_ctx,
+                    max_turns=max_turns,
+                    summarize_old_history=summarize_old_history,
+                    summary_chunk_turns=summary_chunk_turns,
+                    max_tokens_summary=max_tokens_summary,
+                    summary_max_chars=summary_max_chars,
+                    dynamic_max_tokens=dynamic_max_tokens,
+                    min_generation_tokens=min_generation_tokens,
+                    safety_margin_tokens=safety_margin_tokens,
+                    prompt_cache_mode=prompt_cache_mode,
+                    repeat_penalty=repeat_penalty,
+                    repeat_last_n=repeat_last_n,
+                    rewrite_continue=rewrite_continue,
+                    kv_state_mode=kv_state_mode,
+                    log_level=log_level,
+                    suppress_backend_logs=suppress_backend_logs,
+                    history_dir=history_dir,
+                    reset_session=reset_for_b,
+                    stream_to_console=bool(stream_to_console),
+                    model_manager=managerB,
+                )
+                lineB = f"[{_now_iso_jst()}] B: {lastB}"
+                _append_transcript_lines(tpath, [lineB])
+                transcript_lines.append(lineB)
+                msg = lastB or ""
+                if not kv_memory_enabled:
+                    try:
+                        managerB.unload_model()
+                    except Exception:
+                        pass
+        finally:
+            try:
+                managerA.unload_model()
+            except Exception:
+                pass
+            try:
+                managerB.unload_model()
+            except Exception:
+                pass
 
         return ("\n".join(transcript_lines),)
 
