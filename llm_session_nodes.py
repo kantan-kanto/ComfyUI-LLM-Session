@@ -51,8 +51,8 @@ _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
     "dynamic_max_tokens": True,
     "min_generation_tokens": 96,
     "safety_margin_tokens": 64,
-    "prompt_cache_mode": "disk",
-    "kv_state_mode": "memory",
+    "persistent_cache": "LlamaDiskCache",
+    "runtime_cache": "LlamaTrieCache",
     "log_level": "timing",
     "suppress_backend_logs": True,
     "repeat_penalty": 1.12,
@@ -144,13 +144,13 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["repeat_penalty"] = min(2.0, max(1.0, _as_float(defaults.get("repeat_penalty"), 1.12)))
 
     # Enums / strings
-    defaults["prompt_cache_mode"] = str(defaults.get("prompt_cache_mode", "disk")).lower()
-    if defaults["prompt_cache_mode"] not in ("disk", "memory", "off"):
-        defaults["prompt_cache_mode"] = _SIMPLE_DEFAULTS_BUILTIN["prompt_cache_mode"]
+    defaults["persistent_cache"] = str(defaults.get("persistent_cache", "LlamaDiskCache"))
+    if defaults["persistent_cache"] not in ("LlamaDiskCache", "off"):
+        defaults["persistent_cache"] = _SIMPLE_DEFAULTS_BUILTIN["persistent_cache"]
 
-    defaults["kv_state_mode"] = str(defaults.get("kv_state_mode", "memory")).lower()
-    if defaults["kv_state_mode"] not in ("memory", "off"):
-        defaults["kv_state_mode"] = _SIMPLE_DEFAULTS_BUILTIN["kv_state_mode"]
+    defaults["runtime_cache"] = str(defaults.get("runtime_cache", "LlamaTrieCache"))
+    if defaults["runtime_cache"] not in ("KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"):
+        defaults["runtime_cache"] = _SIMPLE_DEFAULTS_BUILTIN["runtime_cache"]
 
     defaults["log_level"] = str(defaults.get("log_level", "timing")).lower()
     if defaults["log_level"] not in ("minimal", "timing", "debug"):
@@ -1073,6 +1073,48 @@ def maybe_summarize_history(model: "Llama",
     return history
 
 
+class _LayeredCache:
+    """
+    Two-level cache wrapper.
+    - primary: fast cache (RAM/Trie)
+    - secondary: persistent cache (Disk)
+    """
+
+    def __init__(self, primary: Any, secondary: Any):
+        self.primary = primary
+        self.secondary = secondary
+
+    def __contains__(self, key: Any) -> bool:
+        try:
+            if key in self.primary:
+                return True
+        except Exception:
+            pass
+        try:
+            return key in self.secondary
+        except Exception:
+            return False
+
+    def __getitem__(self, key: Any) -> Any:
+        try:
+            if key in self.primary:
+                return self.primary[key]
+        except Exception:
+            pass
+        value = self.secondary[key]
+        # Read-through: populate primary on secondary hit.
+        try:
+            self.primary[key] = value
+        except Exception:
+            pass
+        return value
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        # Write-through to both levels.
+        self.primary[key] = value
+        self.secondary[key] = value
+
+
 class GGUFModelManager:
 
     def __init__(self):
@@ -1085,8 +1127,8 @@ class GGUFModelManager:
         self.current_model_path: Optional[str] = None
         self.current_mmproj_path: Optional[str] = None
 
-        # Optional override for where prompt cache should be stored
-        self.prompt_cache_dir_override: Optional[str] = None
+        # Optional override for where cache should be stored
+        self.cache_dir_override: Optional[str] = None
 
     def _normalize_path(self, p: Optional[str]) -> Optional[str]:
         if p is None:
@@ -1185,7 +1227,7 @@ class GGUFModelManager:
         mmproj_path: Optional[str] = None,
         n_ctx: int = 4096,
         n_gpu_layers: int = 0,
-        verbose: bool = True,
+        verbose: bool = False,
     ) -> Llama:
         """Load GGUF model."""
         if not LLAMA_CPP_AVAILABLE:
@@ -1317,12 +1359,12 @@ class GGUFModelManager:
             pass
         return f"llama_cpp_py={pkg_ver}|llama_cpp_backend={backend_ver}"
 
-    def _default_prompt_cache_dir(self, model_path: str, mmproj_path: str, n_ctx: int, n_gpu_layers: int = 0) -> str:
+    def _default_cache_dir(self, model_path: str, mmproj_path: str, n_ctx: int, n_gpu_layers: int = 0) -> str:
         """
-        Compute a stable cache directory for prompt/KV cache.
+        Compute a stable cache directory for cache data.
         We key by model+mmproj+n_ctx so caches are not mixed across incompatible settings.
         """
-        base = (self.prompt_cache_dir_override or os.path.join(_safe_output_dir(), "llm_session_sessions", "prompt_cache"))
+        base = (self.cache_dir_override or os.path.join(_safe_output_dir(), "llm_session_sessions", "cache"))
         os.makedirs(base, exist_ok=True)
         key_src = (
             f"{os.path.abspath(model_path)}|{os.path.abspath(mmproj_path or '')}|"
@@ -1335,79 +1377,101 @@ class GGUFModelManager:
         os.makedirs(cache_dir, exist_ok=True)
         return cache_dir
 
-    def configure_prompt_cache(
+    def configure_cache(
         self,
         llm,
         model_path: str,
         mmproj_path: str,
         n_ctx: int,
         n_gpu_layers: int = 0,
-        cache_mode: str = "disk",
+        persistent_cache: str = "LlamaDiskCache",
+        runtime_cache: str = "LlamaTrieCache",
     ) -> None:
         """
-        Enable llama-cpp-python prompt/KV caching when supported.
+        Configure cache backends.
+        - persistent_cache: LlamaDiskCache / off
+        - runtime_cache: KV_cache / LlamaRAMCache / LlamaTrieCache / off
 
-        - "disk": persistent cache under output/.../prompt_cache/<hash>/
-        - "memory": in-memory cache (if supported)
-        - "off": disable (best effort)
+        Note:
+        - KV_cache is handled separately by save_state/load_state logic.
+        - cache object attached to llm is composed from runtime/persistent backends.
         """
-        cache_mode = (cache_mode or "disk").lower()
+        persistent_cache = str(persistent_cache or "off")
+        runtime_cache = str(runtime_cache or "off")
         try:
             # llama-cpp-python provides cache helpers in many versions (names vary).
             import llama_cpp
         except Exception as e:
-            if cache_mode != "off":
-                print(f"[GGUFModelManager] Prompt cache requested but llama_cpp import failed: {e}")
+            if persistent_cache != "off" or runtime_cache not in ("off", "KV_cache"):
+                print(f"[GGUFModelManager] Cache requested but llama_cpp import failed: {e}")
             return
 
         # Determine desired cache object
-        cache_obj = None
-        cache_desc = None
+        cache_obj: Any = None
+        cache_desc = "off"
+        disk_dir: Optional[str] = None
         try:
-            if cache_mode == "off":
-                # Best-effort disable: set cache to None if setter exists
-                if hasattr(llm, "set_cache"):
-                    llm.set_cache(None)
-                self._current_cache_info = None
-                print("[GGUFModelManager] Prompt cache: OFF")
-                return
-
-            if cache_mode == "disk":
-                cache_dir = self._default_prompt_cache_dir(model_path, mmproj_path, n_ctx, n_gpu_layers=n_gpu_layers)
-                # Common class names across versions
-                if hasattr(llama_cpp, "LlamaDiskCache"):
-                    cache_obj = llama_cpp.LlamaDiskCache(cache_dir)
-                    cache_desc = f"disk:{cache_dir}"
-                elif hasattr(llama_cpp, "LlamaCache"):
-                    # Some versions use LlamaCache(directory=...)
-                    try:
-                        cache_obj = llama_cpp.LlamaCache(cache_dir)
-                        cache_desc = f"disk:{cache_dir}"
-                    except Exception:
-                        cache_obj = None
-                elif hasattr(llama_cpp, "DiskCache"):
-                    cache_obj = llama_cpp.DiskCache(cache_dir)
-                    cache_desc = f"disk:{cache_dir}"
-                else:
-                    # No known disk cache class
-                    cache_obj = None
-
-            if cache_mode == "memory" and cache_obj is None:
+            runtime_obj = None
+            runtime_desc = "off"
+            if runtime_cache == "LlamaRAMCache":
                 if hasattr(llama_cpp, "LlamaRAMCache"):
-                    cache_obj = llama_cpp.LlamaRAMCache()
-                    cache_desc = "memory"
+                    runtime_obj = llama_cpp.LlamaRAMCache()
+                    runtime_desc = "LlamaRAMCache"
+                elif hasattr(llama_cpp, "RAMCache"):
+                    runtime_obj = llama_cpp.RAMCache()
+                    runtime_desc = "RAMCache"
+                else:
+                    print("[GGUFModelManager] Runtime cache requested but RAM cache class is unavailable")
+            elif runtime_cache == "LlamaTrieCache":
+                if hasattr(llama_cpp, "LlamaTrieCache"):
+                    runtime_obj = llama_cpp.LlamaTrieCache()
+                    runtime_desc = "LlamaTrieCache"
+                else:
+                    print("[GGUFModelManager] Runtime cache requested but LlamaTrieCache is unavailable")
+
+            persistent_obj = None
+            persistent_desc = "off"
+            if persistent_cache == "LlamaDiskCache":
+                cache_dir = self._default_cache_dir(model_path, mmproj_path, n_ctx, n_gpu_layers=n_gpu_layers)
+                disk_dir = cache_dir
+                if hasattr(llama_cpp, "LlamaDiskCache"):
+                    persistent_obj = llama_cpp.LlamaDiskCache(cache_dir)
+                    persistent_desc = f"LlamaDiskCache:{cache_dir}"
+                elif hasattr(llama_cpp, "DiskCache"):
+                    persistent_obj = llama_cpp.DiskCache(cache_dir)
+                    persistent_desc = f"DiskCache:{cache_dir}"
                 elif hasattr(llama_cpp, "LlamaCache"):
                     try:
-                        cache_obj = llama_cpp.LlamaCache()
-                        cache_desc = "memory"
+                        persistent_obj = llama_cpp.LlamaCache(cache_dir)
+                        persistent_desc = f"LlamaCache:{cache_dir}"
                     except Exception:
-                        cache_obj = None
-                elif hasattr(llama_cpp, "RAMCache"):
-                    cache_obj = llama_cpp.RAMCache()
-                    cache_desc = "memory"
+                        persistent_obj = None
+                if persistent_obj is None:
+                    print("[GGUFModelManager] Persistent cache requested but disk cache class is unavailable")
+
+            if runtime_obj is not None and persistent_obj is not None:
+                cache_obj = _LayeredCache(runtime_obj, persistent_obj)
+                cache_desc = f"runtime={runtime_desc};persistent={persistent_desc}"
+            elif runtime_obj is not None:
+                cache_obj = runtime_obj
+                cache_desc = f"runtime={runtime_desc}"
+            elif persistent_obj is not None:
+                cache_obj = persistent_obj
+                cache_desc = f"persistent={persistent_desc}"
+            else:
+                cache_obj = None
 
             if cache_obj is None:
-                print(f"[GGUFModelManager] Prompt cache: not supported by this llama-cpp-python build (mode={cache_mode})")
+                # Disable cache when no cache backend is selected/available.
+                try:
+                    if hasattr(llm, "set_cache"):
+                        llm.set_cache(None)
+                    elif hasattr(llm, "cache"):
+                        llm.cache = None
+                except Exception:
+                    pass
+                self._current_cache_info = None
+                print("[GGUFModelManager] Cache: OFF")
                 return
 
             # Apply cache to model (different versions expose different APIs)
@@ -1425,18 +1489,32 @@ class GGUFModelManager:
 
             if applied:
                 self._current_cache_info = {
-                    "mode": cache_mode,
+                    "persistent_cache": persistent_cache,
+                    "runtime_cache": runtime_cache,
                     "desc": cache_desc,
+                    "disk_dir": disk_dir,
                 }
-                print(f"[GGUFModelManager] Prompt cache enabled: {cache_desc}")
+                print(f"[GGUFModelManager] Cache enabled: {cache_desc}")
             else:
-                print(f"[GGUFModelManager] Prompt cache object created but could not be applied (mode={cache_mode})")
+                print("[GGUFModelManager] Cache object created but could not be applied")
         except Exception as e:
-            print(f"[GGUFModelManager] Prompt cache setup failed (mode={cache_mode}): {e}")
+            print(
+                "[GGUFModelManager] Cache setup failed "
+                f"(persistent={persistent_cache}, runtime={runtime_cache}): {e}"
+            )
+            # Fail closed: detach possibly stale cache object after setup failure.
+            try:
+                if hasattr(llm, "set_cache"):
+                    llm.set_cache(None)
+                elif hasattr(llm, "cache"):
+                    llm.cache = None
+            except Exception:
+                pass
+            self._current_cache_info = None
 
-    def invalidate_prompt_cache(self, llm, remove_disk_data: bool = False) -> None:
+    def invalidate_cache(self, llm, remove_disk_data: bool = False) -> None:
         """
-        Best-effort invalidation for prompt cache after state mismatch.
+        Best-effort invalidation for cache after state mismatch.
         - Detach cache from model
         - Optionally remove disk cache directory
         """
@@ -1450,8 +1528,10 @@ class GGUFModelManager:
         except Exception:
             pass
 
-        if remove_disk_data and desc.startswith("disk:"):
+        disk_dir = str(info.get("disk_dir", "") or "")
+        if remove_disk_data and not disk_dir and desc.startswith("disk:"):
             disk_dir = desc[len("disk:"):].strip()
+        if remove_disk_data and disk_dir:
             if disk_dir:
                 try:
                     shutil.rmtree(disk_dir, ignore_errors=True)
@@ -1494,7 +1574,13 @@ _MEM_KV_STATE = {}
 
 def _is_state_data_mismatch_error(err: Exception) -> bool:
     s = str(err or "")
-    return "Failed to set llama state data" in s
+    if "Failed to set llama state data" in s:
+        return True
+    if "'NoneType' object has no attribute 'input_ids'" in s:
+        return True
+    if "cache_item.input_ids" in s and "NoneType" in s:
+        return True
+    return False
 
 
 def _clear_kv_state_for_session(session_id: str) -> None:
@@ -1504,12 +1590,12 @@ def _clear_kv_state_for_session(session_id: str) -> None:
         pass
 
 
-def _clear_prompt_cache_under_history_file(history_file_path: str) -> None:
+def _clear_cache_under_history_file(history_file_path: str) -> None:
     """
-    Remove and recreate prompt cache root under the same base as history files.
+    Remove and recreate cache root under the same base as history files.
     """
     try:
-        cache_root = os.path.join(os.path.dirname(history_file_path), "prompt_cache")
+        cache_root = os.path.join(os.path.dirname(history_file_path), "cache")
         shutil.rmtree(cache_root, ignore_errors=True)
         os.makedirs(cache_root, exist_ok=True)
     except Exception:
@@ -1660,11 +1746,11 @@ class LLMSessionChatSimpleNode:
             dynamic_max_tokens=bool(defaults["dynamic_max_tokens"]),
             min_generation_tokens=int(defaults["min_generation_tokens"]),
             safety_margin_tokens=int(defaults["safety_margin_tokens"]),
-            prompt_cache_mode=str(defaults["prompt_cache_mode"]),
+            persistent_cache=str(defaults["persistent_cache"]),
             repeat_penalty=float(defaults["repeat_penalty"]),
             repeat_last_n=int(defaults["repeat_last_n"]),
             rewrite_continue=bool(defaults["rewrite_continue"]),
-            kv_state_mode=str(defaults["kv_state_mode"]),
+            runtime_cache=str(defaults["runtime_cache"]),
             log_level=str(defaults["log_level"]),
             suppress_backend_logs=bool(defaults["suppress_backend_logs"]),
             history_dir=history_dir or "",
@@ -1816,8 +1902,8 @@ class LLMDialogueCycleSimpleNode:
         safety_margin_tokens = int(defaults.get("safety_margin_tokens") or 64)
 
         # Cache + repetition controls
-        prompt_cache_mode = str(defaults.get("prompt_cache_mode") or "disk")
-        kv_state_mode = str(defaults.get("kv_state_mode") or "memory")
+        persistent_cache = str(defaults.get("persistent_cache") or "LlamaDiskCache")
+        runtime_cache = str(defaults.get("runtime_cache") or "LlamaTrieCache")
         repeat_penalty = float(defaults.get("repeat_penalty") or 1.12)
         repeat_last_n = int(defaults.get("repeat_last_n") or 256)
         rewrite_continue = bool(defaults.get("rewrite_continue") if "rewrite_continue" in defaults else True)
@@ -1857,8 +1943,8 @@ class LLMDialogueCycleSimpleNode:
             dynamic_max_tokens=bool(dynamic_max_tokens),
             min_generation_tokens=int(min_generation_tokens),
             safety_margin_tokens=int(safety_margin_tokens),
-            prompt_cache_mode=prompt_cache_mode,
-            kv_state_mode=kv_state_mode,
+            persistent_cache=persistent_cache,
+            runtime_cache=runtime_cache,
             repeat_penalty=float(repeat_penalty),
             repeat_last_n=int(repeat_last_n),
             rewrite_continue=bool(rewrite_continue),
@@ -1960,13 +2046,13 @@ class LLMSessionChatNode:
                 "image": ("IMAGE", {
                     "tooltip": "Optional image input for this turn only (never saved to history)"
                 }),
-                "prompt_cache_mode": (["disk", "memory", "off"], {
-                    "default": "disk",
-                    "tooltip": "Enable llama.cpp prompt/KV caching to speed up repeated prefixes (best effort). 'disk' persists under output/llm_session_sessions/prompt_cache/."
+                "persistent_cache": (["LlamaDiskCache", "off"], {
+                    "default": "LlamaDiskCache",
+                    "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under output/llm_session_sessions/cache/."
                 }),
-                "kv_state_mode": (["memory", "off"], {
-                    "default": "memory",
-                    "tooltip": "Enable in-memory llama-cpp-python save_state/load_state cache per session."
+                "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {
+                    "default": "LlamaTrieCache",
+                    "tooltip": "Runtime cache backend. KV_cache uses save_state/load_state, RAM/Trie use llama.cpp cache in memory."
                 }),
                 "log_level": (["minimal", "timing", "debug"], {
                     "default": "timing",
@@ -2079,11 +2165,11 @@ class LLMSessionChatNode:
              dynamic_max_tokens: bool = True,
              min_generation_tokens: int = 96,
              safety_margin_tokens: int = 64,
-             prompt_cache_mode: str = "disk",
+             persistent_cache: str = "LlamaDiskCache",
              repeat_penalty: float = 1.12,
              repeat_last_n: int = 256,
              rewrite_continue: bool = True,
-             kv_state_mode: str = "memory",
+             runtime_cache: str = "LlamaTrieCache",
              log_level: str = "timing",
              suppress_backend_logs: bool = True,
              history_dir: str = "",
@@ -2143,7 +2229,13 @@ class LLMSessionChatNode:
         )
         if bool(reset_session):
             _clear_kv_state_for_session(session_id)
-            _clear_prompt_cache_under_history_file(hist_path)
+            _clear_cache_under_history_file(hist_path)
+            # Also detach runtime cache from already loaded model if present.
+            try:
+                if _model_manager is not None and getattr(_model_manager, "model", None) is not None:
+                    _model_manager.invalidate_cache(_model_manager.model, remove_disk_data=False)
+            except Exception:
+                pass
 
         # Continue rewrite with language detection (improved version)
         _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
@@ -2181,12 +2273,12 @@ class LLMSessionChatNode:
                 print(f"[LLM Session Chat] Continue detected, language: {detected_lang}")
 
 
-        # Store prompt-cache under the same directory as the history file
+        # Store cache under the same directory as the history file
         try:
-            _model_manager.prompt_cache_dir_override = os.path.join(os.path.dirname(hist_path), "prompt_cache")
-            os.makedirs(_model_manager.prompt_cache_dir_override, exist_ok=True)
+            _model_manager.cache_dir_override = os.path.join(os.path.dirname(hist_path), "cache")
+            os.makedirs(_model_manager.cache_dir_override, exist_ok=True)
         except Exception:
-            _model_manager.prompt_cache_dir_override = None
+            _model_manager.cache_dir_override = None
 
         # Prepare current-turn image tensor (optional)
         img_tensor = image if image is not None else None
@@ -2201,25 +2293,26 @@ class LLMSessionChatNode:
                 mmproj_path=mmproj_path,
                 n_ctx=int(n_ctx),
                 n_gpu_layers=int(n_gpu_layers),
-                verbose=True,
+                verbose=False,
             )
         except Exception as e:
             print(f"[LLM Session Chat] Error loading model: {e}")
             _log_total("Finished (error)")
             return ("",)
 
-        # Best-effort prompt/KV cache configuration (llama-cpp-python feature; may be unsupported)
+        # Best-effort cache configuration (llama-cpp-python feature; may be unsupported)
         try:
-            _model_manager.configure_prompt_cache(
+            _model_manager.configure_cache(
                 llm,
                 model_path=model_path,
                 mmproj_path=mmproj_path,
                 n_ctx=int(n_ctx),
                 n_gpu_layers=int(n_gpu_layers),
-                cache_mode=prompt_cache_mode,
+                persistent_cache=persistent_cache,
+                runtime_cache=runtime_cache,
             )
         except Exception as e:
-            print(f"[LLM Session Chat] Prompt cache setup warning: {e}")
+            print(f"[LLM Session Chat] Cache setup warning: {e}")
 
 
         # Build messages (history summary + last turns + current turn w/ optional image)
@@ -2255,7 +2348,7 @@ class LLMSessionChatNode:
                     print(f"  [{i}] role={role} content_type={type(c)}")
 
         # In-memory KV/state cache (best-effort)
-        if (kv_state_mode or "off").lower() == "memory" and image is None:
+        if (runtime_cache or "off") == "KV_cache" and image is None:
             try:
                 _turns_ctx = (history.get("turns") or [])
                 _mt = int(max_turns) if (max_turns is not None) else None
@@ -2312,7 +2405,7 @@ class LLMSessionChatNode:
                         _clear_kv_state_for_session(session_id)
                         if _is_state_data_mismatch_error(e):
                             try:
-                                _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                                _model_manager.invalidate_cache(llm, remove_disk_data=True)
                             except Exception:
                                 pass
                         if log_level != "minimal":
@@ -2415,7 +2508,7 @@ class LLMSessionChatNode:
                     state_cache_recovered = True
                     _clear_kv_state_for_session(session_id)
                     try:
-                        _model_manager.invalidate_prompt_cache(llm, remove_disk_data=True)
+                        _model_manager.invalidate_cache(llm, remove_disk_data=True)
                     except Exception:
                         pass
                     if log_level != "minimal":
@@ -2501,8 +2594,8 @@ class LLMSessionChatNode:
         # Save only the latest execution parameters (overwrite each time)
         history.setdefault("meta", {})["last_params"] = {
             # Runtime context/load system
-            "prompt_cache_mode": (prompt_cache_mode or "off"),
-            "kv_state_mode": (kv_state_mode or "off"),
+            "persistent_cache": (persistent_cache or "off"),
+            "runtime_cache": (runtime_cache or "off"),
 
             # History control
             "max_turns": int(max_turns) if max_turns is not None else None,
@@ -2549,7 +2642,7 @@ class LLMSessionChatNode:
 
         
         # Save in-memory KV/state for next turn (best-effort)
-        if (kv_state_mode or "off").lower() == "memory" and image is None:
+        if (runtime_cache or "off") == "KV_cache" and image is None:
             try:
                 if hasattr(llm, "save_state"):
                     _turns_ctx2 = (history.get("turns") or [])
@@ -2641,11 +2734,11 @@ def _chat_one_turn(
     dynamic_max_tokens: bool = True,
     min_generation_tokens: int = 96,
     safety_margin_tokens: int = 64,
-    prompt_cache_mode: str = "disk",
+    persistent_cache: str = "LlamaDiskCache",
     repeat_penalty: float = 1.12,
     repeat_last_n: int = 256,
     rewrite_continue: bool = True,
-    kv_state_mode: str = "memory",
+    runtime_cache: str = "LlamaTrieCache",
     log_level: str = "timing",
     suppress_backend_logs: bool = True,
     history_dir: str = "",
@@ -2695,7 +2788,13 @@ def _chat_one_turn(
     )
     if bool(reset_session):
         _clear_kv_state_for_session(session_id)
-        _clear_prompt_cache_under_history_file(hist_path)
+        _clear_cache_under_history_file(hist_path)
+        # Also detach runtime cache from already loaded model if present.
+        try:
+            if mgr is not None and getattr(mgr, "model", None) is not None:
+                mgr.invalidate_cache(mgr.model, remove_disk_data=False)
+        except Exception:
+            pass
 
     # Continue rewrite (same behavior as LLMSessionChatNode)
     _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
@@ -2726,12 +2825,12 @@ def _chat_one_turn(
         if log_level == "debug":
             print(f"[LLM Dialogue Cycle] Continue detected, language: {detected_lang}")
 
-    # Store prompt-cache under the same directory as the history file
+    # Store cache under the same directory as the history file
     try:
-        mgr.prompt_cache_dir_override = os.path.join(os.path.dirname(hist_path), "prompt_cache")
-        os.makedirs(mgr.prompt_cache_dir_override, exist_ok=True)
+        mgr.cache_dir_override = os.path.join(os.path.dirname(hist_path), "cache")
+        os.makedirs(mgr.cache_dir_override, exist_ok=True)
     except Exception:
-        mgr.prompt_cache_dir_override = None
+        mgr.cache_dir_override = None
 
     try:
         llm = mgr.load_model(
@@ -2739,20 +2838,21 @@ def _chat_one_turn(
             mmproj_path=mmproj_path,
             n_ctx=int(n_ctx),
             n_gpu_layers=int(n_gpu_layers),
-            verbose=True,
+            verbose=False,
         )
     except Exception:
         return ""
 
-    # Best-effort prompt/KV cache
+    # Best-effort cache
     try:
-        mgr.configure_prompt_cache(
+        mgr.configure_cache(
             llm,
             model_path=model_path,
             mmproj_path=mmproj_path,
             n_ctx=int(n_ctx),
             n_gpu_layers=int(n_gpu_layers),
-            cache_mode=prompt_cache_mode,
+            persistent_cache=persistent_cache,
+            runtime_cache=runtime_cache,
         )
     except Exception:
         pass
@@ -2768,7 +2868,7 @@ def _chat_one_turn(
     )
 
     # In-memory KV/state cache (best-effort). This can speed up long-running sessions.
-    if (kv_state_mode or "off").lower() == "memory":
+    if (runtime_cache or "off") == "KV_cache":
         try:
             _turns_ctx = (history.get("turns") or [])
             _mt = int(max_turns) if (max_turns is not None) else None
@@ -2825,7 +2925,7 @@ def _chat_one_turn(
                     _clear_kv_state_for_session(session_id)
                     if _is_state_data_mismatch_error(e):
                         try:
-                            mgr.invalidate_prompt_cache(llm, remove_disk_data=True)
+                            mgr.invalidate_cache(llm, remove_disk_data=True)
                         except Exception:
                             pass
                     if log_level != "minimal":
@@ -2919,7 +3019,7 @@ def _chat_one_turn(
                 state_cache_recovered = True
                 _clear_kv_state_for_session(session_id)
                 try:
-                    mgr.invalidate_prompt_cache(llm, remove_disk_data=True)
+                    mgr.invalidate_cache(llm, remove_disk_data=True)
                 except Exception:
                     pass
                 if log_level != "minimal":
@@ -2984,8 +3084,8 @@ def _chat_one_turn(
         "repeat_last_n": int(repeat_last_n) if repeat_last_n is not None else None,
 
         # Runtime context/load system
-        "prompt_cache_mode": (prompt_cache_mode or "off"),
-        "kv_state_mode": (kv_state_mode or "off"),
+        "persistent_cache": (persistent_cache or "off"),
+        "runtime_cache": (runtime_cache or "off"),
 
         # History control
         "max_turns": int(max_turns) if max_turns is not None else None,
@@ -3026,7 +3126,7 @@ def _chat_one_turn(
         pass
 
     # Save in-memory KV/state for next turn (best-effort)
-    if (kv_state_mode or "off").lower() == "memory":
+    if (runtime_cache or "off") == "KV_cache":
         try:
             if hasattr(llm, "save_state"):
                 _turns_ctx2 = (history.get("turns") or [])
@@ -3118,8 +3218,8 @@ class LLMDialogueCycleNode:
                 "min_generation_tokens": ("INT", {"default": 96, "min": 1, "max": 4096}),
                 "safety_margin_tokens": ("INT", {"default": 64, "min": 0, "max": 2048}),
 
-                "prompt_cache_mode": (["disk", "memory", "off"], {"default": "disk"}),
-                "kv_state_mode": (["memory", "off"], {"default": "memory"}),
+                "persistent_cache": (["LlamaDiskCache", "off"], {"default": "LlamaDiskCache"}),
+                "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {"default": "LlamaTrieCache"}),
 
                 "repeat_penalty": ("FLOAT", {"default": 1.12, "min": 1.0, "max": 2.0, "step": 0.01}),
                 "repeat_last_n": ("INT", {"default": 256, "min": 0, "max": 4096}),
@@ -3164,8 +3264,8 @@ class LLMDialogueCycleNode:
         dynamic_max_tokens: bool = True,
         min_generation_tokens: int = 96,
         safety_margin_tokens: int = 64,
-        prompt_cache_mode: str = "disk",
-        kv_state_mode: str = "memory",
+        persistent_cache: str = "LlamaDiskCache",
+        runtime_cache: str = "LlamaTrieCache",
         repeat_penalty: float = 1.12,
         repeat_last_n: int = 256,
         rewrite_continue: bool = True,
@@ -3186,14 +3286,14 @@ class LLMDialogueCycleNode:
         if reset:
             _clear_kv_state_for_session(sidA)
             _clear_kv_state_for_session(sidB)
-            _clear_prompt_cache_under_history_file(tpath)
+            _clear_cache_under_history_file(tpath)
 
         lastA = ""
         lastB = ""
         transcript_lines: List[str] = []
         managerA = GGUFModelManager()
         managerB = GGUFModelManager()
-        kv_memory_enabled = (kv_state_mode or "off").lower() == "memory"
+        kv_memory_enabled = (runtime_cache or "off") == "KV_cache"
 
         try:
             first = initial_user_text or ""
@@ -3224,11 +3324,11 @@ class LLMDialogueCycleNode:
                     dynamic_max_tokens=dynamic_max_tokens,
                     min_generation_tokens=min_generation_tokens,
                     safety_margin_tokens=safety_margin_tokens,
-                    prompt_cache_mode=prompt_cache_mode,
+                    persistent_cache=persistent_cache,
                     repeat_penalty=repeat_penalty,
                     repeat_last_n=repeat_last_n,
                     rewrite_continue=rewrite_continue,
-                    kv_state_mode=kv_state_mode,
+                    runtime_cache=runtime_cache,
                     log_level=log_level,
                     suppress_backend_logs=suppress_backend_logs,
                     history_dir=history_dir,
@@ -3269,11 +3369,11 @@ class LLMDialogueCycleNode:
                     dynamic_max_tokens=dynamic_max_tokens,
                     min_generation_tokens=min_generation_tokens,
                     safety_margin_tokens=safety_margin_tokens,
-                    prompt_cache_mode=prompt_cache_mode,
+                    persistent_cache=persistent_cache,
                     repeat_penalty=repeat_penalty,
                     repeat_last_n=repeat_last_n,
                     rewrite_continue=rewrite_continue,
-                    kv_state_mode=kv_state_mode,
+                    runtime_cache=runtime_cache,
                     log_level=log_level,
                     suppress_backend_logs=suppress_backend_logs,
                     history_dir=history_dir,
@@ -3334,3 +3434,4 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
