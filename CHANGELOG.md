@@ -6,28 +6,28 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [1.0.3] - 2026-03-13
 
-- cache 機構の再設計による安全性とパフォーマンスの向上
-  - 従来の `prompt_cache_mode` / `kv_state_mode` を、ディスク等に保存されるpersistent_cache（永続キャッシュ）と、メモリ上で動作するruntime_cache（ランタイムキャッシュ）に明確に分離・再編しました。
-  - 高速なメモリキャッシュ（`LlamaRAMCache` / `LlamaTrieCache`）と永続的なディスクキャッシュ（`LlamaDiskCache` ）を組み合わせた階層型キャッシュ機能を導入し、read-through / write-through動作に対応しました。
-  - cache キーに `n_gpu_layers`、chat format、vision 利用状態、`llama-cpp-python` の runtime 情報を含め、キャッシュの互換性を自動で検知・無効化する仕組みを追加し、動作の安定性を大幅に高めました。
-  - `Failed to set llama state data` や `input_ids` 関連の不整合発生時に、KV state と cache を自動的に無効化して再試行する復旧処理を追加。
-  - `reset_session` 実行時に、history のみではなく、セッション単位の KV state と cache ディレクトリの両方を確実にクリアするよう改善。
-  - LLMDialogueCycleNodeの動作を、1 回の Dialogue Cycle 実行中は、KV_cache 利用時に A/B 間でモデルをアンロードしないよう改善しました。
-  - 既存の設定や workflow で `prompt_cache_mode` / `kv_state_mode` を使用している場合は、`persistent_cache` / `runtime_cache` へ読み替えが必要です。
-　- cache 保存ディレクトリは `prompt_cache/` から `cache/` へ変更されました。旧 cache はそのままでは再利用されません。
+- Improved cache architecture for better safety and performance
+  - The former `prompt_cache_mode` / `kv_state_mode` settings were clearly separated and reorganized into `persistent_cache` and `runtime_cache`.
+  - Added layered cache support that combines fast in-memory caches (`LlamaRAMCache` / `LlamaTrieCache`) with persistent disk cache (`LlamaDiskCache`), with read-through / write-through behavior.
+  - Cache keys now include `n_gpu_layers`, chat format, vision usage state, and `llama-cpp-python` runtime information, allowing incompatible caches to be detected and invalidated automatically for improved stability.
+  - Added recovery logic that automatically invalidates KV state and cache, then retries once when `Failed to set llama state data` or `input_ids`-related inconsistencies occur.
+  - Improved `reset_session` so that it clears not only history, but also per-session KV state and the cache directory.
+  - Improved `LLMDialogueCycleNode` so that, during a single Dialogue Cycle run, models are not unloaded between A/B turns when `runtime_cache` is set to `KV_cache`.
+  - If your existing settings or workflows use `prompt_cache_mode` / `kv_state_mode`, they should be updated to `persistent_cache` / `runtime_cache`.
+  - The cache storage directory has changed from `prompt_cache/` to `cache/`. Existing cache data is not reused automatically.
 
-- マルチモーダル（Vision）モデル対応の汎用化と拡張
-  - llama-cpp-pythonがサポートする多様なVisionモデル（Qwen, Llava, Moondream2, MiniCPM, Gemma3, GLM4v等）に柔軟に対応するため、チャットハンドラを動的に読み込む汎用的な仕組みを導入しました。
-  - mmproj（Visionプロジェクター）ファイルの自動検出ロジックを改善し、より多くのモデルでユーザーが手動でパスを指定する手間を削減しました。モデル名や mmproj 名が命名規則から外れている場合は、手動指定が必要になることがあります。
-  - LLM Session Chat / LLM Dialogue Cycle で、同じ vision モデル初期化・cache 適用方針を共有。
+- Generalized and expanded multimodal (Vision) model support
+  - Introduced a generic mechanism for dynamically loading chat handlers, making it easier to support a wider range of Vision models available in llama-cpp-python, including Qwen, Llava, Moondream2, MiniCPM, Gemma3, and GLM4v families.
+  - Improved mmproj (Vision projector) auto-detection to reduce the need for manual path selection on more model setups. If model or mmproj filenames do not follow the expected naming patterns, manual selection may still be required.
+  - `LLM Session Chat` and `LLM Dialogue Cycle` now share the same Vision model initialization and cache-application strategy.
 
-- 要約付き対話履歴（History）管理の堅牢化、一貫性向上
-  - 履歴 turn に連番 `id` を付与し、要約がどこまで反映済みかを `covered_until_turn_id` で追跡する方式へ変更。
-  - 旧形式の履歴 JSON を読み込んだ際に、新しい履歴スキーマへ正規化する処理を追加し、既存セッションとの互換性を改善。長期間継続している session では、要約や文脈再利用の挙動が従来と変わる場合があります。
+- More robust and consistent summarized conversation history management
+  - Added sequential `id` values to history turns and changed summarized-range tracking to use `covered_until_turn_id`.
+  - Added normalization logic that upgrades older history JSON files to the new schema, improving compatibility with existing sessions. Long-running sessions may therefore show different summarization and context reuse behavior than before.
 
-- モデルの出力品質とデバッグ機能の改善
-  - モデルが生成する思考過程のテキスト（例: <think>...</think>タグなど）を最終的な出力から自動的に除去し、よりクリーンな回答を得られるようにしました。
-  - デバッグログ(log_level: debug)を強化し、キャッシュの状態やモデルに渡されるプロンプトの内容をより詳細に追跡可能にしました。
+- Improved output quality and debugging
+  - Automatically strips reasoning text emitted by models, such as `<think>...</think>` blocks, from the final output for cleaner responses.
+  - Strengthened debug logging (`log_level: debug`) so cache state and prompt content passed to the model can be traced in more detail.
 
 ---
 ## [1.0.2] - 2026-02-13

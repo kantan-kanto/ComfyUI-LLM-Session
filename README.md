@@ -17,15 +17,15 @@ for **observation, experimentation, and analysis**.
 
 ## Upgrade Notes for Existing Users
 
-以下は、`1.0.3` へ更新する既存ユーザー向けの注意事項です。
+The following notes are intended for existing users upgrading to `1.0.3`.
 
-- cache 関連の設定名が変更されました。従来の `prompt_cache_mode` / `kv_state_mode` は、`persistent_cache` / `runtime_cache` に再編されています。
-- cache の保存先ディレクトリ名が `prompt_cache/` から `cache/` に変更されました。既存の cache は自動移行されません。
-- `reset_session` 実行時は、history だけでなくセッション単位の KV state と cache もクリアされます。
-- 履歴 JSON は旧形式でも自動正規化されますが、要約済み範囲の管理方式が変わったため、長期運用中の session では挙動差が出る可能性があります。
-- Vision モデル利用時は、mmproj の自動検出ロジックと handler 判定が変更されています。従来は動いていた組み合わせでも、backend や命名規則次第で再確認が必要です。
+- Cache-related setting names have changed. The previous `prompt_cache_mode` / `kv_state_mode` options have been reorganized into `persistent_cache` / `runtime_cache`.
+- The cache storage directory name has changed from `prompt_cache/` to `cache/`. Existing cache data is not migrated automatically.
+- Running `reset_session` now clears not only history, but also the per-session KV state and cache data.
+- Older history JSON files are normalized automatically, but the tracking model for summarized ranges has changed. Long-lived sessions may therefore behave somewhat differently from previous versions.
+- When using Vision models, both mmproj auto-detection and handler selection logic have changed. Even combinations that worked before may need to be rechecked depending on backend behavior and filename conventions.
 
-詳細は [CHANGELOG.md](CHANGELOG.md) の `1.0.3` と、Vision / backend 差異については [COMPATIBILITY.md](COMPATIBILITY.md) を参照してください。
+For details, see the `1.0.3` section in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ---
 
@@ -299,9 +299,9 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.0.2
+### Current Version: 1.0.3
 
-- Include model configuration fields in KV cache signature to prevent cross-model state reuse.
-- Add configurable console streaming support across session nodes
-- Support GGUF model discovery from extra `LLM` paths via `extra_model_paths.yaml`
-- Fix import-time failures for llama-cpp and improve registry compatibility
+- Improved cache architecture for better safety and performance
+- Generalized and expanded multimodal (Vision) model support
+- More robust and consistent summarized conversation history management
+- Improved output quality and debugging

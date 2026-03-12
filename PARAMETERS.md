@@ -75,18 +75,20 @@ Typical values:
 
 ## Cache Parameters
 
-### kv_state_mode
-Controls KV cache usage during conversation.
+### persistent_cache
+Controls persistent disk cache.
 
-- memory (recommended)
+- LlamaDiskCache (recommended)
 - off
 
 ---
 
-### prompt_cache_mode
-Controls prompt evaluation cache.
+### runtime_cache
+Controls fast in-memory caches usage during conversation.
 
-- disk (recommended)
+- KV_cache
+- LlamaRAMCache
+- LlamaTrieCache (recommended)
 - off
 
 ---

@@ -57,14 +57,14 @@ Mixtral failures occur at model load time and are likely backend-related.
 
 ## Upgrade-related Compatibility Notes
 
-以下は `1.0.3` 系更新に伴う、既存ユーザー向けの互換性上の注意事項です。
+The following notes are compatibility-related cautions for existing users upgrading to the `1.0.3` series.
 
-- Vision モデルの chat handler 判定は動的ロード方式に変更されました。対応するVisionモデルが増えています。`llama-cpp-python` 側に handler 実装が存在しない場合、その chat format は自動的に無効化されます。
-- mmproj の自動検出はモデル名と mmproj 名の別名正規化に依存します。ファイル名が想定プレフィックスから外れている場合、Auto-detect が失敗することがあります。
-- 一部 vision 系モデルは backend 依存が強く、handler が読み込めても画像入力が安定動作しない場合があります。私の環境では`Qwen3.5` のVisionが利用できていません。Textだけでも素晴らしいので、ぜひ使ってみて下さい。
-- cache 機構の構成を変更しました。"prompt_cache_mode": "LlamaDiskCache", "runtime_cache": "LlamaTrieCache"をデフォルト設定としました。既存のUI設定はそのままだとエラーがでますので、選択し直して下さい。jsonでの既存設定項目は無視されますので、項目名"prompt_cache_mode"、"runtime_cache "とそれぞれの設定値を追加記載して下さい。 なお私の環境では、最新（0.3.30+）の`llama-cpp-python`でKV_cacheが利用できなくなっています。
-- cache 互換性判定が強化されたため、旧バージョンで作成された cache や runtime 条件の異なる cache は、自動的に無効化されることがあります。これは不具合ではなく安全側の動作です。
-- `reset_session` 実行時は cache も削除されるため、更新前よりも「完全な新規セッション」に近い挙動になります。
+- Vision model chat handler detection now uses dynamic loading. Supported Vision model coverage has increased, but if the required handler implementation does not exist in your `llama-cpp-python` build, that chat format is disabled automatically.
+- mmproj auto-detection now depends on normalized aliases for both model and mmproj filenames. If filenames fall outside the expected prefix patterns, Auto-detect may fail.
+- Some Vision-family models remain highly backend-dependent. Even when the handler loads successfully, image input may still be unstable or unsupported in practice. In my environment, `Qwen3.5` Vision is not working yet, although text-only use works well.
+- The cache configuration model has changed. The new default settings are `persistent_cache = "LlamaDiskCache"` and `runtime_cache = "LlamaTrieCache"`. Existing UI settings should be reselected manually if needed. Older JSON config keys are ignored, so update your config files to use the new option names and values. In my environment, `KV_cache` no longer works with the latest `llama-cpp-python` (`0.3.30+`).
+- Cache compatibility checks are now stricter. Cache data created by older versions or under different runtime conditions may be invalidated automatically. This is expected safety behavior, not a defect.
+- `reset_session` now also clears cache data, so its behavior is closer to starting a completely fresh session than in previous versions.
 
 ---
 
