@@ -34,8 +34,7 @@ This document summarizes empirical compatibility results obtained during develop
 - Qwen3-VL (4B / 8B)
 - Qwen3.5 (9B / 27B / 35B-A3B)*
 
-**Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash` and `Phi-4` fail to load
-Nemotron-Nano、Qwen3.5のロード可否は未確認
+**Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash` and `Phi-4` fail to load. Loadability for `Nemotron-Nano` and `Qwen3.5` has not been verified.
 
 ---
 
@@ -82,7 +81,7 @@ The following notes are compatibility-related cautions for existing users upgrad
 **Recommended Installation (JamePeng fork for Qwen3-VL support):**  
 Please follow the build and installation instructions provided in the JamePeng fork repository, as this fork requires a custom build and cannot be reliably installed via a simple `pip install`.
 
-0.3.30+ (JamePeng fork)でQwen3.5に対応していますが、私の環境ではVisonの利用は成功していません。text_only_modeのみ利用できています。
+`0.3.30+` (JamePeng fork) includes support for `Qwen3.5`, but in my environment Vision mode has not worked successfully. Only text-only mode is currently usable.
 
 **Source:** https://github.com/JamePeng/llama-cpp-python
 
