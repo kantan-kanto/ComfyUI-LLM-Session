@@ -661,10 +661,72 @@ def _new_history(session_id: str, system_prompt: str, model_sig: Optional[Dict[s
         "summary": {
             "enabled": False,
             "text": "",
-            "updated_at": ""
+            "updated_at": "",
+            "covered_until_turn_id": 0,
         },
         "turns": []
     }
+
+def _normalize_history_schema(hist: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort upgrade of older history files to the current in-memory shape."""
+    hist.setdefault("meta", {})
+    hist.setdefault("system_prompt", "")
+    hist.setdefault("turns", [])
+
+    summary = hist.setdefault("summary", {})
+    summary.setdefault("enabled", False)
+    summary.setdefault("text", "")
+    summary.setdefault("updated_at", "")
+
+    turns = hist.get("turns") or []
+    normalized_turns = []
+    next_id = 1
+    max_id = 0
+    for t in turns:
+        if not isinstance(t, dict):
+            continue
+        turn = dict(t)
+        tid = _coerce_int(turn.get("id"), 0)
+        if tid <= 0:
+            tid = next_id
+        next_id = max(next_id, tid + 1)
+        max_id = max(max_id, tid)
+        turn["id"] = tid
+        normalized_turns.append(turn)
+
+    hist["turns"] = normalized_turns
+
+    covered = _coerce_int(summary.get("covered_until_turn_id"), -1)
+    if covered < 0:
+        # Old histories may already contain a rolling summary but lack the boundary marker.
+        # Preserve the existing summary text and start tracking coverage from now on.
+        covered = 0
+    summary["covered_until_turn_id"] = min(max(0, covered), max_id)
+    summary["enabled"] = bool(summary.get("enabled") or str(summary.get("text") or "").strip())
+    return hist
+
+def _next_turn_id(history: Dict[str, Any]) -> int:
+    turns = history.get("turns") or []
+    max_id = 0
+    for t in turns:
+        if isinstance(t, dict):
+            max_id = max(max_id, _coerce_int(t.get("id"), 0))
+    return max_id + 1
+
+def _get_context_turns(history: Dict[str, Any], max_turns: Optional[int] = None) -> List[Dict[str, Any]]:
+    turns = history.get("turns") or []
+    covered = _coerce_int((history.get("summary") or {}).get("covered_until_turn_id"), 0)
+    pending = [
+        t for t in turns
+        if isinstance(t, dict) and _coerce_int(t.get("id"), 0) > covered
+    ]
+    if max_turns is not None:
+        mt = max(0, _coerce_int(max_turns, 0))
+        if mt > 0:
+            pending = pending[-mt:]
+        else:
+            pending = []
+    return pending
 
 def load_history(session_id: str, history_dir: Optional[str], system_prompt: str,
                  model_sig: Optional[Dict[str, Any]] = None,
@@ -682,6 +744,7 @@ def load_history(session_id: str, history_dir: Optional[str], system_prompt: str
                 hist = json.load(f)
             if not isinstance(hist, dict) or hist.get("schema_version") != 1:
                 raise ValueError("Unsupported history schema")
+            hist = _normalize_history_schema(hist)
             # Keep last known system prompt as fallback, but prefer current input when provided
             if system_prompt:
                 hist["system_prompt"] = system_prompt
@@ -697,6 +760,7 @@ def load_history(session_id: str, history_dir: Optional[str], system_prompt: str
                     with open(bak, "r", encoding="utf-8") as f:
                         hist = json.load(f)
                     if isinstance(hist, dict) and hist.get("schema_version") == 1:
+                        hist = _normalize_history_schema(hist)
                         if system_prompt:
                             hist["system_prompt"] = system_prompt
                         if model_sig:
@@ -731,13 +795,7 @@ def build_chat_messages(history: Dict[str, Any],
     if summarize_old_history:
         summary = (history.get("summary") or {}).get("text") or ""
 
-    turns = history.get("turns") or []
-    if max_turns is not None:
-        mt = max(0, _coerce_int(max_turns, 0))
-        if mt > 0:
-            turns = turns[-mt:]
-        else:
-            turns = []
+    turns = _get_context_turns(history, max_turns=max_turns)
 
     messages: List[Dict[str, Any]] = []
     if sys or summary.strip():
@@ -968,7 +1026,9 @@ def _summarize_with_model(model: "Llama", existing_summary: str, turns_chunk: li
     msgs = _make_summary_prompt(existing_summary, turns_chunk)
     with _make_suppress_backend_logs(suppress_logs):
         resp = _create_chat_completion_robust(model, msgs, temperature=float(temperature), max_tokens=int(max_tokens))
-    return (resp["choices"][0]["message"]["content"] or "").strip()
+    raw = (resp["choices"][0]["message"]["content"] or "").strip()
+    cleaned = _strip_reasoning_output(raw).strip()
+    return cleaned or raw
 
 def maybe_compact_summary(model: "Llama",
                           history: Dict[str, Any],
@@ -998,7 +1058,8 @@ def maybe_compact_summary(model: "Llama",
     ]
     with _make_suppress_backend_logs(suppress_logs):
         resp = _create_chat_completion_robust(model, msgs, temperature=float(temperature), max_tokens=int(max_tokens_summary))
-    compact = (resp["choices"][0]["message"]["content"] or "").strip()
+    raw = (resp["choices"][0]["message"]["content"] or "").strip()
+    compact = _strip_reasoning_output(raw).strip() or raw
     history.setdefault("summary", {})
     history["summary"]["enabled"] = True
     history["summary"]["text"] = compact
@@ -1023,25 +1084,22 @@ def maybe_summarize_history(model: "Llama",
     if not summarize_old_history:
         return history
 
-    turns = history.get("turns") or []
+    pending = _get_context_turns(history, max_turns=None)
     mt = max(0, _coerce_int(max_turns, 12))
     if mt == 0:
-        # No prior turns kept; optionally keep summary only if user wants it (we leave it unchanged)
-        history["turns"] = []
         return history
 
-    if len(turns) <= mt:
+    if len(pending) <= mt:
         return history
 
     chunk = max(1, _coerce_int(summary_chunk_turns, 3))
-    overflow_n = len(turns) - mt
+    overflow_n = len(pending) - mt
     if overflow_n < chunk:
         # Not enough overflow to justify a summary generation (saves time)
         return history
 
-    # Take the oldest chunk from overflow
-    to_summarize = turns[:chunk]
-    remaining = turns[chunk:]
+    # Take the oldest chunk from the currently unsummarized window.
+    to_summarize = pending[:chunk]
 
     history.setdefault("summary", {})
     history["summary"]["enabled"] = True
@@ -1058,7 +1116,14 @@ def maybe_summarize_history(model: "Llama",
 
     history["summary"]["text"] = new_sum
     history["summary"]["updated_at"] = _now_iso_jst()
-    history["turns"] = remaining
+    last_chunk_id = 0
+    for t in to_summarize:
+        if isinstance(t, dict):
+            last_chunk_id = max(last_chunk_id, _coerce_int(t.get("id"), 0))
+    history["summary"]["covered_until_turn_id"] = max(
+        _coerce_int(history["summary"].get("covered_until_turn_id"), 0),
+        last_chunk_id,
+    )
 
     # Compact summary if it grows too large
     history = maybe_compact_summary(
@@ -2350,10 +2415,7 @@ class LLMSessionChatNode:
         # In-memory KV/state cache (best-effort)
         if (runtime_cache or "off") == "KV_cache" and image is None:
             try:
-                _turns_ctx = (history.get("turns") or [])
-                _mt = int(max_turns) if (max_turns is not None) else None
-                if _mt is not None and _mt >= 0:
-                    _turns_ctx = _turns_ctx[-_mt:] if _mt > 0 else []
+                _turns_ctx = _get_context_turns(history, max_turns=max_turns)
                 _summary_txt = ""
                 if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
                     _summary_txt = history.get("summary", {}).get("text", "") or ""
@@ -2563,6 +2625,7 @@ class LLMSessionChatNode:
 
         # Update history (do not persist image; keep image_note empty in phase 1)
         history.setdefault("turns", []).append({
+            "id": _next_turn_id(history),
             "t": _now_iso_jst(),
             "user": {
                 "text": user_text or "",
@@ -2645,10 +2708,7 @@ class LLMSessionChatNode:
         if (runtime_cache or "off") == "KV_cache" and image is None:
             try:
                 if hasattr(llm, "save_state"):
-                    _turns_ctx2 = (history.get("turns") or [])
-                    _mt2 = int(max_turns) if (max_turns is not None) else None
-                    if _mt2 is not None and _mt2 >= 0:
-                        _turns_ctx2 = _turns_ctx2[-_mt2:] if _mt2 > 0 else []
+                    _turns_ctx2 = _get_context_turns(history, max_turns=max_turns)
                     _summary_txt2 = ""
                     if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
                         _summary_txt2 = history.get("summary", {}).get("text", "") or ""
@@ -2870,10 +2930,7 @@ def _chat_one_turn(
     # In-memory KV/state cache (best-effort). This can speed up long-running sessions.
     if (runtime_cache or "off") == "KV_cache":
         try:
-            _turns_ctx = (history.get("turns") or [])
-            _mt = int(max_turns) if (max_turns is not None) else None
-            if _mt is not None and _mt >= 0:
-                _turns_ctx = _turns_ctx[-_mt:] if _mt > 0 else []
+            _turns_ctx = _get_context_turns(history, max_turns=max_turns)
             _summary_txt = ""
             if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
                 _summary_txt = history.get("summary", {}).get("text", "") or ""
@@ -3069,6 +3126,7 @@ def _chat_one_turn(
 
     # Update history
     history.setdefault("turns", []).append({
+        "id": _next_turn_id(history),
         "t": _now_iso_jst(),
         "user": {"text": user_text or "", "image_note": ""},
         "assistant": {"text": assistant_text or ""},   
@@ -3129,10 +3187,7 @@ def _chat_one_turn(
     if (runtime_cache or "off") == "KV_cache":
         try:
             if hasattr(llm, "save_state"):
-                _turns_ctx2 = (history.get("turns") or [])
-                _mt2 = int(max_turns) if (max_turns is not None) else None
-                if _mt2 is not None and _mt2 >= 0:
-                    _turns_ctx2 = _turns_ctx2[-_mt2:] if _mt2 > 0 else []
+                _turns_ctx2 = _get_context_turns(history, max_turns=max_turns)
                 _summary_txt2 = ""
                 if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
                     _summary_txt2 = history.get("summary", {}).get("text", "") or ""
