@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.0.2
+**Version:** 1.0.3
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -12,6 +12,20 @@ such as Llama, Mistral, Qwen, DeepSeek, GLM, Gemma, LLaVA and gpt-oss.
 
 In addition to user–model chat, it also supports model-to-model dialogue
 for **observation, experimentation, and analysis**.
+
+---
+
+## Upgrade Notes for Existing Users
+
+以下は、`1.0.3` へ更新する既存ユーザー向けの注意事項です。
+
+- cache 関連の設定名が変更されました。従来の `prompt_cache_mode` / `kv_state_mode` は、`persistent_cache` / `runtime_cache` に再編されています。
+- cache の保存先ディレクトリ名が `prompt_cache/` から `cache/` に変更されました。既存の cache は自動移行されません。
+- `reset_session` 実行時は、history だけでなくセッション単位の KV state と cache もクリアされます。
+- 履歴 JSON は旧形式でも自動正規化されますが、要約済み範囲の管理方式が変わったため、長期運用中の session では挙動差が出る可能性があります。
+- Vision モデル利用時は、mmproj の自動検出ロジックと handler 判定が変更されています。従来は動いていた組み合わせでも、backend や命名規則次第で再確認が必要です。
+
+詳細は [CHANGELOG.md](CHANGELOG.md) の `1.0.3` と、Vision / backend 差異については [COMPATIBILITY.md](COMPATIBILITY.md) を参照してください。
 
 ---
 
@@ -103,11 +117,11 @@ When using Vision-capable models, please follow these rules:
 - The model filename must start with one of the following prefixes and end with `.gguf`:
 
   ```
-  qwen2, qwen3, llava, llama, minicpm-v-2_6, gemma-3, glm-4
+  llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, gemma3, gemma-3, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35
   ```
 - The mmproj filename must start with `mmproj-` and end with `.gguf`.
 - If exactly one file matching
-  `mmproj-[qwen2|qwen3|llava|llama|minicpm-v-2_6|gemma-3|glm-4].gguf`
+  `mmproj-*[llava-1-5|llava15|llava-v1.5|llava-1-6|llava16|llava-v1.6|moondream2|nanollava|llama-3|llama3|minicpm-v-2.6|minicpm-v-2_6|minicpmv26|minicpm-v-4.0|minicpm-v-4_0|minicpmv40|minicpm-v-4.5|minicpm-v-4_5|minicpmv45|gemma3|gemma-3|glm4.1v|glm4_1v|glm41v|glm-4.1v|glm4.6v|glm4_6v|glm46v|glm-4.6v|granitedocling|granite-docling|lfm2-vl|lfm2vl|paddleocr|qwen2.5-vl|qwen2_5-vl|qwen25vl|qwen3-vl|qwen3vl|qwen3.5|qwen3_5|qwen35]*.gguf`
   exists in the folder, it can be selected automatically via Auto-detect.
 - Filename matching is **case-insensitive**.
 
@@ -189,23 +203,25 @@ The following GGUF instruction models have been tested.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- GLM-4.6V Flash*
+- GLM-4.6V Flash
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
 - LLaVA
 - MiniCPM-V 2.6
 - Mistral NeMo 12B Instruct
+- Nemotron-Nano
 - Phi-3 Mini Instruct
 - Phi-4*
 - Qwen2.5 Instruct (7B / 14B)
 - Qwen2.5-VL (3B / 7B)
 - Qwen3-30B-A3B
 - Qwen3-VL (4B / 8B)
+- Qwen3.5 (9B / 27B / 35B-A3B)
 
 ### MoE Models
 
 - MoE models can work depending on backend support
-- Qwen3-30B-A3B confirmed working
+- Qwen3-30B-A3B, Qwen3.5-35B-A3B confirmed working
 - Mixtral GGUF may fail to load depending on llama.cpp / llama-cpp-python build
 
 ### Vision Models
