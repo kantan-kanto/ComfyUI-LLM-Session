@@ -200,6 +200,22 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     return defaults
 
+
+def _retry_kwargs_with_repeat_last_n_fallback(
+    kwargs: Dict[str, Any],
+    repeat_last_n: Optional[int],
+) -> Dict[str, Any]:
+    retried_kwargs = dict(kwargs)
+    if "penalty_last_n" in retried_kwargs:
+        retried_kwargs.pop("penalty_last_n", None)
+        if repeat_last_n and int(repeat_last_n) > 0:
+            retried_kwargs["repeat_last_n"] = int(repeat_last_n)
+            return retried_kwargs
+    retried_kwargs.pop("repeat_last_n", None)
+    retried_kwargs.pop("repeat_penalty", None)
+    retried_kwargs.pop("top_p", None)
+    return retried_kwargs
+
 # llama-cpp-python imports
 from importlib import import_module
 from collections import defaultdict
@@ -2716,18 +2732,28 @@ class LLMSessionChatNode:
                             else:
                                 stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                         except TypeError:
-                            _kwargs.pop("penalty_last_n", None)
-                            _kwargs.pop("repeat_penalty", None)
-                            _kwargs.pop("top_p", None)
-                            if text_chat_request is not None:
-                                stream_iter = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    stream=True,
-                                    **_kwargs,
-                                )
-                            else:
-                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
+                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                            try:
+                                if text_chat_request is not None:
+                                    stream_iter = llm.create_completion(
+                                        prompt=text_chat_request["prompt"],
+                                        stop=text_chat_request["stop"],
+                                        stream=True,
+                                        **_kwargs,
+                                    )
+                                else:
+                                    stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
+                            except TypeError:
+                                _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                                if text_chat_request is not None:
+                                    stream_iter = llm.create_completion(
+                                        prompt=text_chat_request["prompt"],
+                                        stop=text_chat_request["stop"],
+                                        stream=True,
+                                        **_kwargs,
+                                    )
+                                else:
+                                    stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                         for chunk in stream_iter:
                             token = _extract_stream_content(chunk)
                             if not token:
@@ -2750,18 +2776,27 @@ class LLMSessionChatNode:
                             else:
                                 resp = _create_chat_completion_robust(llm, messages, **_kwargs)
                         except TypeError:
-                            # Older builds may not accept repetition kwargs
-                            _kwargs.pop("penalty_last_n", None)
-                            _kwargs.pop("repeat_penalty", None)
-                            _kwargs.pop("top_p", None)
-                            if text_chat_request is not None:
-                                resp = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    **_kwargs,
-                                )
-                            else:
-                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
+                            # Older builds may require repeat_last_n instead of penalty_last_n.
+                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                            try:
+                                if text_chat_request is not None:
+                                    resp = llm.create_completion(
+                                        prompt=text_chat_request["prompt"],
+                                        stop=text_chat_request["stop"],
+                                        **_kwargs,
+                                    )
+                                else:
+                                    resp = _create_chat_completion_robust(llm, messages, **_kwargs)
+                            except TypeError:
+                                _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                                if text_chat_request is not None:
+                                    resp = llm.create_completion(
+                                        prompt=text_chat_request["prompt"],
+                                        stop=text_chat_request["stop"],
+                                        **_kwargs,
+                                    )
+                                else:
+                                    resp = _create_chat_completion_robust(llm, messages, **_kwargs)
                         if text_chat_request is not None:
                             assistant_text = (resp["choices"][0]["text"] or "")
                         else:
@@ -3272,18 +3307,28 @@ def _chat_one_turn(
                         else:
                             stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                     except TypeError:
-                        _kwargs.pop("penalty_last_n", None)
-                        _kwargs.pop("repeat_penalty", None)
-                        _kwargs.pop("top_p", None)
-                        if text_chat_request is not None:
-                            stream_iter = llm.create_completion(
-                                prompt=text_chat_request["prompt"],
-                                stop=text_chat_request["stop"],
-                                stream=True,
-                                **_kwargs,
-                            )
-                        else:
-                            stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
+                        _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                        try:
+                            if text_chat_request is not None:
+                                stream_iter = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    stream=True,
+                                    **_kwargs,
+                                )
+                            else:
+                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
+                        except TypeError:
+                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                            if text_chat_request is not None:
+                                stream_iter = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    stream=True,
+                                    **_kwargs,
+                                )
+                            else:
+                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                     for chunk in stream_iter:
                         token = _extract_stream_content(chunk)
                         if not token:
@@ -3306,17 +3351,26 @@ def _chat_one_turn(
                         else:
                             resp = _create_chat_completion_robust(llm, messages, **_kwargs)
                     except TypeError:
-                        _kwargs.pop("penalty_last_n", None)
-                        _kwargs.pop("repeat_penalty", None)
-                        _kwargs.pop("top_p", None)
-                        if text_chat_request is not None:
-                            resp = llm.create_completion(
-                                prompt=text_chat_request["prompt"],
-                                stop=text_chat_request["stop"],
-                                **_kwargs,
-                            )
-                        else:
-                            resp = _create_chat_completion_robust(llm, messages, **_kwargs)
+                        _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                        try:
+                            if text_chat_request is not None:
+                                resp = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    **_kwargs,
+                                )
+                            else:
+                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
+                        except TypeError:
+                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
+                            if text_chat_request is not None:
+                                resp = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    **_kwargs,
+                                )
+                            else:
+                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
 
                     if text_chat_request is not None:
                         assistant_text = (resp["choices"][0]["text"] or "").strip()
