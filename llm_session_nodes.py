@@ -100,6 +100,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
         return defaults
 
     chat_handler_overrides: Dict[str, Dict[str, Any]] = {}
+    text_chat_builder_overrides: Dict[str, Dict[str, Any]] = {}
     qwen35_raw = raw.get("qwen3.5")
     if isinstance(qwen35_raw, dict):
         qwen35_overrides: Dict[str, Any] = {}
@@ -107,6 +108,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
             qwen35_overrides["enable_thinking"] = qwen35_raw.get("enable_thinking")
         if qwen35_overrides:
             chat_handler_overrides["qwen3.5"] = qwen35_overrides
+            text_chat_builder_overrides["qwen3.5"] = dict(qwen35_overrides)
 
     # Best-effort type coercion + clamping (never raise)
     def _as_int(x, d):
@@ -179,6 +181,12 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
                 overrides.get("enable_thinking"),
                 CHAT_HANDLER_KWARGS_MAP.get(chat_format, {}).get("enable_thinking", True),
             )
+    for chat_format, overrides in list(text_chat_builder_overrides.items()):
+        if chat_format == "qwen3.5" and "enable_thinking" in overrides:
+            overrides["enable_thinking"] = _as_bool(
+                overrides.get("enable_thinking"),
+                TEXT_CHAT_BUILDER_CONFIG_MAP.get(chat_format, {}).get("enable_thinking", False),
+            )
 
     # System prompt(s)
     sp = defaults.get("system_prompt")
@@ -188,6 +196,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     sp_b = defaults.get("system_prompt_B")
     defaults["system_prompt_B"] = str(sp_b) if sp_b is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt_B"]
     defaults["chat_handler_overrides"] = chat_handler_overrides
+    defaults["text_chat_builder_overrides"] = text_chat_builder_overrides
 
     return defaults
 
@@ -236,6 +245,10 @@ CHAT_HANDLER_KWARGS_MAP = {
     "qwen2.5-vl": {"image_min_tokens": 1024},
     "qwen3-vl": {"image_min_tokens": 1024},
     "qwen3.5": {"enable_thinking": False, "image_min_tokens": 1024},
+}
+
+TEXT_CHAT_BUILDER_CONFIG_MAP = {
+    "qwen3.5": {"enable_thinking": False},
 }
 
 normalized_chat_format_map = {
@@ -311,6 +324,100 @@ def _get_chat_handler_kwargs(
         if isinstance(override_values, dict):
             extra_kwargs.update(override_values)
     return extra_kwargs
+
+
+def _get_text_chat_builder_config(
+    chat_format: str,
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    config = dict(TEXT_CHAT_BUILDER_CONFIG_MAP.get(chat_format, {}))
+    if isinstance(text_chat_builder_overrides, dict):
+        override_values = text_chat_builder_overrides.get(chat_format)
+        if isinstance(override_values, dict):
+            config.update(override_values)
+    return config
+
+
+def _detect_model_family(model_path: str) -> Optional[str]:
+    model_name_lower = os.path.basename(model_path).lower()
+    for key, family in normalized_chat_format_map.items():
+        if key in model_name_lower:
+            return family
+    return None
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(str(part.get("text") or ""))
+        return "\n".join([p for p in parts if p]).strip()
+    return str(content or "")
+
+
+def _build_qwen35_text_prompt(messages: List[Dict[str, Any]], config: dict[str, Any]) -> tuple[str, list[str]]:
+    system_message = "You are a helpful assistant."
+    prompt_parts: List[str] = []
+    enable_thinking = bool(config.get("enable_thinking", False))
+
+    for message in messages:
+        role = str((message or {}).get("role") or "")
+        content = _message_content_to_text((message or {}).get("content"))
+        if role == "system":
+            if content.strip():
+                system_message = content
+            continue
+        if role == "user":
+            prompt_parts.append(f"<|im_start|>user\n{content}<|im_end|>")
+            continue
+        if role == "assistant":
+            prompt_parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
+
+    prompt = f"<|im_start|>system\n{system_message}<|im_end|>\n"
+    if prompt_parts:
+        prompt += "\n".join(prompt_parts) + "\n"
+    prompt += "<|im_start|>assistant\n"
+    if enable_thinking:
+        prompt += "<think>\n"
+    else:
+        prompt += "<think>\n\n</think>\n\n"
+    return prompt, ["<|im_end|>", "<|endoftext|>"]
+
+
+def _build_text_chat_request(
+    model_path: str,
+    mmproj_path: Optional[str],
+    messages: List[Dict[str, Any]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    if mmproj_path not in (None, "", "(Not required)"):
+        return None
+    for message in messages:
+        content = (message or {}).get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") != "text":
+                    return None
+    model_family = _detect_model_family(model_path)
+    if not model_family or model_family not in TEXT_CHAT_BUILDER_CONFIG_MAP:
+        return None
+    config = _get_text_chat_builder_config(
+        model_family,
+        text_chat_builder_overrides=text_chat_builder_overrides,
+    )
+    if model_family == "qwen3.5":
+        prompt, stop = _build_qwen35_text_prompt(messages, config)
+        return {
+            "mode": "completion",
+            "model_family": model_family,
+            "prompt": prompt,
+            "stop": stop,
+            "config": config,
+        }
+    return None
 
 
 def _load_available_chat_handlers(
@@ -1843,6 +1950,7 @@ class LLMSessionChatSimpleNode:
     ) -> tuple:
         defaults = _load_simple_defaults(config_path=config_path)
         chat_handler_overrides = defaults.get("chat_handler_overrides")
+        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
 
         # Delegate to the full node implementation
         node = LLMSessionChatNode()
@@ -1877,6 +1985,7 @@ class LLMSessionChatSimpleNode:
             reset_session=bool(defaults["reset_session"]),
             stream_to_console=bool(defaults["stream_to_console"]),
             chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
         )
 
 
@@ -1997,6 +2106,7 @@ class LLMDialogueCycleSimpleNode:
         # Load defaults from config (or fallback)
         defaults = _load_simple_defaults(config_path or "")
         chat_handler_overrides = defaults.get("chat_handler_overrides")
+        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
 
         # System prompts (shared + optional overrides)
         # UI fields take priority when non-empty; otherwise fall back to config/defaults.
@@ -2076,6 +2186,7 @@ class LLMDialogueCycleSimpleNode:
             reset_session=bool(reset_session),
             stream_to_console=bool(defaults.get("stream_to_console") or False),
             chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
         )
 
 
@@ -2298,7 +2409,8 @@ class LLMSessionChatNode:
              history_dir: str = "",
              reset_session: bool = False,
              stream_to_console: bool = False,
-             chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
+             chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+             text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
         global _model_manager
         _t_total = time.perf_counter()
         def _log_total(status: str):
@@ -2448,6 +2560,12 @@ class LLMSessionChatNode:
             summarize_old_history=bool(summarize_old_history),
             system_prompt=system_prompt or "",
         )
+        text_chat_request = _build_text_chat_request(
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            messages=messages,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
 
         if log_level == "debug":
             print("[DEBUG] messages:")
@@ -2573,14 +2691,13 @@ class LLMSessionChatNode:
                 _t_attempt = time.perf_counter()
                 resp = None
                 _kwargs = {
-                    "messages": messages,
                     "temperature": float(temperature),
                     "top_p": float(top_p),
                     "max_tokens": int(gen_tokens),
                 }
                 # Repetition controls (supported by many llama-cpp-python builds)
                 if repeat_last_n and int(repeat_last_n) > 0:
-                    _kwargs["repeat_last_n"] = int(repeat_last_n)
+                    _kwargs["penalty_last_n"] = int(repeat_last_n)
                 if repeat_penalty and float(repeat_penalty) != 1.0:
                     _kwargs["repeat_penalty"] = float(repeat_penalty)
 
@@ -2589,12 +2706,28 @@ class LLMSessionChatNode:
                         pieces: List[str] = []
                         out = sys.__stdout__
                         try:
-                            stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                            if text_chat_request is not None:
+                                stream_iter = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    stream=True,
+                                    **_kwargs,
+                                )
+                            else:
+                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                         except TypeError:
-                            _kwargs.pop("repeat_last_n", None)
+                            _kwargs.pop("penalty_last_n", None)
                             _kwargs.pop("repeat_penalty", None)
                             _kwargs.pop("top_p", None)
-                            stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                            if text_chat_request is not None:
+                                stream_iter = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    stream=True,
+                                    **_kwargs,
+                                )
+                            else:
+                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                         for chunk in stream_iter:
                             token = _extract_stream_content(chunk)
                             if not token:
@@ -2608,14 +2741,31 @@ class LLMSessionChatNode:
                         assistant_text = "".join(pieces)
                     else:
                         try:
-                            resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                            if text_chat_request is not None:
+                                resp = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    **_kwargs,
+                                )
+                            else:
+                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
                         except TypeError:
                             # Older builds may not accept repetition kwargs
-                            _kwargs.pop("repeat_last_n", None)
+                            _kwargs.pop("penalty_last_n", None)
                             _kwargs.pop("repeat_penalty", None)
                             _kwargs.pop("top_p", None)
-                            resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
-                        assistant_text = resp["choices"][0]["message"]["content"]
+                            if text_chat_request is not None:
+                                resp = llm.create_completion(
+                                    prompt=text_chat_request["prompt"],
+                                    stop=text_chat_request["stop"],
+                                    **_kwargs,
+                                )
+                            else:
+                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
+                        if text_chat_request is not None:
+                            assistant_text = (resp["choices"][0]["text"] or "")
+                        else:
+                            assistant_text = resp["choices"][0]["message"]["content"]
                 _dt = time.perf_counter() - _t_attempt
                 print(f"[LLM Session Chat] Generation attempt {attempts+1} succeeded in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit})")
                 break
@@ -2667,6 +2817,12 @@ class LLMSessionChatNode:
                         max_turns=turns_limit,
                         summarize_old_history=bool(summarize_old_history),
                         system_prompt=system_prompt or "",
+                    )
+                    text_chat_request = _build_text_chat_request(
+                        model_path=model_path,
+                        mmproj_path=mmproj_path,
+                        messages=messages,
+                        text_chat_builder_overrides=text_chat_builder_overrides,
                     )
                     attempts += 1
                     continue
@@ -2865,6 +3021,7 @@ def _chat_one_turn(
     stream_to_console: bool = False,
     model_manager: Optional[GGUFModelManager] = None,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """
     One chat turn using the same history/summary logic as LLMSessionChatNode,
@@ -2986,6 +3143,12 @@ def _chat_one_turn(
         summarize_old_history=bool(summarize_old_history),
         system_prompt=system_prompt or "",
     )
+    text_chat_request = _build_text_chat_request(
+        model_path=model_path,
+        mmproj_path=mmproj_path,
+        messages=messages,
+        text_chat_builder_overrides=text_chat_builder_overrides,
+    )
 
     # In-memory KV/state cache (best-effort). This can speed up long-running sessions.
     if (runtime_cache or "off") == "KV_cache":
@@ -3085,13 +3248,12 @@ def _chat_one_turn(
     while attempts < 6:
         try:
             _kwargs = {
-                "messages": messages,
                 "temperature": float(temperature),
                 "top_p": float(top_p),
                 "max_tokens": int(gen_tokens),
             }
             if repeat_last_n and int(repeat_last_n) > 0:
-                _kwargs["repeat_last_n"] = int(repeat_last_n)
+                _kwargs["penalty_last_n"] = int(repeat_last_n)
             if repeat_penalty and float(repeat_penalty) != 1.0:
                 _kwargs["repeat_penalty"] = float(repeat_penalty)
 
@@ -3100,12 +3262,28 @@ def _chat_one_turn(
                     pieces: List[str] = []
                     out = sys.__stdout__
                     try:
-                        stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        if text_chat_request is not None:
+                            stream_iter = llm.create_completion(
+                                prompt=text_chat_request["prompt"],
+                                stop=text_chat_request["stop"],
+                                stream=True,
+                                **_kwargs,
+                            )
+                        else:
+                            stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                     except TypeError:
-                        _kwargs.pop("repeat_last_n", None)
+                        _kwargs.pop("penalty_last_n", None)
                         _kwargs.pop("repeat_penalty", None)
                         _kwargs.pop("top_p", None)
-                        stream_iter = _iter_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        if text_chat_request is not None:
+                            stream_iter = llm.create_completion(
+                                prompt=text_chat_request["prompt"],
+                                stop=text_chat_request["stop"],
+                                stream=True,
+                                **_kwargs,
+                            )
+                        else:
+                            stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
                     for chunk in stream_iter:
                         token = _extract_stream_content(chunk)
                         if not token:
@@ -3119,14 +3297,31 @@ def _chat_one_turn(
                     assistant_text = "".join(pieces).strip()
                 else:
                     try:
-                        resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        if text_chat_request is not None:
+                            resp = llm.create_completion(
+                                prompt=text_chat_request["prompt"],
+                                stop=text_chat_request["stop"],
+                                **_kwargs,
+                            )
+                        else:
+                            resp = _create_chat_completion_robust(llm, messages, **_kwargs)
                     except TypeError:
-                        _kwargs.pop("repeat_last_n", None)
+                        _kwargs.pop("penalty_last_n", None)
                         _kwargs.pop("repeat_penalty", None)
                         _kwargs.pop("top_p", None)
-                        resp = _create_chat_completion_robust(llm, messages, **{k:v for k,v in _kwargs.items() if k!='messages'})
+                        if text_chat_request is not None:
+                            resp = llm.create_completion(
+                                prompt=text_chat_request["prompt"],
+                                stop=text_chat_request["stop"],
+                                **_kwargs,
+                            )
+                        else:
+                            resp = _create_chat_completion_robust(llm, messages, **_kwargs)
 
-                    assistant_text = (resp["choices"][0]["message"]["content"] or "").strip()
+                    if text_chat_request is not None:
+                        assistant_text = (resp["choices"][0]["text"] or "").strip()
+                    else:
+                        assistant_text = (resp["choices"][0]["message"]["content"] or "").strip()
             break
         except Exception as e:
             if log_level == "debug":
@@ -3173,6 +3368,12 @@ def _chat_one_turn(
                     max_turns=turns_limit,
                     summarize_old_history=bool(summarize_old_history),
                     system_prompt=system_prompt or "",
+                )
+                text_chat_request = _build_text_chat_request(
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    messages=messages,
+                    text_chat_builder_overrides=text_chat_builder_overrides,
                 )
                 attempts += 1
                 continue
@@ -3390,6 +3591,7 @@ class LLMDialogueCycleNode:
         reset_session: bool = False,
         stream_to_console: bool = False,
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
         base_id = (session_id or "default").strip() or "default"
         sidA = f"{base_id}_A"
@@ -3451,6 +3653,7 @@ class LLMDialogueCycleNode:
                     stream_to_console=bool(stream_to_console),
                     model_manager=managerA,
                     chat_handler_overrides=chat_handler_overrides,
+                    text_chat_builder_overrides=text_chat_builder_overrides,
                 )
                 lineA = f"[{_now_iso_jst()}] A: {lastA}"
                 _append_transcript_lines(tpath, [lineA])
@@ -3497,6 +3700,7 @@ class LLMDialogueCycleNode:
                     stream_to_console=bool(stream_to_console),
                     model_manager=managerB,
                     chat_handler_overrides=chat_handler_overrides,
+                    text_chat_builder_overrides=text_chat_builder_overrides,
                 )
                 lineB = f"[{_now_iso_jst()}] B: {lastB}"
                 _append_transcript_lines(tpath, [lineB])
