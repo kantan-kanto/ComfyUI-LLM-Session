@@ -99,6 +99,15 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     except Exception:
         return defaults
 
+    chat_handler_overrides: Dict[str, Dict[str, Any]] = {}
+    qwen35_raw = raw.get("qwen3.5")
+    if isinstance(qwen35_raw, dict):
+        qwen35_overrides: Dict[str, Any] = {}
+        if "enable_thinking" in qwen35_raw:
+            qwen35_overrides["enable_thinking"] = qwen35_raw.get("enable_thinking")
+        if qwen35_overrides:
+            chat_handler_overrides["qwen3.5"] = qwen35_overrides
+
     # Best-effort type coercion + clamping (never raise)
     def _as_int(x, d):
         try:
@@ -164,6 +173,13 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["reset_session"] = _as_bool(defaults.get("reset_session"), False)
     defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), False)
 
+    for chat_format, overrides in list(chat_handler_overrides.items()):
+        if chat_format == "qwen3.5" and "enable_thinking" in overrides:
+            overrides["enable_thinking"] = _as_bool(
+                overrides.get("enable_thinking"),
+                CHAT_HANDLER_KWARGS_MAP.get(chat_format, {}).get("enable_thinking", True),
+            )
+
     # System prompt(s)
     sp = defaults.get("system_prompt")
     defaults["system_prompt"] = str(sp) if sp is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt"]
@@ -171,6 +187,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["system_prompt_A"] = str(sp_a) if sp_a is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt_A"]
     sp_b = defaults.get("system_prompt_B")
     defaults["system_prompt_B"] = str(sp_b) if sp_b is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt_B"]
+    defaults["chat_handler_overrides"] = chat_handler_overrides
 
     return defaults
 
@@ -282,6 +299,18 @@ def _make_chat_handler_factory(handler_cls: type, extra_kwargs: dict[str, Any]) 
         return handler_cls(clip_model_path=mmproj_path, **extra_kwargs)
 
     return factory
+
+
+def _get_chat_handler_kwargs(
+    chat_format: str,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    extra_kwargs = dict(CHAT_HANDLER_KWARGS_MAP.get(chat_format, {}))
+    if isinstance(chat_handler_overrides, dict):
+        override_values = chat_handler_overrides.get(chat_format)
+        if isinstance(override_values, dict):
+            extra_kwargs.update(override_values)
+    return extra_kwargs
 
 
 def _load_available_chat_handlers(
@@ -621,14 +650,22 @@ def default_sessions_dir() -> str:
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
-def _history_path(session_id: str, history_dir: Optional[str] = None) -> str:
+def _safe_session_name(session_id: str) -> str:
     session_id = (session_id or "default").strip()
     safe = "".join(c for c in session_id if c.isalnum() or c in ("-", "_", "."))
-    if not safe:
-        safe = "default"
+    return safe or "default"
+
+def _history_path(session_id: str, history_dir: Optional[str] = None) -> str:
+    safe = _safe_session_name(session_id)
     base = (history_dir or "").strip() or default_sessions_dir()
     _ensure_dir(base)
     return os.path.join(base, f"{safe}.json")
+
+def _session_cache_root(session_id: str, history_dir: Optional[str] = None) -> str:
+    base = (history_dir or "").strip() or default_sessions_dir()
+    cache_root = os.path.join(base, "cache", _safe_session_name(session_id))
+    _ensure_dir(cache_root)
+    return cache_root
 
 def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
     """Write JSON atomically-ish with .tmp + .bak."""
@@ -945,6 +982,18 @@ def _strip_reasoning_output(text: str) -> str:
     s = str(text or "")
     if not s:
         return s
+
+    # Some local models expose internal channel markup. If any channel name contains
+    # "final", keep only the last such block's message body.
+    channel_blocks = re.findall(
+        r"(?is)<\|channel\|>\s*([^\r\n<]*)\s*<\|message\|>\s*(.*?)(?=<\|end\|>|<\|start\|>|<\|channel\|>|$)",
+        s,
+    )
+    for channel_name, body in reversed(channel_blocks):
+        if "final" in (channel_name or "").lower():
+            cand = (body or "").strip()
+            if cand:
+                return cand
 
     # If a closing think tag exists, keep only the tail after the last one.
     # Some models emit reasoning text without an opening <think> but still output </think>.
@@ -1277,6 +1326,7 @@ class GGUFModelManager:
         n_ctx: int,
         n_gpu_layers: int,
         use_vision: bool,
+        chat_handler_kwargs: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         return (
             self._normalize_path(model_path),
@@ -1284,6 +1334,7 @@ class GGUFModelManager:
             int(n_ctx),
             int(n_gpu_layers),
             bool(use_vision),
+            json.dumps(chat_handler_kwargs or {}, sort_keys=True, ensure_ascii=True),
         )
 
     def load_model(
@@ -1292,6 +1343,7 @@ class GGUFModelManager:
         mmproj_path: Optional[str] = None,
         n_ctx: int = 4096,
         n_gpu_layers: int = 0,
+        chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         verbose: bool = False,
     ) -> Llama:
         """Load GGUF model."""
@@ -1312,6 +1364,7 @@ class GGUFModelManager:
         chat_handler = None
         chat_format = None
         use_vision = False
+        active_chat_handler_kwargs: Dict[str, Any] = {}
 
         model_name_lower = os.path.basename(model_path).lower()
 
@@ -1332,7 +1385,18 @@ class GGUFModelManager:
                 if mmproj_path is not None:
                     print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
                     try:
-                        chat_handler = chat_handler_factory_map[model_family](mmproj_path)
+                        handler_name = chat_handler_map.get(model_family)
+                        handler_cls = globals().get(handler_name) if handler_name else None
+                        if handler_cls is None:
+                            raise RuntimeError(f"Chat handler class unavailable for {model_family}")
+                        active_chat_handler_kwargs = _get_chat_handler_kwargs(
+                            model_family,
+                            chat_handler_overrides=chat_handler_overrides,
+                        )
+                        chat_handler = handler_cls(
+                            clip_model_path=mmproj_path,
+                            **active_chat_handler_kwargs,
+                        )
                         chat_format = model_family
                         use_vision = True
                     except Exception as e:
@@ -1358,6 +1422,7 @@ class GGUFModelManager:
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             use_vision=use_vision,
+            chat_handler_kwargs=active_chat_handler_kwargs,
         )
 
         # If signature matches, reuse
@@ -1427,7 +1492,8 @@ class GGUFModelManager:
     def _default_cache_dir(self, model_path: str, mmproj_path: str, n_ctx: int, n_gpu_layers: int = 0) -> str:
         """
         Compute a stable cache directory for cache data.
-        We key by model+mmproj+n_ctx so caches are not mixed across incompatible settings.
+        Cache root can be scoped by session; under that root, we key by model settings
+        so incompatible configurations do not share the same disk cache directory.
         """
         base = (self.cache_dir_override or os.path.join(_safe_output_dir(), "llm_session_sessions", "cache"))
         os.makedirs(base, exist_ok=True)
@@ -1655,18 +1721,6 @@ def _clear_kv_state_for_session(session_id: str) -> None:
         pass
 
 
-def _clear_cache_under_history_file(history_file_path: str) -> None:
-    """
-    Remove and recreate cache root under the same base as history files.
-    """
-    try:
-        cache_root = os.path.join(os.path.dirname(history_file_path), "cache")
-        shutil.rmtree(cache_root, ignore_errors=True)
-        os.makedirs(cache_root, exist_ok=True)
-    except Exception:
-        pass
-
-
 def _kv_state_debug_info(state: Any) -> str:
     """Return a compact debug string for llama state payload."""
     try:
@@ -1788,6 +1842,7 @@ class LLMSessionChatSimpleNode:
         stream_to_console: bool = True,
     ) -> tuple:
         defaults = _load_simple_defaults(config_path=config_path)
+        chat_handler_overrides = defaults.get("chat_handler_overrides")
 
         # Delegate to the full node implementation
         node = LLMSessionChatNode()
@@ -1821,6 +1876,7 @@ class LLMSessionChatSimpleNode:
             history_dir=history_dir or "",
             reset_session=bool(defaults["reset_session"]),
             stream_to_console=bool(defaults["stream_to_console"]),
+            chat_handler_overrides=chat_handler_overrides,
         )
 
 
@@ -1894,7 +1950,7 @@ class LLMDialogueCycleSimpleNode:
                 }),
                 "history_dir": ("STRING", {
                     "default": "",
-                    "tooltip": "Directory to store histories, summaries, transcript, and caches. Empty uses ComfyUI output."
+                    "tooltip": "Directory to store histories, summaries, transcript, and session-scoped disk caches. Empty uses ComfyUI output."
                 }),
             },
             "optional": {
@@ -1908,7 +1964,7 @@ class LLMDialogueCycleSimpleNode:
                 }),
                 "reset_session": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "If true, overwrite existing session history with a fresh session."
+                    "tooltip": "If true, overwrite existing session history with a fresh session. Session disk cache is kept."
                 }),
             }
         }
@@ -1940,6 +1996,7 @@ class LLMDialogueCycleSimpleNode:
 
         # Load defaults from config (or fallback)
         defaults = _load_simple_defaults(config_path or "")
+        chat_handler_overrides = defaults.get("chat_handler_overrides")
 
         # System prompts (shared + optional overrides)
         # UI fields take priority when non-empty; otherwise fall back to config/defaults.
@@ -2018,6 +2075,7 @@ class LLMDialogueCycleSimpleNode:
             history_dir=history_dir or "",
             reset_session=bool(reset_session),
             stream_to_console=bool(defaults.get("stream_to_console") or False),
+            chat_handler_overrides=chat_handler_overrides,
         )
 
 
@@ -2113,7 +2171,7 @@ class LLMSessionChatNode:
                 }),
                 "persistent_cache": (["LlamaDiskCache", "off"], {
                     "default": "LlamaDiskCache",
-                    "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under output/llm_session_sessions/cache/."
+                    "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under a session-specific cache directory in output/llm_session_sessions/cache/."
                 }),
                 "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {
                     "default": "LlamaTrieCache",
@@ -2191,11 +2249,11 @@ class LLMSessionChatNode:
                 }),
                 "history_dir": ("STRING", {
                     "default": "",
-                    "tooltip": "Optional directory for history files. Empty uses output/llm_session_sessions/"
+                    "tooltip": "Optional directory for history files and session-scoped disk caches. Empty uses output/llm_session_sessions/"
                 }),
                 "reset_session": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "If true, overwrite existing session history file with a fresh session."
+                    "tooltip": "If true, overwrite existing session history file with a fresh session. Session disk cache is kept."
                 }),
                 "stream_to_console": ("BOOLEAN", {
                     "default": False,
@@ -2239,7 +2297,8 @@ class LLMSessionChatNode:
              suppress_backend_logs: bool = True,
              history_dir: str = "",
              reset_session: bool = False,
-             stream_to_console: bool = False) -> tuple:
+             stream_to_console: bool = False,
+             chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
         global _model_manager
         _t_total = time.perf_counter()
         def _log_total(status: str):
@@ -2294,7 +2353,6 @@ class LLMSessionChatNode:
         )
         if bool(reset_session):
             _clear_kv_state_for_session(session_id)
-            _clear_cache_under_history_file(hist_path)
             # Also detach runtime cache from already loaded model if present.
             try:
                 if _model_manager is not None and getattr(_model_manager, "model", None) is not None:
@@ -2338,9 +2396,9 @@ class LLMSessionChatNode:
                 print(f"[LLM Session Chat] Continue detected, language: {detected_lang}")
 
 
-        # Store cache under the same directory as the history file
+        # Store disk cache under a session-specific root.
         try:
-            _model_manager.cache_dir_override = os.path.join(os.path.dirname(hist_path), "cache")
+            _model_manager.cache_dir_override = _session_cache_root(session_id, history_dir or None)
             os.makedirs(_model_manager.cache_dir_override, exist_ok=True)
         except Exception:
             _model_manager.cache_dir_override = None
@@ -2358,6 +2416,7 @@ class LLMSessionChatNode:
                 mmproj_path=mmproj_path,
                 n_ctx=int(n_ctx),
                 n_gpu_layers=int(n_gpu_layers),
+                chat_handler_overrides=chat_handler_overrides,
                 verbose=False,
             )
         except Exception as e:
@@ -2805,6 +2864,7 @@ def _chat_one_turn(
     reset_session: bool = False,
     stream_to_console: bool = False,
     model_manager: Optional[GGUFModelManager] = None,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """
     One chat turn using the same history/summary logic as LLMSessionChatNode,
@@ -2848,7 +2908,6 @@ def _chat_one_turn(
     )
     if bool(reset_session):
         _clear_kv_state_for_session(session_id)
-        _clear_cache_under_history_file(hist_path)
         # Also detach runtime cache from already loaded model if present.
         try:
             if mgr is not None and getattr(mgr, "model", None) is not None:
@@ -2885,9 +2944,9 @@ def _chat_one_turn(
         if log_level == "debug":
             print(f"[LLM Dialogue Cycle] Continue detected, language: {detected_lang}")
 
-    # Store cache under the same directory as the history file
+    # Store disk cache under a session-specific root.
     try:
-        mgr.cache_dir_override = os.path.join(os.path.dirname(hist_path), "cache")
+        mgr.cache_dir_override = _session_cache_root(session_id, history_dir or None)
         os.makedirs(mgr.cache_dir_override, exist_ok=True)
     except Exception:
         mgr.cache_dir_override = None
@@ -2898,6 +2957,7 @@ def _chat_one_turn(
             mmproj_path=mmproj_path,
             n_ctx=int(n_ctx),
             n_gpu_layers=int(n_gpu_layers),
+            chat_handler_overrides=chat_handler_overrides,
             verbose=False,
         )
     except Exception:
@@ -3273,7 +3333,7 @@ class LLMDialogueCycleNode:
                 "min_generation_tokens": ("INT", {"default": 96, "min": 1, "max": 4096}),
                 "safety_margin_tokens": ("INT", {"default": 64, "min": 0, "max": 2048}),
 
-                "persistent_cache": (["LlamaDiskCache", "off"], {"default": "LlamaDiskCache"}),
+                "persistent_cache": (["LlamaDiskCache", "off"], {"default": "LlamaDiskCache", "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
                 "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {"default": "LlamaTrieCache"}),
 
                 "repeat_penalty": ("FLOAT", {"default": 1.12, "min": 1.0, "max": 2.0, "step": 0.01}),
@@ -3282,8 +3342,8 @@ class LLMDialogueCycleNode:
                 "log_level": (["minimal", "timing", "debug"], {"default": "timing"}),
                 "suppress_backend_logs": ("BOOLEAN", {"default": True}),
 
-                "history_dir": ("STRING", {"default": "", "tooltip": "Optional history directory. Empty => output/llm_session_sessions/"}),
-                "reset_session": ("BOOLEAN", {"default": False, "tooltip": "If true, resets both {id}_A and {id}_B histories (transcript file is not deleted)."}),
+                "history_dir": ("STRING", {"default": "", "tooltip": "Optional history directory. Empty => output/llm_session_sessions/. Disk caches are also stored there, separated by session id."}),
+                "reset_session": ("BOOLEAN", {"default": False, "tooltip": "If true, resets both {id}_A and {id}_B histories (transcript file is not deleted). Session disk caches are kept."}),
                 "stream_to_console": ("BOOLEAN", {"default": False, "tooltip": "Stream tokens to console while generating."}),
             }
         }
@@ -3329,6 +3389,7 @@ class LLMDialogueCycleNode:
         history_dir: str = "",
         reset_session: bool = False,
         stream_to_console: bool = False,
+        chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
         base_id = (session_id or "default").strip() or "default"
         sidA = f"{base_id}_A"
@@ -3341,7 +3402,6 @@ class LLMDialogueCycleNode:
         if reset:
             _clear_kv_state_for_session(sidA)
             _clear_kv_state_for_session(sidB)
-            _clear_cache_under_history_file(tpath)
 
         lastA = ""
         lastB = ""
@@ -3390,6 +3450,7 @@ class LLMDialogueCycleNode:
                     reset_session=reset,
                     stream_to_console=bool(stream_to_console),
                     model_manager=managerA,
+                    chat_handler_overrides=chat_handler_overrides,
                 )
                 lineA = f"[{_now_iso_jst()}] A: {lastA}"
                 _append_transcript_lines(tpath, [lineA])
@@ -3435,6 +3496,7 @@ class LLMDialogueCycleNode:
                     reset_session=reset_for_b,
                     stream_to_console=bool(stream_to_console),
                     model_manager=managerB,
+                    chat_handler_overrides=chat_handler_overrides,
                 )
                 lineB = f"[{_now_iso_jst()}] B: {lastB}"
                 _append_transcript_lines(tpath, [lineB])
@@ -3489,4 +3551,3 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-

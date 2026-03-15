@@ -22,5 +22,8 @@
   "repeat_last_n": 256,
   "rewrite_continue": true,
   "reset_session": false,
-  "stream_to_console": true
+  "stream_to_console": true,
+  "qwen3.5": {
+    "enable_thinking": true
+  }
 }
