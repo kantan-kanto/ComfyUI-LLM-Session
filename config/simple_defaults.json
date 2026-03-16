@@ -14,7 +14,7 @@
   "dynamic_max_tokens": true,
   "min_generation_tokens": 96,
   "safety_margin_tokens": 64,
-  "persistent_cache": "LlamaDiskCache",
+  "persistent_cache": "off",
   "runtime_cache": "LlamaTrieCache",
   "log_level": "timing",
   "suppress_backend_logs": true,
@@ -24,6 +24,6 @@
   "reset_session": false,
   "stream_to_console": true,
   "qwen3.5": {
-    "enable_thinking": true
+    "enable_thinking": false
   }
 }

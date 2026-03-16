@@ -51,7 +51,7 @@ _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
     "dynamic_max_tokens": True,
     "min_generation_tokens": 96,
     "safety_margin_tokens": 64,
-    "persistent_cache": "LlamaDiskCache",
+    "persistent_cache": "off",
     "runtime_cache": "LlamaTrieCache",
     "log_level": "timing",
     "suppress_backend_logs": True,
@@ -155,7 +155,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["repeat_penalty"] = min(2.0, max(1.0, _as_float(defaults.get("repeat_penalty"), 1.12)))
 
     # Enums / strings
-    defaults["persistent_cache"] = str(defaults.get("persistent_cache", "LlamaDiskCache"))
+    defaults["persistent_cache"] = str(defaults.get("persistent_cache", "off"))
     if defaults["persistent_cache"] not in ("LlamaDiskCache", "off"):
         defaults["persistent_cache"] = _SIMPLE_DEFAULTS_BUILTIN["persistent_cache"]
 
@@ -267,6 +267,10 @@ TEXT_CHAT_BUILDER_CONFIG_MAP = {
     "qwen3.5": {"enable_thinking": False},
 }
 
+SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP = {
+    "qwen3.5": {"enable_thinking": False},
+}
+
 normalized_chat_format_map = {
     "llava-1-5": "llava-1-5",
     "llava15": "llava-1-5",
@@ -360,6 +364,32 @@ def _detect_model_family(model_path: str) -> Optional[str]:
         if key in model_name_lower:
             return family
     return None
+
+
+def _merge_text_chat_builder_overrides(
+    model_path: Optional[str],
+    base_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    forced_overrides_map: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Merge model-family-specific builder overrides without touching unrelated models."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    if isinstance(base_overrides, dict):
+        for chat_format, override_values in base_overrides.items():
+            if isinstance(override_values, dict):
+                merged[str(chat_format)] = dict(override_values)
+
+    if not forced_overrides_map:
+        return merged or None
+
+    model_family = _detect_model_family(model_path or "")
+    forced_values = forced_overrides_map.get(model_family or "")
+    if not isinstance(forced_values, dict):
+        return merged or None
+
+    current = dict(merged.get(model_family) or {})
+    current.update(forced_values)
+    merged[model_family] = current
+    return merged
 
 
 def _message_content_to_text(content: Any) -> str:
@@ -1082,6 +1112,66 @@ def _iter_chat_completion_robust(llm: "Llama", messages: List[Dict[str, Any]], *
         folded = _fold_system_into_user_messages(messages)
         return llm.create_chat_completion(messages=folded, stream=True, **kwargs)
 
+def _create_text_or_chat_completion(
+    llm: "Llama",
+    messages: List[Dict[str, Any]],
+    *,
+    model_path: Optional[str] = None,
+    mmproj_path: Optional[str] = None,
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    forced_text_chat_builder_overrides_map: Optional[Dict[str, Dict[str, Any]]] = None,
+    repeat_last_n: Optional[int] = None,
+    **kwargs,
+) -> tuple[Dict[str, Any], bool]:
+    """Use the same text-chat-builder path as normal chat when available."""
+    text_chat_request = None
+    if model_path:
+        effective_text_chat_builder_overrides = _merge_text_chat_builder_overrides(
+            model_path=model_path,
+            base_overrides=text_chat_builder_overrides,
+            forced_overrides_map=forced_text_chat_builder_overrides_map,
+        )
+        text_chat_request = _build_text_chat_request(
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            messages=messages,
+            text_chat_builder_overrides=effective_text_chat_builder_overrides,
+        )
+
+    completion_kwargs = dict(kwargs)
+    try:
+        if text_chat_request is not None:
+            resp = llm.create_completion(
+                prompt=text_chat_request["prompt"],
+                stop=text_chat_request["stop"],
+                **completion_kwargs,
+            )
+        else:
+            resp = _create_chat_completion_robust(llm, messages, **completion_kwargs)
+    except TypeError:
+        completion_kwargs = _retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
+        try:
+            if text_chat_request is not None:
+                resp = llm.create_completion(
+                    prompt=text_chat_request["prompt"],
+                    stop=text_chat_request["stop"],
+                    **completion_kwargs,
+                )
+            else:
+                resp = _create_chat_completion_robust(llm, messages, **completion_kwargs)
+        except TypeError:
+            completion_kwargs = _retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
+            if text_chat_request is not None:
+                resp = llm.create_completion(
+                    prompt=text_chat_request["prompt"],
+                    stop=text_chat_request["stop"],
+                    **completion_kwargs,
+                )
+            else:
+                resp = _create_chat_completion_robust(llm, messages, **completion_kwargs)
+
+    return resp, bool(text_chat_request is not None)
+
 def _extract_stream_content(chunk: Any) -> str:
     """Best-effort extraction of streamed text from llama-cpp-python chunks."""
     try:
@@ -1185,20 +1275,47 @@ def _make_summary_prompt(existing_summary: str, turns_chunk: list) -> list:
         {
             "role": "system",
             "content": (
-                "Summarize the conversation into a compact rolling memory. "
-                "Keep ONLY: key facts, decisions, constraints, user preferences, and open TODOs. "
-                "Do NOT add new information. Be concise. Use short sentences."
+                "Summarize the conversation into a compact rolling memory for later dialogue turns.\n\n"
+                "Keep only:\n"
+                "- named people and their roles\n"
+                "- stable facts already stated in the conversation\n"
+                "- important decisions, constraints, preferences, promises, and open TODOs\n"
+                "- the current situation if it matters for the next turn\n\n"
+                "Rules:\n"
+                "- Do not add new information.\n"
+                "- Do not infer unstated attributes.\n"
+                "- Do not replace names with generic labels if a name is known.\n"
+                "- If a detail is uncertain, omit it.\n"
+                "- Prefer plain factual statements in Japanese.\n"
+                "- Use 2 to 5 short lines.\n"
+                "- Keep the wording concrete and minimal.\n"
+                "- No headings, no bullet markers, no analysis, no reasoning."
             )
         },
         {"role": "user", "content": user_text}
     ]
 
 def _summarize_with_model(model: "Llama", existing_summary: str, turns_chunk: list,
-                         temperature: float, max_tokens: int, suppress_logs: bool = False) -> str:
+                         temperature: float, max_tokens: int, suppress_logs: bool = False,
+                         model_path: Optional[str] = None,
+                         mmproj_path: Optional[str] = None,
+                         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> str:
     msgs = _make_summary_prompt(existing_summary, turns_chunk)
     with _make_suppress_backend_logs(suppress_logs):
-        resp = _create_chat_completion_robust(model, msgs, temperature=float(temperature), max_tokens=int(max_tokens))
-    raw = (resp["choices"][0]["message"]["content"] or "").strip()
+        resp, used_text_builder = _create_text_or_chat_completion(
+            model,
+            msgs,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+            forced_text_chat_builder_overrides_map=SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP,
+            temperature=float(temperature),
+            max_tokens=int(max_tokens),
+        )
+    if used_text_builder:
+        raw = (resp["choices"][0]["text"] or "").strip()
+    else:
+        raw = (resp["choices"][0]["message"]["content"] or "").strip()
     cleaned = _strip_reasoning_output(raw).strip()
     return cleaned or raw
 
@@ -1207,7 +1324,10 @@ def maybe_compact_summary(model: "Llama",
                           summary_max_chars: int = 1500,
                           temperature: float = 0.2,
                           max_tokens_summary: int = 128,
-                          suppress_logs: bool = False) -> Dict[str, Any]:
+                          suppress_logs: bool = False,
+                          model_path: Optional[str] = None,
+                          mmproj_path: Optional[str] = None,
+                          text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """
     If summary grows too large, re-summarize it to keep it compact.
     This is a safety valve to keep prompts small and fast.
@@ -1222,15 +1342,37 @@ def maybe_compact_summary(model: "Llama",
         {
             "role": "system",
             "content": (
-                "Compress the given summary while preserving key facts, constraints, decisions, "
-                "user preferences, and open TODOs. Remove redundancy. Keep it short."
+                "Rewrite the summary into a shorter rolling memory for later dialogue turns.\n\n"
+                "Preserve:\n"
+                "- named people and roles\n"
+                "- stable facts\n"
+                "- important constraints, preferences, promises, and unresolved points\n\n"
+                "Rules:\n"
+                "- Do not add or guess information.\n"
+                "- Keep names if they are known.\n"
+                "- Remove vague labels, analysis, and redundancy.\n"
+                "- Write plain factual Japanese only.\n"
+                "- Use 2 to 5 short lines.\n"
+                "- No headings, no bullet markers, no reasoning."
             )
         },
         {"role": "user", "content": text}
     ]
     with _make_suppress_backend_logs(suppress_logs):
-        resp = _create_chat_completion_robust(model, msgs, temperature=float(temperature), max_tokens=int(max_tokens_summary))
-    raw = (resp["choices"][0]["message"]["content"] or "").strip()
+        resp, used_text_builder = _create_text_or_chat_completion(
+            model,
+            msgs,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+            forced_text_chat_builder_overrides_map=SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP,
+            temperature=float(temperature),
+            max_tokens=int(max_tokens_summary),
+        )
+    if used_text_builder:
+        raw = (resp["choices"][0]["text"] or "").strip()
+    else:
+        raw = (resp["choices"][0]["message"]["content"] or "").strip()
     compact = _strip_reasoning_output(raw).strip() or raw
     history.setdefault("summary", {})
     history["summary"]["enabled"] = True
@@ -1246,7 +1388,10 @@ def maybe_summarize_history(model: "Llama",
                            temperature: float = 0.2,
                            max_tokens_summary: int = 128,
                            summary_max_chars: int = 1500,
-                           suppress_logs: bool = False) -> Dict[str, Any]:
+                           suppress_logs: bool = False,
+                           model_path: Optional[str] = None,
+                           mmproj_path: Optional[str] = None,
+                           text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     """
     Phase 1.5:
     - Do NOT summarize every turn. Summarize only when overflow reaches summary_chunk_turns.
@@ -1284,6 +1429,9 @@ def maybe_summarize_history(model: "Llama",
         temperature=temperature,
         max_tokens=max_tokens_summary,
         suppress_logs=suppress_logs,
+        model_path=model_path,
+        mmproj_path=mmproj_path,
+        text_chat_builder_overrides=text_chat_builder_overrides,
     )
 
     history["summary"]["text"] = new_sum
@@ -1305,6 +1453,9 @@ def maybe_summarize_history(model: "Llama",
         temperature=temperature,
         max_tokens_summary=max_tokens_summary,
         suppress_logs=suppress_logs,
+        model_path=model_path,
+        mmproj_path=mmproj_path,
+        text_chat_builder_overrides=text_chat_builder_overrides,
     )
 
     return history
@@ -1638,7 +1789,7 @@ class GGUFModelManager:
         mmproj_path: str,
         n_ctx: int,
         n_gpu_layers: int = 0,
-        persistent_cache: str = "LlamaDiskCache",
+        persistent_cache: str = "off",
         runtime_cache: str = "LlamaTrieCache",
     ) -> None:
         """
@@ -1835,6 +1986,18 @@ def _is_state_data_mismatch_error(err: Exception) -> bool:
     if "cache_item.input_ids" in s and "NoneType" in s:
         return True
     return False
+
+
+def _cache_debug_label(manager: Optional["GGUFModelManager"]) -> str:
+    try:
+        info = getattr(manager, "_current_cache_info", None) or {}
+        desc = str(info.get("desc", "") or "off")
+        disk_dir = str(info.get("disk_dir", "") or "")
+        if disk_dir:
+            return f"{desc};disk_dir={disk_dir}"
+        return desc
+    except Exception:
+        return "unknown"
 
 
 def _clear_kv_state_for_session(session_id: str) -> None:
@@ -2150,7 +2313,7 @@ class LLMDialogueCycleSimpleNode:
         safety_margin_tokens = int(defaults.get("safety_margin_tokens") or 64)
 
         # Cache + repetition controls
-        persistent_cache = str(defaults.get("persistent_cache") or "LlamaDiskCache")
+        persistent_cache = str(defaults.get("persistent_cache") or "off")
         runtime_cache = str(defaults.get("runtime_cache") or "LlamaTrieCache")
         repeat_penalty = float(defaults.get("repeat_penalty") or 1.12)
         repeat_last_n = int(defaults.get("repeat_last_n") or 256)
@@ -2297,7 +2460,7 @@ class LLMSessionChatNode:
                     "tooltip": "Optional image input for this turn only (never saved to history)"
                 }),
                 "persistent_cache": (["LlamaDiskCache", "off"], {
-                    "default": "LlamaDiskCache",
+                    "default": "off",
                     "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under a session-specific cache directory in output/llm_session_sessions/cache/."
                 }),
                 "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {
@@ -2415,7 +2578,7 @@ class LLMSessionChatNode:
              dynamic_max_tokens: bool = True,
              min_generation_tokens: int = 96,
              safety_margin_tokens: int = 64,
-             persistent_cache: str = "LlamaDiskCache",
+             persistent_cache: str = "off",
              repeat_penalty: float = 1.12,
              repeat_last_n: int = 256,
              rewrite_continue: bool = True,
@@ -2813,6 +2976,11 @@ class LLMSessionChatNode:
                 if _is_state_data_mismatch_error(e) and not state_cache_recovered:
                     state_cache_recovered = True
                     _clear_kv_state_for_session(session_id)
+                    if log_level != "minimal":
+                        print(
+                            "[LLM Session Chat] Cache mismatch details: "
+                            f"session_id={session_id}, cache={_cache_debug_label(_model_manager)}, error={e}"
+                        )
                     try:
                         _model_manager.invalidate_cache(llm, remove_disk_data=True)
                     except Exception:
@@ -2840,6 +3008,9 @@ class LLMSessionChatNode:
                                         temperature=0.2,
                                         max_tokens_summary=int(max_tokens_summary),
                                         suppress_logs=(log_level != "debug"),
+                                        model_path=model_path,
+                                        mmproj_path=mmproj_path,
+                                        text_chat_builder_overrides=text_chat_builder_overrides,
                                     )
                                 except Exception:
                                     pass
@@ -2935,6 +3106,9 @@ class LLMSessionChatNode:
                     max_tokens_summary=int(max_tokens_summary),
                     summary_max_chars=int(summary_max_chars),
                     suppress_logs=(log_level != "debug"),
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    text_chat_builder_overrides=text_chat_builder_overrides,
                 )
                 _dt_sum = time.perf_counter() - _t_sum
                 if log_level != "minimal":
@@ -3044,7 +3218,7 @@ def _chat_one_turn(
     dynamic_max_tokens: bool = True,
     min_generation_tokens: int = 96,
     safety_margin_tokens: int = 64,
-    persistent_cache: str = "LlamaDiskCache",
+    persistent_cache: str = "off",
     repeat_penalty: float = 1.12,
     repeat_last_n: int = 256,
     rewrite_continue: bool = True,
@@ -3384,6 +3558,11 @@ def _chat_one_turn(
             if _is_state_data_mismatch_error(e) and not state_cache_recovered:
                 state_cache_recovered = True
                 _clear_kv_state_for_session(session_id)
+                if log_level != "minimal":
+                    print(
+                        "[LLM Dialogue Cycle] Cache mismatch details: "
+                        f"session_id={session_id}, cache={_cache_debug_label(mgr)}, error={e}"
+                    )
                 try:
                     mgr.invalidate_cache(llm, remove_disk_data=True)
                 except Exception:
@@ -3411,6 +3590,9 @@ def _chat_one_turn(
                                     temperature=0.2,
                                     max_tokens_summary=int(max_tokens_summary),
                                     suppress_logs=(log_level != "debug"),
+                                    model_path=model_path,
+                                    mmproj_path=mmproj_path,
+                                    text_chat_builder_overrides=text_chat_builder_overrides,
                                 )
                             except Exception:
                                 pass
@@ -3489,6 +3671,9 @@ def _chat_one_turn(
                 max_tokens_summary=int(max_tokens_summary),
                 summary_max_chars=int(summary_max_chars),
                 suppress_logs=(log_level != "debug"),
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                text_chat_builder_overrides=text_chat_builder_overrides,
             )
         except Exception:
             pass
@@ -3588,7 +3773,7 @@ class LLMDialogueCycleNode:
                 "min_generation_tokens": ("INT", {"default": 96, "min": 1, "max": 4096}),
                 "safety_margin_tokens": ("INT", {"default": 64, "min": 0, "max": 2048}),
 
-                "persistent_cache": (["LlamaDiskCache", "off"], {"default": "LlamaDiskCache", "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
+                "persistent_cache": (["LlamaDiskCache", "off"], {"default": "off", "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
                 "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {"default": "LlamaTrieCache"}),
 
                 "repeat_penalty": ("FLOAT", {"default": 1.12, "min": 1.0, "max": 2.0, "step": 0.01}),
@@ -3634,7 +3819,7 @@ class LLMDialogueCycleNode:
         dynamic_max_tokens: bool = True,
         min_generation_tokens: int = 96,
         safety_margin_tokens: int = 64,
-        persistent_cache: str = "LlamaDiskCache",
+        persistent_cache: str = "off",
         runtime_cache: str = "LlamaTrieCache",
         repeat_penalty: float = 1.12,
         repeat_last_n: int = 256,
