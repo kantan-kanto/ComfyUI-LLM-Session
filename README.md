@@ -21,7 +21,7 @@ The following notes are intended for existing users upgrading to `1.0.4`.
 
 - Cache-related setting names have changed. The previous `prompt_cache_mode` / `kv_state_mode` options have been reorganized into `persistent_cache` / `runtime_cache`.
 - The cache storage directory name has changed from `prompt_cache/` to `cache/`. Existing cache data is not migrated automatically.
-- `reset_session` で履歴とKV状態は初期化しつつ、セッション用ディスクキャッシュは保持する仕様へ変更
+- `reset_session` now clears history and per-session KV state, while keeping the session's disk cache so the same session can restart efficiently.
 - Older history JSON files are normalized automatically, but the tracking model for summarized ranges has changed. Long-lived sessions may therefore behave somewhat differently from previous versions.
 - When using Vision models, both mmproj auto-detection and handler selection logic have changed. Even combinations that worked before may need to be rechecked depending on backend behavior and filename conventions.
 
@@ -306,9 +306,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.0.3
+### Current Version: 1.0.4
 
-- Improved cache architecture for better safety and performance
-- Generalized and expanded multimodal (Vision) model support
-- More robust and consistent summarized conversation history management
-- Improved output quality and debugging
+- Revised cache behavior and improved cache safety
+- Improved Qwen3.5 generation paths and override handling
+- Improved backward compatibility for repetition-control parameters
+- Improved conversation summarization quality and history tracking
+

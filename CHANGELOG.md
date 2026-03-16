@@ -4,6 +4,32 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [1.0.4] - 2026-03-16
+
+- Revised cache behavior and improved cache safety
+ - Changed the default `persistent_cache` from `LlamaDiskCache` to `off`
+ - Updated `reset_session` so it clears history and per-session KV state while keeping the session's disk cache
+ - Moved disk cache storage to a session-scoped layout under `history_dir/cache/<session_id>/...`, with further separation by model settings
+ - Added more detailed diagnostics for cache mismatches and strengthened retry behavior after cache invalidation
+ - Updated `history_dir`, `reset_session`, and `persistent_cache` descriptions and tooltips to match the new cache model
+
+- Improved Qwen3.5 generation paths and override handling
+ - Added `qwen3.5.enable_thinking` to `config/simple_defaults.json`
+ - Introduced text prompt builder overrides so Qwen3.5 text-mode generation can explicitly enable or disable `<think>` output
+ - Updated the compatibility documentation to reflect the current Qwen3.5 support status
+
+- Improved backward compatibility for repetition-control parameters
+ - Adjusted repetition-penalty argument handling across llama-cpp-python versions by retrying with legacy `repeat_last_n` when the newer `penalty_last_n` path is rejected
+
+- Improved conversation summarization quality and history tracking
+ - Reworked the summary prompt to preserve names, roles, constraints, and unresolved items in a more compact and consistent way
+ - Strengthened the summary-compaction prompt to avoid guesswork and vague rewrites
+ - Added normalization for older histories that lack `covered_until_turn_id`, so summarized ranges can be tracked safely
+ - Improved post-processing that strips exposed reasoning such as `<think>` blocks and internal channel markup
+ - Added a forced override to suppress Qwen3.5 thinking output during summary generation
+
+---
+
 ## [1.0.3] - 2026-03-13
 
 - Improved cache architecture for better safety and performance

@@ -80,10 +80,12 @@ Typical values:
 ### persistent_cache
 Controls persistent disk cache.
 
-- LlamaDiskCache (私の環境では動かない)
+- LlamaDiskCache
 - off 
 
 `LlamaDiskCache` is scoped per `session_id`. Inside each session cache root, cache entries are further separated by model settings so incompatible configurations do not share the same disk cache directory.
+
+Availability depends on the `llama-cpp-python` build. If disk cache support is unstable in your environment, use `off`.
 
 ---
 

@@ -59,10 +59,10 @@ The following notes are compatibility-related cautions for existing users upgrad
 
 - Vision model chat handler detection now uses dynamic loading. Supported Vision model coverage has increased, but if the required handler implementation does not exist in your `llama-cpp-python` build, that chat format is disabled automatically.
 - mmproj auto-detection now depends on normalized aliases for both model and mmproj filenames. If filenames fall outside the expected prefix patterns, Auto-detect may fail.
-- Some Vision-family models remain highly backend-dependent. Even when the handler loads successfully, image input may still be unstable or unsupported in practice. In my environment, `Qwen3.5` Vision is not working yet, although text-only use works well.
-- The cache configuration model has changed. The new default settings are `persistent_cache = "off"` and `runtime_cache = "LlamaTrieCache"`. Existing UI settings should be reselected manually if needed. Older JSON config keys are ignored, so update your config files to use the new option names and values. In my environment, `KV_cache` and `LlamaDiskCache` no longer work with the latest `llama-cpp-python` (`0.3.33+`).
+- Some Vision-family models remain highly backend-dependent. Even when the handler loads successfully, image input may still be unstable or unsupported in practice. In my environment, `Qwen3.5` Vision works with the JamePeng fork `0.3.33+`, but it should still be treated as backend-dependent.
+- The cache configuration model has changed. The new default settings are `persistent_cache = "off"` and `runtime_cache = "LlamaTrieCache"`. Existing UI settings should be reselected manually if needed. Older JSON config keys are ignored, so update your config files to use the new option names and values. Depending on your `llama-cpp-python` build, `KV_cache` and `LlamaDiskCache` may still be unstable or unavailable, which is why `LlamaTrieCache` is now the default.
 - Cache compatibility checks are now stricter. Cache data created by older versions or under different runtime conditions may be invalidated automatically. This is expected safety behavior, not a defect.
-- `reset_session` で履歴とKV状態は初期化しつつ、セッション用ディスクキャッシュは保持する仕様へ変更
+- `reset_session` now clears history and per-session KV state, but keeps the session-scoped disk cache namespace.
 
 ---
 
@@ -76,12 +76,12 @@ The following notes are compatibility-related cautions for existing users upgrad
 | 0.3.21+ (JamePeng fork) | ✅ | ✅ | ✅ | ❌ |
 | 0.3.33+ (JamePeng fork) | ✅ | ✅ | ✅ | ✅ |
 
-**Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash` and `Phi-4` fail to load
+**Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash`, `Nemotron-Nano` and `Qwen3.5` fail to load.
 
 **Recommended Installation (JamePeng fork for Qwen3-VL support):**  
 Please follow the build and installation instructions provided in the JamePeng fork repository, as this fork requires a custom build and cannot be reliably installed via a simple `pip install`.
 
-~~`0.3.30+` (JamePeng fork) includes support for `Qwen3.5`, but in my environment Vision mode has not worked successfully. Only text-only mode is currently usable.~~ `0.3.33`(JamePeng fork)で私の環境で、`Qwen3.5`のVisionモードが動くことを確認しました。
+`0.3.33+` (JamePeng fork) works for `Qwen3.5` Vision in my environment. Earlier `0.3.30+` builds added support for `Qwen3.5`, but Vision mode was not yet working reliably for me at that stage.
 
 **Source:** https://github.com/JamePeng/llama-cpp-python
 
