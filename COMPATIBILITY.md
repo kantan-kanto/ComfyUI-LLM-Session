@@ -35,6 +35,7 @@ This document summarizes empirical compatibility results obtained during develop
 - Qwen3.5 (9B / 27B / 35B-A3B)*
 
 **Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash`, `Nemotron-Nano` and `Qwen3.5` fail to load.
+
 ---
 
 ## MoE Models (Backend-Dependent)
