@@ -11,12 +11,14 @@ It is intended as a reference for advanced users.
 Directory used to store:
 - conversation history
 - automatic summaries
-- prompt cache files
+- session-scoped prompt cache files
 
 Using the same `history_dir` allows conversations to persist across executions.
 
 ### reset_session
-Overwrites the cache, history and summary files associated with the session name.
+Overwrites the history and summary files associated with the session name, and resets per-session KV state.
+
+`reset_session` does not delete `LlamaDiskCache`. Reusing the same `session_id` keeps the same disk-cache namespace.
 
 ---
 
@@ -78,8 +80,10 @@ Typical values:
 ### persistent_cache
 Controls persistent disk cache.
 
-- LlamaDiskCache (recommended)
-- off
+- LlamaDiskCache (私の環境では動かない)
+- off 
+
+`LlamaDiskCache` is scoped per `session_id`. Inside each session cache root, cache entries are further separated by model settings so incompatible configurations do not share the same disk cache directory.
 
 ---
 
@@ -174,4 +178,3 @@ Streams the LLM output to the console in real time.
 - Not all parameters are required for every model
 - Tune only when issues appear
 - Simple nodes intentionally hide most parameters
-
