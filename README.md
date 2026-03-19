@@ -56,6 +56,11 @@ Model-to-model dialogue execution without graph cycles.
 ### LLM Dialogue Cycle (Simple)
 Minimal version focused on **role-based dialogue observation**.
 
+### Unload LLM Model
+A utility node to manually unload the LLM from VRAM. Useful for freeing up GPU memory for other tasks without restarting ComfyUI.
+Usage: set `unload_now` to true and queue the node to unload the model.
+After running, set it back to false to avoid accidental repeated unloads.
+
 ---
 
 ## Key Design Concepts
@@ -312,4 +317,3 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 - Improved Qwen3.5 generation paths and override handling
 - Improved backward compatibility for repetition-control parameters
 - Improved conversation summarization quality and history tracking
-

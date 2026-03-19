@@ -22,8 +22,6 @@ import shutil
 import folder_paths
 import hashlib
 import traceback
-
-
 # ============================================================================
 # Simple Defaults (config-driven)
 # ============================================================================
@@ -1952,6 +1950,12 @@ class GGUFModelManager:
             print(f"[GGUFModelManager] Unloading model: {self.current_model_path}")
         try:
             if self.model is not None:
+                # Detach any runtime/persistent cache (RAM/Trie/Disk) from llama-cpp
+                try:
+                    self.invalidate_cache(self.model, remove_disk_data=False)
+                except Exception:
+                    pass
+            if self.model is not None:
                 del self.model
         finally:
             self.model = None
@@ -1965,10 +1969,24 @@ class GGUFModelManager:
         self.current_model_path = None
         self.current_mmproj_path = None
         self._signature = None
+        try:
+            # Clear in-memory KV cache state to avoid stale session reuse.
+            global _MEM_KV_STATE
+            _MEM_KV_STATE.clear()
+        except Exception:
+            pass
 
         # Encourage timely cleanup (important for llama-cpp backends and mmproj state)
         import gc as _gc
         _gc.collect()
+        try:
+            import torch as _torch
+            if _torch.cuda.is_available():
+                _torch.cuda.empty_cache()
+            if hasattr(_torch, "xpu") and _torch.xpu.is_available():
+                _torch.xpu.empty_cache()
+        except Exception:
+            pass
 
 # Global model manager
 _model_manager = GGUFModelManager()
@@ -3963,6 +3981,36 @@ class LLMDialogueCycleNode:
         return ("\n".join(transcript_lines),)
 
 
+class UnloadLLMModelNode:
+    """Node to unload the currently loaded LLM model to free VRAM."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "unload_now": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Toggle true and queue to unload the current LLM model and free VRAM."
+                }),
+            },
+            "optional": {
+                "trigger": ("*",),
+            },
+        }
+
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("trigger",)
+    FUNCTION = "unload_model"
+    CATEGORY = "LLM/Session"
+
+    def unload_model(self, unload_now: bool, trigger: Any = None):
+        """Calls the global model manager to unload the model."""
+        global _model_manager
+        if unload_now and _model_manager:
+            _model_manager.unload_model()
+        return (trigger,)
+
+
 # ============================================================================
 # ComfyUI Node Registration
 # ============================================================================
@@ -3972,6 +4020,7 @@ NODE_CLASS_MAPPINGS = {
     "LLMDialogueCycleSimpleNode": LLMDialogueCycleSimpleNode,
     "LLMSessionChatNode": LLMSessionChatNode,
     "LLMDialogueCycleNode": LLMDialogueCycleNode,
+    "UnloadLLMModelNode": UnloadLLMModelNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -3979,6 +4028,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LLMDialogueCycleSimpleNode": "LLM Dialogue Cycle (Simple)",
     "LLMSessionChatNode": "LLM Session Chat",
     "LLMDialogueCycleNode": "LLM Dialogue Cycle",
+    "UnloadLLMModelNode": "Unload LLM Model",
 }
 
 
