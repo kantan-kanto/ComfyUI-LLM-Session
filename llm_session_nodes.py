@@ -1512,6 +1512,7 @@ class GGUFModelManager:
         self._signature: Optional[tuple] = None
         self.current_model_path: Optional[str] = None
         self.current_mmproj_path: Optional[str] = None
+        self._suppress_next_unload_log: bool = False
 
         # Optional override for where cache should be stored
         self.cache_dir_override: Optional[str] = None
@@ -1704,7 +1705,9 @@ class GGUFModelManager:
 
         # Otherwise, explicitly unload to avoid stale mmproj/handler state
         if self.model is not None:
-            print("[GGUFModelManager] Signature changed -> unloading previous model to avoid stale state")
+            if not self._suppress_next_unload_log:
+                print("[GGUFModelManager] Signature changed -> unloading previous model to avoid stale state")
+            self._suppress_next_unload_log = False
             self.unload_model()
 
         print(f"[GGUFModelManager] Loading model: {model_path}")
@@ -4002,11 +4005,16 @@ class UnloadLLMModelNode:
     RETURN_NAMES = ("trigger",)
     FUNCTION = "unload_model"
     CATEGORY = "LLM/Session"
+    OUTPUT_NODE = True
 
     def unload_model(self, unload_now: bool, trigger: Any = None):
         """Calls the global model manager to unload the model."""
         global _model_manager
         if unload_now and _model_manager:
+            # Suppress only if an actual model was present to unload.
+            if _model_manager.model is not None:
+                model_path = _model_manager.current_model_path or "unknown"
+                _model_manager._suppress_next_unload_log = True
             _model_manager.unload_model()
         return (trigger,)
 

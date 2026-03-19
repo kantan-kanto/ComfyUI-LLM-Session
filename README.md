@@ -58,6 +58,7 @@ Minimal version focused on **role-based dialogue observation**.
 
 ### Unload LLM Model
 A utility node to manually unload the LLM from VRAM. Useful for freeing up GPU memory for other tasks without restarting ComfyUI.
+This node can be executed as an output node.
 Usage: set `unload_now` to true and queue the node to unload the model.
 After running, set it back to false to avoid accidental repeated unloads.
 
