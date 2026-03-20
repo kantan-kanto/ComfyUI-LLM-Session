@@ -66,6 +66,30 @@ _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 
+def _simple_config_log(message: str, log_level: str) -> None:
+    try:
+        if str(log_level).strip().lower() != "minimal":
+            print(f"[LLM Session Simple] {message}")
+    except Exception:
+        pass
+
+def _normalize_config_path(config_path: Optional[str]) -> str:
+    raw = (config_path or "").strip()
+    if not raw:
+        return ""
+    # Strip wrapping quotes if the UI includes them.
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        raw = raw[1:-1].strip()
+    try:
+        raw = os.path.expandvars(raw)
+        raw = os.path.expanduser(raw)
+    except Exception:
+        pass
+    try:
+        return str(Path(raw))
+    except Exception:
+        return raw
+
 def _simple_config_path() -> str:
     try:
         base = Path(__file__).parent
@@ -75,33 +99,43 @@ def _simple_config_path() -> str:
 
 def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load Simple defaults from JSON, falling back to built-in safe defaults."""
-    cfg_path = (config_path or "").strip() or _simple_config_path()
+    cfg_path = _normalize_config_path(config_path) or _simple_config_path()
     defaults = dict(_SIMPLE_DEFAULTS_BUILTIN)
+    log_level_hint = defaults.get("log_level", "timing")
 
     if not cfg_path:
+        _simple_config_log("No config path provided; using built-in defaults.", log_level_hint)
         return defaults
     if not os.path.exists(cfg_path):
+        _simple_config_log(f"Config not found: {cfg_path} (using built-in defaults)", log_level_hint)
         return defaults
 
     try:
-        with open(cfg_path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        if not isinstance(raw, dict):
+        # Use utf-8-sig to tolerate BOM without failing JSON parsing.
+        with open(cfg_path, "r", encoding="utf-8-sig") as f:
+            config_obj = json.load(f)
+        if not isinstance(config_obj, dict):
+            _simple_config_log(f"Config JSON is not an object: {cfg_path}", log_level_hint)
             return defaults
-        if int(raw.get("schema_version", 1)) != 1:
+        if int(config_obj.get("schema_version", 1)) != 1:
             # Future-proof: unknown schema -> ignore
+            _simple_config_log(f"Config schema_version unsupported: {config_obj.get('schema_version')} in {cfg_path}", log_level_hint)
             return defaults
 
-        for k, v in raw.items():
+        if "log_level" in config_obj:
+            log_level_hint = str(config_obj.get("log_level") or log_level_hint)
+
+        for k, v in config_obj.items():
             if k not in _SIMPLE_ALLOWED_KEYS:
                 continue
             defaults[k] = v
     except Exception:
+        _simple_config_log(f"Failed to load config: {cfg_path}", log_level_hint)
         return defaults
 
     chat_handler_overrides: Dict[str, Dict[str, Any]] = {}
     text_chat_builder_overrides: Dict[str, Dict[str, Any]] = {}
-    qwen35_raw = raw.get("qwen3.5")
+    qwen35_raw = config_obj.get("qwen3.5")
     if isinstance(qwen35_raw, dict):
         qwen35_overrides: Dict[str, Any] = {}
         if "enable_thinking" in qwen35_raw:
