@@ -2524,15 +2524,15 @@ def _build_turn_execution_dependencies() -> TurnExecutionDependencies:
 
 
 def _build_dialogue_cycle_dependencies() -> DialogueCycleDependencies:
-    return {
-        "now_iso": _now_iso_jst,
-        "transcript_path": _transcript_path,
-        "append_transcript_lines": _append_transcript_lines,
-        "clear_kv_state_for_session": _clear_kv_state_for_session,
-        "model_manager_factory": GGUFModelManager,
-        "unload_model": lambda manager: manager.unload_model(),
-        "chat_one_turn": _chat_one_turn,
-    }
+    return DialogueCycleDependencies(
+        now_iso=_now_iso_jst,
+        transcript_path=_transcript_path,
+        append_transcript_lines=_append_transcript_lines,
+        clear_kv_state_for_session=_clear_kv_state_for_session,
+        model_manager_factory=GGUFModelManager,
+        unload_model=lambda manager: manager.unload_model(),
+        chat_one_turn=_chat_one_turn,
+    )
 
 
 def _build_dialogue_cycle_request(
