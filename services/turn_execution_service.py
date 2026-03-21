@@ -200,6 +200,10 @@ class TurnExecutionService:
         s = str(err)
         return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
 
+    def execute_from_node_inputs(self, **kwargs: Any) -> TurnExecutionResult:
+        request = TurnExecutionRequest.from_node_inputs(**kwargs)
+        return self.execute_turn(request)
+
     def _preflight(
         self, request: TurnExecutionRequest, deps: TurnExecutionDependencies
     ) -> tuple[Optional[Any], Optional[TurnExecutionResult]]:
@@ -794,5 +798,6 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
+
 
 
