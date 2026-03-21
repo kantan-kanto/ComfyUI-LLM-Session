@@ -2578,6 +2578,11 @@ def _build_dialogue_cycle_common_turn_kwargs(
     }
 
 
+def _resolve_model_path_for_session_chat(model: str) -> str:
+    roots = _get_llm_model_roots()
+    return _resolve_llm_relpath(model, roots=roots)
+
+
 def _require_llama_cpp_available() -> None:
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
@@ -2806,8 +2811,7 @@ class LLMSessionChatNode:
             _log_total("Finished (error)")
             return ("",)
 
-        roots = _get_llm_model_roots()
-        model_path = _resolve_llm_relpath(model, roots=roots)
+        model_path = _resolve_model_path_for_session_chat(model)
         if not os.path.exists(model_path):
             print(f"[LLM Session Chat] Error: Model not found: {model_path}")
             _log_total("Finished (error)")
