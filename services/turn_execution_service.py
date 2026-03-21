@@ -76,20 +76,20 @@ class TurnExecutionService:
         s = str(err)
         return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
 
-    def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
-        deps = request.dependencies
-
+    def _preflight(
+        self, request: TurnExecutionRequest, deps: Dict[str, Any]
+    ) -> tuple[Optional[Any], Optional[TurnExecutionResult]]:
         llama_cpp_available = bool(deps.get("llama_cpp_available", True))
         if not llama_cpp_available:
             msg = "llama_cpp is not available"
             import_err = deps.get("llama_cpp_import_error")
             if import_err:
                 msg += f" ({import_err})"
-            return TurnExecutionResult(assistant_text="", generation_succeeded=False, error=RuntimeError(msg))
+            return None, TurnExecutionResult(assistant_text="", generation_succeeded=False, error=RuntimeError(msg))
 
         mgr = request.model_manager
         if mgr is None:
-            return TurnExecutionResult(
+            return None, TurnExecutionResult(
                 assistant_text="",
                 generation_succeeded=False,
                 error=RuntimeError("model_manager is required"),
@@ -97,8 +97,13 @@ class TurnExecutionService:
 
         is_no_models_placeholder = self._dep(deps, "is_no_models_placeholder")
         if is_no_models_placeholder(request.model):
-            return TurnExecutionResult(assistant_text="", generation_succeeded=False)
+            return None, TurnExecutionResult(assistant_text="", generation_succeeded=False)
 
+        return mgr, None
+
+    def _resolve_model_paths(
+        self, request: TurnExecutionRequest, deps: Dict[str, Any]
+    ) -> tuple[Optional[str], Optional[str], Optional[TurnExecutionResult]]:
         get_llm_model_roots = self._dep(deps, "get_llm_model_roots")
         resolve_model_and_mmproj = self._dep(deps, "resolve_model_and_mmproj")
         roots = get_llm_model_roots()
@@ -106,21 +111,39 @@ class TurnExecutionService:
         try:
             model_path, mmproj_path = resolve_model_and_mmproj(roots, request.model, request.mmproj)
         except Exception as err:
-            return TurnExecutionResult(assistant_text="", generation_succeeded=False, error=err)
+            return None, None, TurnExecutionResult(assistant_text="", generation_succeeded=False, error=err)
 
-        model_sig = {
+        return model_path, mmproj_path, None
+
+    def _build_model_sig(
+        self,
+        *,
+        deps: Dict[str, Any],
+        model_path: str,
+        mmproj_path: Optional[str],
+        n_ctx: int,
+        n_gpu_layers: int,
+    ) -> Dict[str, Any]:
+        return {
             "model_file": os.path.basename(model_path),
             "mmproj_file": (
                 os.path.basename(mmproj_path)
                 if (mmproj_path and mmproj_path != deps.get("mmproj_not_required"))
                 else ""
             ),
-            "n_ctx": int(request.n_ctx),
-            "n_gpu_layers": int(request.n_gpu_layers),
+            "n_ctx": int(n_ctx),
+            "n_gpu_layers": int(n_gpu_layers),
         }
 
+    def _load_history(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        model_sig: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], str]:
         load_history = self._dep(deps, "load_history")
-        history, hist_path = load_history(
+        return load_history(
             session_id=request.session_id,
             history_dir=(request.history_dir or None),
             system_prompt=request.system_prompt,
@@ -128,6 +151,9 @@ class TurnExecutionService:
             reset_session=bool(request.reset_session),
         )
 
+    def _reset_state_if_needed(
+        self, *, request: TurnExecutionRequest, deps: Dict[str, Any], mgr: Any
+    ) -> Any:
         clear_kv_state_for_session = self._dep(deps, "clear_kv_state_for_session")
         if bool(request.reset_session):
             clear_kv_state_for_session(request.session_id)
@@ -136,7 +162,15 @@ class TurnExecutionService:
                     mgr.invalidate_cache(mgr.model, remove_disk_data=False)
             except Exception:
                 pass
+        return clear_kv_state_for_session
 
+    def _rewrite_user_text(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        history: Dict[str, Any],
+    ) -> str:
         rewrite_continue_prompt = self._dep(deps, "rewrite_continue_prompt")
         detect_history_language = self._dep(deps, "detect_history_language")
         continue_result = rewrite_continue_prompt(
@@ -145,10 +179,20 @@ class TurnExecutionService:
             rewrite_continue=bool(request.rewrite_continue),
             detect_history_language=detect_history_language,
         )
-        user_text_for_model = continue_result.user_text_for_model
         if continue_result.rewritten and request.log_level == "debug":
             print(f"{request.log_prefix} Continue detected, language: {continue_result.detected_language}")
+        return continue_result.user_text_for_model
 
+    def _load_model_with_cache(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        mgr: Any,
+        model_path: str,
+        mmproj_path: Optional[str],
+        hist_path: str,
+    ) -> tuple[Optional[Any], Optional[TurnExecutionResult]]:
         session_cache_root = self._dep(deps, "session_cache_root")
         try:
             mgr.cache_dir_override = session_cache_root(request.session_id, request.history_dir or None)
@@ -166,7 +210,15 @@ class TurnExecutionService:
                 verbose=False,
             )
         except Exception as err:
-            return TurnExecutionResult(assistant_text="", history_path=hist_path, generation_succeeded=False, error=err)
+            return (
+                None,
+                TurnExecutionResult(
+                    assistant_text="",
+                    history_path=hist_path,
+                    generation_succeeded=False,
+                    error=err,
+                ),
+            )
 
         try:
             mgr.configure_cache(
@@ -181,6 +233,18 @@ class TurnExecutionService:
         except Exception:
             pass
 
+        return llm, None
+
+    def _build_generation_inputs(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        history: Dict[str, Any],
+        user_text_for_model: str,
+        model_path: str,
+        mmproj_path: Optional[str],
+    ) -> tuple[Any, Any]:
         build_chat_messages = self._dep(deps, "build_chat_messages")
         build_text_chat_request = self._dep(deps, "build_text_chat_request")
         messages = build_chat_messages(
@@ -197,7 +261,20 @@ class TurnExecutionService:
             messages=messages,
             text_chat_builder_overrides=request.text_chat_builder_overrides,
         )
+        return messages, text_chat_request
 
+    def _maybe_restore_kv_state(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        mgr: Any,
+        llm: Any,
+        history: Dict[str, Any],
+        model_path: str,
+        mmproj_path: Optional[str],
+        clear_kv_state_for_session: Any,
+    ) -> tuple[Any, Any, Any]:
         build_kv_state_signature = self._dep(deps, "build_kv_state_signature")
         try_restore_kv_state = self._dep(deps, "try_restore_kv_state")
         is_state_data_mismatch_error = self._dep(deps, "is_state_data_mismatch_error")
@@ -242,130 +319,46 @@ class TurnExecutionService:
             except Exception:
                 pass
 
-        maybe_compact_summary = self._dep(deps, "maybe_compact_summary")
+        return is_state_data_mismatch_error, kv_state_debug_info, get_context_turns
 
-        def _on_state_cache_mismatch(err: Exception) -> None:
-            clear_kv_state_for_session(request.session_id)
-            if request.log_level != "minimal":
-                cache_debug_label = self._dep(deps, "cache_debug_label")
+    def _build_attempt_logger(self, request: TurnExecutionRequest) -> Optional[Any]:
+        if not request.enable_attempt_logging:
+            return None
+
+        def _attempt_logger(
+            ok: bool,
+            attempt_no: int,
+            elapsed: float,
+            gen_tok: int,
+            turns: Optional[int],
+            err: Optional[Exception],
+        ) -> None:
+            if ok:
                 print(
-                    f"{request.log_prefix} Cache mismatch details: "
-                    f"session_id={request.session_id}, cache={cache_debug_label(mgr)}, error={err}"
+                    f"{request.log_prefix} Generation attempt {attempt_no} succeeded in {elapsed:.2f} seconds "
+                    f"(max_tokens={int(gen_tok)}, turns_limit={turns})"
                 )
-            try:
-                mgr.invalidate_cache(llm, remove_disk_data=True)
-            except Exception:
-                pass
-            if request.log_level != "minimal":
-                print(f"{request.log_prefix} Detected incompatible cache state; cache invalidated and retrying once.")
-
-        def _on_compact_summary() -> None:
-            nonlocal history
-            if request.summarize_old_history:
-                try:
-                    history = maybe_compact_summary(
-                        model=llm,
-                        history=history,
-                        summary_max_chars=int(request.summary_max_chars),
-                        temperature=0.2,
-                        max_tokens_summary=int(request.max_tokens_summary),
-                        suppress_logs=(request.log_level != "debug"),
-                        model_path=model_path,
-                        mmproj_path=mmproj_path,
-                        text_chat_builder_overrides=request.text_chat_builder_overrides,
-                    )
-                except Exception:
-                    pass
-
-        def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
-            rebuilt_messages = build_chat_messages(
-                history=history,
-                user_text=user_text_for_model or "",
-                image_tensor=request.image,
-                max_turns=new_turns_limit,
-                summarize_old_history=bool(request.summarize_old_history),
-                system_prompt=request.system_prompt or "",
-            )
-            rebuilt_text_chat_request = build_text_chat_request(
-                model_path=model_path,
-                mmproj_path=mmproj_path,
-                messages=rebuilt_messages,
-                text_chat_builder_overrides=request.text_chat_builder_overrides,
-            )
-            return rebuilt_messages, rebuilt_text_chat_request
-
-        attempt_logger = None
-        if request.enable_attempt_logging:
-            def _attempt_logger(ok: bool, attempt_no: int, elapsed: float, gen_tok: int, turns: Optional[int], err: Optional[Exception]) -> None:
-                if ok:
-                    print(
-                        f"{request.log_prefix} Generation attempt {attempt_no} succeeded in {elapsed:.2f} seconds "
-                        f"(max_tokens={int(gen_tok)}, turns_limit={turns})"
-                    )
-                    return
-                print(
-                    f"{request.log_prefix} Generation attempt {attempt_no} failed in {elapsed:.2f} seconds "
-                    f"(max_tokens={int(gen_tok)}, turns_limit={turns}): {err}"
-                )
-            attempt_logger = _attempt_logger
-
-        run_generation_with_adaptive_retry = self._dep(deps, "run_generation_with_adaptive_retry")
-        make_suppress_backend_logs = self._dep(deps, "make_suppress_backend_logs")
-
-        generation_result = run_generation_with_adaptive_retry(
-            llm=llm,
-            messages=messages,
-            text_chat_request=text_chat_request,
-            max_tokens=int(request.max_tokens),
-            temperature=float(request.temperature),
-            top_p=float(request.top_p),
-            repeat_penalty=float(request.repeat_penalty),
-            repeat_last_n=int(request.repeat_last_n),
-            dynamic_max_tokens=bool(request.dynamic_max_tokens),
-            min_generation_tokens=int(request.min_generation_tokens),
-            safety_margin_tokens=int(request.safety_margin_tokens),
-            initial_turns_limit=(int(request.max_turns) if request.max_turns is not None else None),
-            stream_to_console=bool(request.stream_to_console),
-            max_attempts=6,
-            is_ctx_error=self._is_ctx_error,
-            is_state_data_mismatch_error=is_state_data_mismatch_error,
-            on_state_cache_mismatch=_on_state_cache_mismatch,
-            on_compact_summary=_on_compact_summary,
-            rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
-            attempt_logger=attempt_logger,
-            debug_traceback=(request.log_level == "debug"),
-            traceback_print_exc=traceback.print_exc,
-            suppress_backend_logs_ctx_factory=lambda: make_suppress_backend_logs(
-                bool(request.suppress_backend_logs) and (request.log_level != "debug")
-            ),
-            iter_chat_completion_robust=self._dep(deps, "iter_chat_completion_robust"),
-            create_chat_completion_robust=self._dep(deps, "create_chat_completion_robust"),
-            extract_stream_content=self._dep(deps, "extract_stream_content"),
-            retry_kwargs_with_repeat_last_n_fallback=self._dep(deps, "retry_kwargs_with_repeat_last_n_fallback"),
-        )
-
-        assistant_text = generation_result.assistant_text
-        if request.strip_assistant_before_reasoning_filter:
-            assistant_text = assistant_text.strip()
-
-        if generation_result.non_ctx_error:
-            return TurnExecutionResult(
-                assistant_text="",
-                history_path=hist_path,
-                generation_succeeded=False,
-                error=generation_result.last_err,
+                return
+            print(
+                f"{request.log_prefix} Generation attempt {attempt_no} failed in {elapsed:.2f} seconds "
+                f"(max_tokens={int(gen_tok)}, turns_limit={turns}): {err}"
             )
 
-        strip_reasoning_output = self._dep(deps, "strip_reasoning_output")
-        assistant_text = strip_reasoning_output(assistant_text)
-        if not assistant_text:
-            return TurnExecutionResult(
-                assistant_text="",
-                history_path=hist_path,
-                generation_succeeded=False,
-                error=generation_result.last_err,
-            )
+        return _attempt_logger
 
+    def _persist_history_and_summary(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        history: Dict[str, Any],
+        assistant_text: str,
+        generation_result: Any,
+        llm: Any,
+        hist_path: str,
+        model_path: str,
+        mmproj_path: Optional[str],
+    ) -> Dict[str, Any]:
         next_turn_id = self._dep(deps, "next_turn_id")
         now_iso = self._dep(deps, "now_iso")
 
@@ -437,33 +430,239 @@ class TurnExecutionService:
         except Exception:
             pass
 
-        if (request.runtime_cache or "off") == "KV_cache" and request.image is None:
+        return history
+
+    def _maybe_save_kv_state(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: Dict[str, Any],
+        llm: Any,
+        history: Dict[str, Any],
+        model_path: str,
+        mmproj_path: Optional[str],
+        kv_state_debug_info: Any,
+        get_context_turns: Any,
+    ) -> None:
+        if (request.runtime_cache or "off") != "KV_cache" or request.image is not None:
+            return
+        try:
+            build_kv_state_signature = self._dep(deps, "build_kv_state_signature")
+            kv_sig2 = build_kv_state_signature(
+                history=history,
+                max_turns=request.max_turns,
+                summarize_old_history=bool(request.summarize_old_history),
+                system_prompt=(request.system_prompt or ""),
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(request.n_ctx),
+                n_gpu_layers=int(request.n_gpu_layers),
+                get_context_turns=get_context_turns,
+            )
+            try_save_kv_state = self._dep(deps, "try_save_kv_state")
+            try_save_kv_state(
+                session_id=request.session_id,
+                signature=kv_sig2,
+                llm=llm,
+                mem_kv_state=self._dep(deps, "mem_kv_state"),
+                log_prefix=request.log_prefix,
+                log_level=request.log_level,
+                kv_state_debug_info=kv_state_debug_info,
+                log_saved_when_not_minimal=bool(request.kv_log_saved_when_not_minimal),
+                log_unsupported_when_not_minimal=bool(request.kv_log_unsupported_when_not_minimal),
+            )
+        except Exception:
+            pass
+
+    def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
+        deps = request.dependencies
+
+        mgr, early_result = self._preflight(request, deps)
+        if early_result is not None:
+            return early_result
+
+        model_path, mmproj_path, early_result = self._resolve_model_paths(request, deps)
+        if early_result is not None:
+            return early_result
+        assert mgr is not None and model_path is not None
+
+        model_sig = self._build_model_sig(
+            deps=deps,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            n_ctx=int(request.n_ctx),
+            n_gpu_layers=int(request.n_gpu_layers),
+        )
+        history, hist_path = self._load_history(request=request, deps=deps, model_sig=model_sig)
+        clear_kv_state_for_session = self._reset_state_if_needed(request=request, deps=deps, mgr=mgr)
+        user_text_for_model = self._rewrite_user_text(request=request, deps=deps, history=history)
+
+        llm, early_result = self._load_model_with_cache(
+            request=request,
+            deps=deps,
+            mgr=mgr,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            hist_path=hist_path,
+        )
+        if early_result is not None:
+            return early_result
+        assert llm is not None
+
+        build_chat_messages = self._dep(deps, "build_chat_messages")
+        build_text_chat_request = self._dep(deps, "build_text_chat_request")
+        messages, text_chat_request = self._build_generation_inputs(
+            request=request,
+            deps=deps,
+            history=history,
+            user_text_for_model=user_text_for_model,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+        )
+
+        is_state_data_mismatch_error, kv_state_debug_info, get_context_turns = self._maybe_restore_kv_state(
+            request=request,
+            deps=deps,
+            mgr=mgr,
+            llm=llm,
+            history=history,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            clear_kv_state_for_session=clear_kv_state_for_session,
+        )
+
+        maybe_compact_summary = self._dep(deps, "maybe_compact_summary")
+
+        def _on_state_cache_mismatch(err: Exception) -> None:
+            clear_kv_state_for_session(request.session_id)
+            if request.log_level != "minimal":
+                cache_debug_label = self._dep(deps, "cache_debug_label")
+                print(
+                    f"{request.log_prefix} Cache mismatch details: "
+                    f"session_id={request.session_id}, cache={cache_debug_label(mgr)}, error={err}"
+                )
             try:
-                kv_sig2 = build_kv_state_signature(
-                    history=history,
-                    max_turns=request.max_turns,
-                    summarize_old_history=bool(request.summarize_old_history),
-                    system_prompt=(request.system_prompt or ""),
-                    model_path=model_path,
-                    mmproj_path=mmproj_path,
-                    n_ctx=int(request.n_ctx),
-                    n_gpu_layers=int(request.n_gpu_layers),
-                    get_context_turns=get_context_turns,
-                )
-                try_save_kv_state = self._dep(deps, "try_save_kv_state")
-                try_save_kv_state(
-                    session_id=request.session_id,
-                    signature=kv_sig2,
-                    llm=llm,
-                    mem_kv_state=self._dep(deps, "mem_kv_state"),
-                    log_prefix=request.log_prefix,
-                    log_level=request.log_level,
-                    kv_state_debug_info=kv_state_debug_info,
-                    log_saved_when_not_minimal=bool(request.kv_log_saved_when_not_minimal),
-                    log_unsupported_when_not_minimal=bool(request.kv_log_unsupported_when_not_minimal),
-                )
+                mgr.invalidate_cache(llm, remove_disk_data=True)
             except Exception:
                 pass
+            if request.log_level != "minimal":
+                print(f"{request.log_prefix} Detected incompatible cache state; cache invalidated and retrying once.")
+
+        def _on_compact_summary() -> None:
+            nonlocal history
+            if request.summarize_old_history:
+                try:
+                    history = maybe_compact_summary(
+                        model=llm,
+                        history=history,
+                        summary_max_chars=int(request.summary_max_chars),
+                        temperature=0.2,
+                        max_tokens_summary=int(request.max_tokens_summary),
+                        suppress_logs=(request.log_level != "debug"),
+                        model_path=model_path,
+                        mmproj_path=mmproj_path,
+                        text_chat_builder_overrides=request.text_chat_builder_overrides,
+                    )
+                except Exception:
+                    pass
+
+        def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
+            rebuilt_messages = build_chat_messages(
+                history=history,
+                user_text=user_text_for_model or "",
+                image_tensor=request.image,
+                max_turns=new_turns_limit,
+                summarize_old_history=bool(request.summarize_old_history),
+                system_prompt=request.system_prompt or "",
+            )
+            rebuilt_text_chat_request = build_text_chat_request(
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                messages=rebuilt_messages,
+                text_chat_builder_overrides=request.text_chat_builder_overrides,
+            )
+            return rebuilt_messages, rebuilt_text_chat_request
+
+        attempt_logger = self._build_attempt_logger(request)
+
+        run_generation_with_adaptive_retry = self._dep(deps, "run_generation_with_adaptive_retry")
+        make_suppress_backend_logs = self._dep(deps, "make_suppress_backend_logs")
+
+        generation_result = run_generation_with_adaptive_retry(
+            llm=llm,
+            messages=messages,
+            text_chat_request=text_chat_request,
+            max_tokens=int(request.max_tokens),
+            temperature=float(request.temperature),
+            top_p=float(request.top_p),
+            repeat_penalty=float(request.repeat_penalty),
+            repeat_last_n=int(request.repeat_last_n),
+            dynamic_max_tokens=bool(request.dynamic_max_tokens),
+            min_generation_tokens=int(request.min_generation_tokens),
+            safety_margin_tokens=int(request.safety_margin_tokens),
+            initial_turns_limit=(int(request.max_turns) if request.max_turns is not None else None),
+            stream_to_console=bool(request.stream_to_console),
+            max_attempts=6,
+            is_ctx_error=self._is_ctx_error,
+            is_state_data_mismatch_error=is_state_data_mismatch_error,
+            on_state_cache_mismatch=_on_state_cache_mismatch,
+            on_compact_summary=_on_compact_summary,
+            rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
+            attempt_logger=attempt_logger,
+            debug_traceback=(request.log_level == "debug"),
+            traceback_print_exc=traceback.print_exc,
+            suppress_backend_logs_ctx_factory=lambda: make_suppress_backend_logs(
+                bool(request.suppress_backend_logs) and (request.log_level != "debug")
+            ),
+            iter_chat_completion_robust=self._dep(deps, "iter_chat_completion_robust"),
+            create_chat_completion_robust=self._dep(deps, "create_chat_completion_robust"),
+            extract_stream_content=self._dep(deps, "extract_stream_content"),
+            retry_kwargs_with_repeat_last_n_fallback=self._dep(deps, "retry_kwargs_with_repeat_last_n_fallback"),
+        )
+
+        assistant_text = generation_result.assistant_text
+        if request.strip_assistant_before_reasoning_filter:
+            assistant_text = assistant_text.strip()
+
+        if generation_result.non_ctx_error:
+            return TurnExecutionResult(
+                assistant_text="",
+                history_path=hist_path,
+                generation_succeeded=False,
+                error=generation_result.last_err,
+            )
+
+        strip_reasoning_output = self._dep(deps, "strip_reasoning_output")
+        assistant_text = strip_reasoning_output(assistant_text)
+        if not assistant_text:
+            return TurnExecutionResult(
+                assistant_text="",
+                history_path=hist_path,
+                generation_succeeded=False,
+                error=generation_result.last_err,
+            )
+
+        history = self._persist_history_and_summary(
+            request=request,
+            deps=deps,
+            history=history,
+            assistant_text=assistant_text,
+            generation_result=generation_result,
+            llm=llm,
+            hist_path=hist_path,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+        )
+        self._maybe_save_kv_state(
+            request=request,
+            deps=deps,
+            llm=llm,
+            history=history,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            kv_state_debug_info=kv_state_debug_info,
+            get_context_turns=get_context_turns,
+        )
 
         return TurnExecutionResult(
             assistant_text=assistant_text,
