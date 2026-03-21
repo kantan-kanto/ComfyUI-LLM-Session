@@ -2799,329 +2799,56 @@ def _chat_one_turn(
             _model_manager = GGUFModelManager()
         mgr = _model_manager
 
-    if _is_no_models_placeholder(model):
-        return ""
-
-    roots = _get_llm_model_roots()
-    try:
-        model_path, mmproj_path = _resolve_model_and_mmproj(roots, model, mmproj)
-    except Exception:
-        return ""
-
-    model_sig = {
-        "model_file": os.path.basename(model_path),
-        "mmproj_file": os.path.basename(mmproj_path) if (mmproj_path and mmproj_path != _MMPROJ_NOT_REQUIRED) else "",
-        "n_ctx": int(n_ctx),
-        "n_gpu_layers": int(n_gpu_layers),
-    }
-
-    history, hist_path = load_history(
+    service = TurnExecutionService()
+    request = TurnExecutionRequest(
+        user_text=user_text,
         session_id=session_id,
-        history_dir=(history_dir or None),
+        model=model,
+        mmproj=mmproj,
         system_prompt=system_prompt,
-        model_sig=model_sig,
-        reset_session=bool(reset_session),
-    )
-    if bool(reset_session):
-        _clear_kv_state_for_session(session_id)
-        # Also detach runtime cache from already loaded model if present.
-        try:
-            if mgr is not None and getattr(mgr, "model", None) is not None:
-                mgr.invalidate_cache(mgr.model, remove_disk_data=False)
-        except Exception:
-            pass
-
-    # Continue rewrite (same behavior as LLMSessionChatNode)
-    continue_result = rewrite_continue_prompt(
-        user_text=(user_text or ""),
-        history=history,
-        rewrite_continue=bool(rewrite_continue),
-        detect_history_language=_detect_history_language,
-    )
-    user_text_for_model = continue_result.user_text_for_model
-    if continue_result.rewritten and log_level == "debug":
-        print(f"[LLM Dialogue Cycle] Continue detected, language: {continue_result.detected_language}")
-
-    # Store disk cache under a session-specific root.
-    try:
-        mgr.cache_dir_override = _session_cache_root(session_id, history_dir or None)
-        os.makedirs(mgr.cache_dir_override, exist_ok=True)
-    except Exception:
-        mgr.cache_dir_override = None
-
-    try:
-        llm = mgr.load_model(
-            model_path=model_path,
-            mmproj_path=mmproj_path,
-            n_ctx=int(n_ctx),
-            n_gpu_layers=int(n_gpu_layers),
-            chat_handler_overrides=chat_handler_overrides,
-            verbose=False,
-        )
-    except Exception:
-        return ""
-
-    # Best-effort cache
-    try:
-        mgr.configure_cache(
-            llm,
-            model_path=model_path,
-            mmproj_path=mmproj_path,
-            n_ctx=int(n_ctx),
-            n_gpu_layers=int(n_gpu_layers),
-            persistent_cache=persistent_cache,
-            runtime_cache=runtime_cache,
-        )
-    except Exception:
-        pass
-
-    # Build messages (no image support in cycle node by design)
-    messages = build_chat_messages(
-        history=history,
-        user_text=user_text_for_model or "",
-        image_tensor=None,
-        max_turns=int(max_turns) if max_turns is not None else None,
-        summarize_old_history=bool(summarize_old_history),
-        system_prompt=system_prompt or "",
-    )
-    text_chat_request = _build_text_chat_request(
-        model_path=model_path,
-        mmproj_path=mmproj_path,
-        messages=messages,
-        text_chat_builder_overrides=text_chat_builder_overrides,
-    )
-
-    # In-memory KV/state cache (best-effort). This can speed up long-running sessions.
-    if (runtime_cache or "off") == "KV_cache":
-        try:
-            _kv_sig = build_kv_state_signature(
-                history=history,
-                max_turns=max_turns,
-                summarize_old_history=bool(summarize_old_history),
-                system_prompt=(system_prompt or ""),
-                model_path=model_path,
-                mmproj_path=mmproj_path,
-                n_ctx=int(n_ctx),
-                n_gpu_layers=int(n_gpu_layers),
-                get_context_turns=_get_context_turns,
-            )
-            try_restore_kv_state(
-                session_id=session_id,
-                signature=_kv_sig,
-                llm=llm,
-                mem_kv_state=_MEM_KV_STATE,
-                log_prefix="[LLM Dialogue Cycle]",
-                log_level=log_level,
-                model_path=model_path,
-                n_ctx=int(n_ctx),
-                n_gpu_layers=int(n_gpu_layers),
-                clear_kv_state_for_session=_clear_kv_state_for_session,
-                is_state_data_mismatch_error=_is_state_data_mismatch_error,
-                invalidate_cache=lambda _llm, remove_disk_data: mgr.invalidate_cache(
-                    _llm, remove_disk_data=remove_disk_data
-                ),
-                saved_llama_state_size=_saved_llama_state_size,
-                current_llama_state_size=_current_llama_state_size,
-                kv_state_debug_info=_kv_state_debug_info,
-                include_error_in_invalidate_message=True,
-            )
-        except Exception as e:
-            if log_level == "debug":
-                print(f"[LLM Dialogue Cycle] KV state: DISABLED ({e})")
-
-    # Generate with dynamic fallback on n_ctx overflow (same pattern)
-    turns_limit = int(max_turns) if max_turns is not None else None
-
-    def _is_ctx_error(err: Exception) -> bool:
-        s = str(err)
-        return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
-
-    def _on_state_cache_mismatch(err: Exception) -> None:
-        _clear_kv_state_for_session(session_id)
-        if log_level != "minimal":
-            print(
-                "[LLM Dialogue Cycle] Cache mismatch details: "
-                f"session_id={session_id}, cache={_cache_debug_label(mgr)}, error={err}"
-            )
-        try:
-            mgr.invalidate_cache(llm, remove_disk_data=True)
-        except Exception:
-            pass
-        if log_level != "minimal":
-            print("[LLM Dialogue Cycle] Detected incompatible cache state; cache invalidated and retrying once.")
-
-    def _on_compact_summary() -> None:
-        nonlocal history
-        if summarize_old_history:
-            try:
-                history = maybe_compact_summary(
-                    model=llm,
-                    history=history,
-                    summary_max_chars=int(summary_max_chars),
-                    temperature=0.2,
-                    max_tokens_summary=int(max_tokens_summary),
-                    suppress_logs=(log_level != "debug"),
-                    model_path=model_path,
-                    mmproj_path=mmproj_path,
-                    text_chat_builder_overrides=text_chat_builder_overrides,
-                )
-            except Exception:
-                pass
-
-    def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
-        _messages = build_chat_messages(
-            history=history,
-            user_text=user_text_for_model or "",
-            image_tensor=None,
-            max_turns=new_turns_limit,
-            summarize_old_history=bool(summarize_old_history),
-            system_prompt=system_prompt or "",
-        )
-        _text_chat_request = _build_text_chat_request(
-            model_path=model_path,
-            mmproj_path=mmproj_path,
-            messages=_messages,
-            text_chat_builder_overrides=text_chat_builder_overrides,
-        )
-        return _messages, _text_chat_request
-
-    generation_result = run_generation_with_adaptive_retry(
-        llm=llm,
-        messages=messages,
-        text_chat_request=text_chat_request,
         max_tokens=int(max_tokens),
         temperature=float(temperature),
         top_p=float(top_p),
-        repeat_penalty=float(repeat_penalty),
-        repeat_last_n=int(repeat_last_n),
+        n_gpu_layers=int(n_gpu_layers),
+        n_ctx=int(n_ctx),
+        image=None,
+        max_turns=(int(max_turns) if max_turns is not None else None),
+        summarize_old_history=bool(summarize_old_history),
+        summary_chunk_turns=int(summary_chunk_turns),
+        max_tokens_summary=int(max_tokens_summary),
+        summary_max_chars=int(summary_max_chars),
         dynamic_max_tokens=bool(dynamic_max_tokens),
         min_generation_tokens=int(min_generation_tokens),
         safety_margin_tokens=int(safety_margin_tokens),
-        initial_turns_limit=turns_limit,
+        persistent_cache=str(persistent_cache),
+        repeat_penalty=float(repeat_penalty),
+        repeat_last_n=int(repeat_last_n),
+        rewrite_continue=bool(rewrite_continue),
+        runtime_cache=str(runtime_cache),
+        log_level=str(log_level),
+        suppress_backend_logs=bool(suppress_backend_logs),
+        history_dir=history_dir or "",
+        reset_session=bool(reset_session),
         stream_to_console=bool(stream_to_console),
-        max_attempts=6,
-        is_ctx_error=_is_ctx_error,
-        is_state_data_mismatch_error=_is_state_data_mismatch_error,
-        on_state_cache_mismatch=_on_state_cache_mismatch,
-        on_compact_summary=_on_compact_summary,
-        rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
-        attempt_logger=None,
-        debug_traceback=(log_level == "debug"),
-        traceback_print_exc=traceback.print_exc,
-        suppress_backend_logs_ctx_factory=lambda: _make_suppress_backend_logs(
-            bool(suppress_backend_logs) and (log_level != "debug")
-        ),
-        iter_chat_completion_robust=_iter_chat_completion_robust,
-        create_chat_completion_robust=_create_chat_completion_robust,
-        extract_stream_content=_extract_stream_content,
-        retry_kwargs_with_repeat_last_n_fallback=_retry_kwargs_with_repeat_last_n_fallback,
+        model_manager=mgr,
+        chat_handler_overrides=chat_handler_overrides,
+        text_chat_builder_overrides=text_chat_builder_overrides,
+        strip_assistant_before_reasoning_filter=True,
+        include_image_and_stream_in_turn_params=False,
+        kv_log_saved_when_not_minimal=True,
+        kv_log_unsupported_when_not_minimal=True,
+        include_error_in_invalidate_message=True,
+        enable_attempt_logging=False,
+        log_prefix="[LLM Dialogue Cycle]",
+        dependencies=_build_turn_execution_dependencies(),
     )
-    assistant_text = generation_result.assistant_text.strip()
-    gen_tokens = generation_result.gen_tokens
-    turns_limit = generation_result.turns_limit
-    last_err = generation_result.last_err
-
-    if generation_result.non_ctx_error:
+    result = service.execute_turn(request)
+    if not result.generation_succeeded:
+        if log_level == "debug" and result.error is not None:
+            print(f"[LLM Dialogue Cycle] generation failed: {result.error}")
         return ""
 
-    assistant_text = _strip_reasoning_output(assistant_text)
-    if not assistant_text:
-        if log_level == "debug":
-            print(f"[LLM Dialogue Cycle] generation failed: {last_err}")
-        return ""
-
-    # Update history
-    history.setdefault("turns", []).append({
-        "id": _next_turn_id(history),
-        "t": _now_iso_jst(),
-        "user": {"text": user_text or "", "image_note": ""},
-        "assistant": {"text": assistant_text or ""},   
-    })
-    history.setdefault("meta", {})["updated_at"] = _now_iso_jst()
-    # Save only the latest execution parameters (overwrite each time)
-    history.setdefault("meta", {})["last_params"] = {
-        # parameters (required values)
-        "max_tokens_req": int(max_tokens),
-        "temperature": float(temperature),
-        "top_p": float(top_p),
-        "repeat_penalty": float(repeat_penalty) if repeat_penalty is not None else None,
-        "repeat_last_n": int(repeat_last_n) if repeat_last_n is not None else None,
-
-        # Runtime context/load system
-        "persistent_cache": (persistent_cache or "off"),
-        "runtime_cache": (runtime_cache or "off"),
-
-        # History control
-        "max_turns": int(max_turns) if max_turns is not None else None,
-        "summarize_old_history": bool(summarize_old_history),
-        "summary_chunk_turns": int(summary_chunk_turns),
-        "max_tokens_summary": int(max_tokens_summary),
-        "summary_max_chars": int(summary_max_chars),
-
-        # Retained actually used values , if dynamic degeneracy is effective
-        "dynamic_max_tokens": bool(dynamic_max_tokens),
-        "max_tokens_used": int(gen_tokens),
-        "turns_limit_used": int(turns_limit) if turns_limit is not None else None,
-
-        "saved_at": _now_iso_jst(),
-    }
-    history["system_prompt"] = system_prompt or history.get("system_prompt", "")
-
-    # Summarize overflow
-    if summarize_old_history and max_turns is not None:
-        try:
-            history = maybe_summarize_history(
-                model=llm,
-                history=history,
-                max_turns=int(max_turns),
-                summarize_old_history=bool(summarize_old_history),
-                summary_chunk_turns=int(summary_chunk_turns),
-                temperature=0.2,
-                max_tokens_summary=int(max_tokens_summary),
-                summary_max_chars=int(summary_max_chars),
-                suppress_logs=(log_level != "debug"),
-                model_path=model_path,
-                mmproj_path=mmproj_path,
-                text_chat_builder_overrides=text_chat_builder_overrides,
-            )
-        except Exception:
-            pass
-
-    try:
-        _atomic_write_json(hist_path, history)
-    except Exception:
-        pass
-
-    # Save in-memory KV/state for next turn (best-effort)
-    if (runtime_cache or "off") == "KV_cache":
-        try:
-            _sig2 = build_kv_state_signature(
-                history=history,
-                max_turns=max_turns,
-                summarize_old_history=bool(summarize_old_history),
-                system_prompt=(system_prompt or ""),
-                model_path=model_path,
-                mmproj_path=mmproj_path,
-                n_ctx=int(n_ctx),
-                n_gpu_layers=int(n_gpu_layers),
-                get_context_turns=_get_context_turns,
-            )
-            try_save_kv_state(
-                session_id=session_id,
-                signature=_sig2,
-                llm=llm,
-                mem_kv_state=_MEM_KV_STATE,
-                log_prefix="[LLM Dialogue Cycle]",
-                log_level=log_level,
-                kv_state_debug_info=_kv_state_debug_info,
-                log_saved_when_not_minimal=True,
-                log_unsupported_when_not_minimal=True,
-            )
-        except Exception as e:
-            if log_level == "debug":
-                print(f"[LLM Dialogue Cycle] KV state save skipped: {e}")
-
-    return assistant_text
+    return result.assistant_text
 
 
 # =============================================================================
