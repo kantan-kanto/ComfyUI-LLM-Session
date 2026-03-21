@@ -24,8 +24,10 @@ import hashlib
 import traceback
 try:
     from .core.continue_rewrite import rewrite_continue_prompt
+    from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
+    from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
 
 
 # ============================================================================
@@ -2796,80 +2798,37 @@ class LLMSessionChatNode:
         # In-memory KV/state cache (best-effort)
         if (runtime_cache or "off") == "KV_cache" and image is None:
             try:
-                _turns_ctx = _get_context_turns(history, max_turns=max_turns)
-                _summary_txt = ""
-                if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
-                    _summary_txt = history.get("summary", {}).get("text", "") or ""
-                _effective_system = (system_prompt or history.get("system_prompt", "") or "").strip()
-                _kv_prefix_material = json.dumps({
-                    "model_path": os.path.abspath(model_path) if model_path else "",
-                    "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
-                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
-                    "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
-                    "system": _effective_system,
-                    "summary": _summary_txt,
-                    "turns": _turns_ctx,
-                }, ensure_ascii=False, sort_keys=True)
-                _kv_sig = hashlib.sha256(_kv_prefix_material.encode("utf-8")).hexdigest()
-                entry = _MEM_KV_STATE.get(session_id)
-                if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
-                    try:
-                        _state_payload = entry.get("state")
-                        _saved_size = _saved_llama_state_size(_state_payload)
-                        _current_size = _current_llama_state_size(llm)
-                        _skip_load = (
-                            _saved_size is not None
-                            and _current_size is not None
-                            and _saved_size != _current_size
-                        )
-                        if _skip_load:
-                            _clear_kv_state_for_session(session_id)
-                            if log_level != "minimal":
-                                print("[LLM Session Chat] KV state: INVALIDATED (incompatible state size)")
-                            if log_level == "debug":
-                                print(
-                                    "[LLM Session Chat] KV precheck mismatch: "
-                                    f"session_id={session_id}, sig={_kv_sig[:12]}, "
-                                    f"saved_size={_saved_size}, current_size={_current_size}, "
-                                    f"model={os.path.basename(model_path)}"
-                                )
-                        else:
-                            if log_level == "debug":
-                                print(
-                                    "[LLM Session Chat] KV load attempt: "
-                                    f"session_id={session_id}, sig={_kv_sig[:12]}, "
-                                    f"{_kv_state_debug_info(_state_payload)}, "
-                                    f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
-                                )
-                            llm.load_state(_state_payload)
-                            if log_level != "minimal":
-                                print("[LLM Session Chat] KV state: HIT (memory)")
-                    except Exception as e:
-                        _clear_kv_state_for_session(session_id)
-                        if _is_state_data_mismatch_error(e):
-                            try:
-                                _model_manager.invalidate_cache(llm, remove_disk_data=True)
-                            except Exception:
-                                pass
-                        if log_level != "minimal":
-                            print("[LLM Session Chat] KV state: INVALIDATED (load failed)")
-                        if log_level == "debug":
-                            print(
-                                "[LLM Session Chat] KV load context: "
-                                f"session_id={session_id}, sig={_kv_sig[:12]}, "
-                                f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
-                            )
-                            print(f"[LLM Session Chat] KV state load failed: {e}")
-                else:
-                    if log_level != "minimal":
-                        reason = "no state" if not entry else "prefix changed"
-                        print(f"[LLM Session Chat] KV state: MISS ({reason})")
-                    if log_level == "debug" and entry:
-                        print(
-                            "[LLM Session Chat] KV miss details: "
-                            f"session_id={session_id}, stored_sig={str(entry.get('signature', ''))[:12]}, "
-                            f"current_sig={_kv_sig[:12]}, { _kv_state_debug_info(entry.get('state')) }"
-                        )
+                _kv_sig = build_kv_state_signature(
+                    history=history,
+                    max_turns=max_turns,
+                    summarize_old_history=bool(summarize_old_history),
+                    system_prompt=(system_prompt or ""),
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    n_ctx=int(n_ctx),
+                    n_gpu_layers=int(n_gpu_layers),
+                    get_context_turns=_get_context_turns,
+                )
+                try_restore_kv_state(
+                    session_id=session_id,
+                    signature=_kv_sig,
+                    llm=llm,
+                    mem_kv_state=_MEM_KV_STATE,
+                    log_prefix="[LLM Session Chat]",
+                    log_level=log_level,
+                    model_path=model_path,
+                    n_ctx=int(n_ctx),
+                    n_gpu_layers=int(n_gpu_layers),
+                    clear_kv_state_for_session=_clear_kv_state_for_session,
+                    is_state_data_mismatch_error=_is_state_data_mismatch_error,
+                    invalidate_cache=lambda _llm, remove_disk_data: _model_manager.invalidate_cache(
+                        _llm, remove_disk_data=remove_disk_data
+                    ),
+                    saved_llama_state_size=_saved_llama_state_size,
+                    current_llama_state_size=_current_llama_state_size,
+                    kv_state_debug_info=_kv_state_debug_info,
+                    include_error_in_invalidate_message=False,
+                )
             except Exception as e:
                 if log_level == "debug":
                     print(f"[LLM Session Chat] KV state: DISABLED ({e})")
@@ -3156,30 +3115,28 @@ class LLMSessionChatNode:
         # Save in-memory KV/state for next turn (best-effort)
         if (runtime_cache or "off") == "KV_cache" and image is None:
             try:
-                if hasattr(llm, "save_state"):
-                    _turns_ctx2 = _get_context_turns(history, max_turns=max_turns)
-                    _summary_txt2 = ""
-                    if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
-                        _summary_txt2 = history.get("summary", {}).get("text", "") or ""
-                    _effective_system2 = (system_prompt or history.get("system_prompt", "") or "").strip()
-                    _kv_prefix_material2 = json.dumps({
-                        "model_path": os.path.abspath(model_path) if model_path else "",
-                        "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
-                        "n_ctx": int(n_ctx) if n_ctx is not None else None,
-                        "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
-                        "system": _effective_system2,
-                        "summary": _summary_txt2,
-                        "turns": _turns_ctx2,
-                    }, ensure_ascii=False, sort_keys=True)
-                    _sig2 = hashlib.sha256(_kv_prefix_material2.encode("utf-8")).hexdigest()
-                    _saved_state = llm.save_state()
-                    _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": _saved_state}
-                    if log_level == "debug":
-                        print(
-                            "[LLM Session Chat] KV state: SAVED (memory) "
-                            f"session_id={session_id}, sig={_sig2[:12]}, "
-                            f"{_kv_state_debug_info(_saved_state)}"
-                        )
+                _sig2 = build_kv_state_signature(
+                    history=history,
+                    max_turns=max_turns,
+                    summarize_old_history=bool(summarize_old_history),
+                    system_prompt=(system_prompt or ""),
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    n_ctx=int(n_ctx),
+                    n_gpu_layers=int(n_gpu_layers),
+                    get_context_turns=_get_context_turns,
+                )
+                try_save_kv_state(
+                    session_id=session_id,
+                    signature=_sig2,
+                    llm=llm,
+                    mem_kv_state=_MEM_KV_STATE,
+                    log_prefix="[LLM Session Chat]",
+                    log_level=log_level,
+                    kv_state_debug_info=_kv_state_debug_info,
+                    log_saved_when_not_minimal=False,
+                    log_unsupported_when_not_minimal=False,
+                )
             except Exception as e:
                 if log_level == "debug":
                     print(f"[LLM Session Chat] KV state save skipped: {e}")
@@ -3338,79 +3295,37 @@ def _chat_one_turn(
     # In-memory KV/state cache (best-effort). This can speed up long-running sessions.
     if (runtime_cache or "off") == "KV_cache":
         try:
-            _turns_ctx = _get_context_turns(history, max_turns=max_turns)
-            _summary_txt = ""
-            if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
-                _summary_txt = history.get("summary", {}).get("text", "") or ""
-            _effective_system = (system_prompt or history.get("system_prompt", "") or "").strip()
-            _kv_prefix_material = json.dumps({
-                "model_path": os.path.abspath(model_path) if model_path else "",
-                "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
-                "n_ctx": int(n_ctx) if n_ctx is not None else None,
-                "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
-                "system": _effective_system,
-                "summary": _summary_txt,
-                "turns": _turns_ctx,
-            }, ensure_ascii=False, sort_keys=True)
-            _kv_sig = hashlib.sha256(_kv_prefix_material.encode("utf-8")).hexdigest()
-            entry = _MEM_KV_STATE.get(session_id)
-            if entry and entry.get("signature") == _kv_sig and hasattr(llm, "load_state"):
-                try:
-                    _state_payload = entry.get("state")
-                    _saved_size = _saved_llama_state_size(_state_payload)
-                    _current_size = _current_llama_state_size(llm)
-                    _skip_load = (
-                        _saved_size is not None
-                        and _current_size is not None
-                        and _saved_size != _current_size
-                    )
-                    if _skip_load:
-                        _clear_kv_state_for_session(session_id)
-                        if log_level != "minimal":
-                            print("[LLM Dialogue Cycle] KV state: INVALIDATED (incompatible state size)")
-                        if log_level == "debug":
-                            print(
-                                "[LLM Dialogue Cycle] KV precheck mismatch: "
-                                f"session_id={session_id}, sig={_kv_sig[:12]}, "
-                                f"saved_size={_saved_size}, current_size={_current_size}, "
-                                f"model={os.path.basename(model_path)}"
-                            )
-                    else:
-                        if log_level == "debug":
-                            print(
-                                "[LLM Dialogue Cycle] KV load attempt: "
-                                f"session_id={session_id}, sig={_kv_sig[:12]}, "
-                                f"{_kv_state_debug_info(_state_payload)}, "
-                                f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
-                            )
-                        llm.load_state(_state_payload)
-                        if log_level != "minimal":
-                            print("[LLM Dialogue Cycle] KV state: HIT (memory)")
-                except Exception as e:
-                    _clear_kv_state_for_session(session_id)
-                    if _is_state_data_mismatch_error(e):
-                        try:
-                            mgr.invalidate_cache(llm, remove_disk_data=True)
-                        except Exception:
-                            pass
-                    if log_level != "minimal":
-                        print(f"[LLM Dialogue Cycle] KV state: INVALIDATED (load failed: {e})")
-                    if log_level == "debug":
-                        print(
-                            "[LLM Dialogue Cycle] KV load context: "
-                            f"session_id={session_id}, sig={_kv_sig[:12]}, "
-                            f"model={os.path.basename(model_path)}, n_ctx={int(n_ctx)}, n_gpu_layers={int(n_gpu_layers)}"
-                        )
-            else:
-                if log_level != "minimal":
-                    reason = "no state" if not entry else "prefix changed"
-                    print(f"[LLM Dialogue Cycle] KV state: MISS ({reason})")
-                if log_level == "debug" and entry:
-                    print(
-                        "[LLM Dialogue Cycle] KV miss details: "
-                        f"session_id={session_id}, stored_sig={str(entry.get('signature', ''))[:12]}, "
-                        f"current_sig={_kv_sig[:12]}, { _kv_state_debug_info(entry.get('state')) }"
-                    )
+            _kv_sig = build_kv_state_signature(
+                history=history,
+                max_turns=max_turns,
+                summarize_old_history=bool(summarize_old_history),
+                system_prompt=(system_prompt or ""),
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(n_ctx),
+                n_gpu_layers=int(n_gpu_layers),
+                get_context_turns=_get_context_turns,
+            )
+            try_restore_kv_state(
+                session_id=session_id,
+                signature=_kv_sig,
+                llm=llm,
+                mem_kv_state=_MEM_KV_STATE,
+                log_prefix="[LLM Dialogue Cycle]",
+                log_level=log_level,
+                model_path=model_path,
+                n_ctx=int(n_ctx),
+                n_gpu_layers=int(n_gpu_layers),
+                clear_kv_state_for_session=_clear_kv_state_for_session,
+                is_state_data_mismatch_error=_is_state_data_mismatch_error,
+                invalidate_cache=lambda _llm, remove_disk_data: mgr.invalidate_cache(
+                    _llm, remove_disk_data=remove_disk_data
+                ),
+                saved_llama_state_size=_saved_llama_state_size,
+                current_llama_state_size=_current_llama_state_size,
+                kv_state_debug_info=_kv_state_debug_info,
+                include_error_in_invalidate_message=True,
+            )
         except Exception as e:
             if log_level == "debug":
                 print(f"[LLM Dialogue Cycle] KV state: DISABLED ({e})")
@@ -3662,33 +3577,28 @@ def _chat_one_turn(
     # Save in-memory KV/state for next turn (best-effort)
     if (runtime_cache or "off") == "KV_cache":
         try:
-            if hasattr(llm, "save_state"):
-                _turns_ctx2 = _get_context_turns(history, max_turns=max_turns)
-                _summary_txt2 = ""
-                if bool(summarize_old_history) and history.get("summary", {}).get("enabled", False):
-                    _summary_txt2 = history.get("summary", {}).get("text", "") or ""
-                _effective_system2 = (system_prompt or history.get("system_prompt", "") or "").strip()
-                _kv_prefix_material2 = json.dumps({
-                    "model_path": os.path.abspath(model_path) if model_path else "",
-                    "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
-                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
-                    "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
-                    "system": _effective_system2,
-                    "summary": _summary_txt2,
-                    "turns": _turns_ctx2,
-                }, ensure_ascii=False, sort_keys=True)
-                _sig2 = hashlib.sha256(_kv_prefix_material2.encode("utf-8")).hexdigest()
-                _saved_state = llm.save_state()
-                _MEM_KV_STATE[session_id] = {"signature": _sig2, "state": _saved_state}
-                if log_level != "minimal":
-                    print(
-                        "[LLM Dialogue Cycle] KV state: SAVED (memory) "
-                        f"session_id={session_id}, sig={_sig2[:12]}, "
-                        f"{_kv_state_debug_info(_saved_state)}"
-                    )
-            else:
-                if log_level != "minimal":
-                    print("[LLM Dialogue Cycle] KV state: UNSUPPORTED (no save_state)")
+            _sig2 = build_kv_state_signature(
+                history=history,
+                max_turns=max_turns,
+                summarize_old_history=bool(summarize_old_history),
+                system_prompt=(system_prompt or ""),
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(n_ctx),
+                n_gpu_layers=int(n_gpu_layers),
+                get_context_turns=_get_context_turns,
+            )
+            try_save_kv_state(
+                session_id=session_id,
+                signature=_sig2,
+                llm=llm,
+                mem_kv_state=_MEM_KV_STATE,
+                log_prefix="[LLM Dialogue Cycle]",
+                log_level=log_level,
+                kv_state_debug_info=_kv_state_debug_info,
+                log_saved_when_not_minimal=True,
+                log_unsupported_when_not_minimal=True,
+            )
         except Exception as e:
             if log_level == "debug":
                 print(f"[LLM Dialogue Cycle] KV state save skipped: {e}")
