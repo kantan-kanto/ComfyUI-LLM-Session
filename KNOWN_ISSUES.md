@@ -21,3 +21,27 @@
 - Current behavior: KV_cache is effectively not working (state is not reused across turns).
 - Regression status: Known pre-existing issue before P0 refactoring; no additional worsening observed in current refactoring.
 - Planned handling: Track as a separate bug-fix task after refactoring milestones.
+## LLM Dialogue Cycle unloads model at end of execution
+- Status: Open
+- First recorded: 2026-03-21
+- Scope: `LLM Dialogue Cycle`
+- Symptom: Model is unloaded when cycle execution finishes.
+- Observed log: `[GGUFModelManager] Unloading model: C:\ComfyUI\models\LLM\Qwen3VL-8B-Instruct-Q8_0.gguf`
+- Current behavior: model unload is always performed at the end of `chat_cycle` flow.
+- Regression status: Unknown (whether this is intended policy or incidental behavior has not been finalized).
+- Planned handling: Re-evaluate as a post-refactor behavior decision task (separate from behavior-preserving refactor commits).
+
+## History .bak recovery does not restore session in some local cases
+- Status: Open
+- First recorded: 2026-03-22
+- Scope: `LLM Session Chat` (history load path)
+- Symptom: Session history is not recovered even when a `.bak` file exists.
+- Repro (confirmed):
+  1. Use an existing session file (example: `20260207.json`).
+  2. Case A: break JSON structure in the primary file (`*.json`) and keep `*.bak`.
+  3. Case B: delete the primary file (`*.json`) while `*.bak` exists.
+  4. Run `LLM Session Chat` with the same `session_id`.
+- Current behavior: `.bak` is not used to restore in the tested local environment.
+- Regression status: Unknown (pre-refactor behavior was not conclusively verified).
+- Planned handling: Address after refactoring completion as a separate bug-fix task.
+- Notes: This issue is tracked separately from behavior-preserving refactor commits.
