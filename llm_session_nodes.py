@@ -24,9 +24,11 @@ import hashlib
 import traceback
 try:
     from .core.continue_rewrite import rewrite_continue_prompt
+    from .core.generation_runner import run_generation_with_adaptive_retry
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
+    from core.generation_runner import run_generation_with_adaptive_retry
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
 
 
@@ -2835,192 +2837,113 @@ class LLMSessionChatNode:
 
         
         # Generate (with optional dynamic fallback when n_ctx is exceeded)
-        assistant_text = ""
-        gen_tokens = int(max_tokens)
-        # Reserve a generation margin up front to reduce n_ctx overflow retries.
-        if bool(dynamic_max_tokens):
-            gen_tokens = max(1, gen_tokens - max(0, int(safety_margin_tokens)))
         turns_limit = int(max_turns) if max_turns is not None else None
 
         def _is_ctx_error(err: Exception) -> bool:
             s = str(err)
             return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
 
-        attempts = 0
-        last_err = None
-        state_cache_recovered = False
-        while attempts < 6:
+        def _attempt_log(ok: bool, attempt_no: int, elapsed: float, gen_tok: int, turns: Optional[int], err: Optional[Exception]) -> None:
+            if ok:
+                print(
+                    f"[LLM Session Chat] Generation attempt {attempt_no} succeeded in {elapsed:.2f} seconds "
+                    f"(max_tokens={int(gen_tok)}, turns_limit={turns})"
+                )
+                return
+            print(
+                f"[LLM Session Chat] Generation attempt {attempt_no} failed in {elapsed:.2f} seconds "
+                f"(max_tokens={int(gen_tok)}, turns_limit={turns}): {err}"
+            )
+
+        def _on_state_cache_mismatch(err: Exception) -> None:
+            _clear_kv_state_for_session(session_id)
+            if log_level != "minimal":
+                print(
+                    "[LLM Session Chat] Cache mismatch details: "
+                    f"session_id={session_id}, cache={_cache_debug_label(_model_manager)}, error={err}"
+                )
             try:
-                _t_attempt = time.perf_counter()
-                resp = None
-                _kwargs = {
-                    "temperature": float(temperature),
-                    "top_p": float(top_p),
-                    "max_tokens": int(gen_tokens),
-                }
-                # Repetition controls (supported by many llama-cpp-python builds)
-                if repeat_last_n and int(repeat_last_n) > 0:
-                    _kwargs["penalty_last_n"] = int(repeat_last_n)
-                if repeat_penalty and float(repeat_penalty) != 1.0:
-                    _kwargs["repeat_penalty"] = float(repeat_penalty)
+                _model_manager.invalidate_cache(llm, remove_disk_data=True)
+            except Exception:
+                pass
+            if log_level != "minimal":
+                print("[LLM Session Chat] Detected incompatible cache state; cache invalidated and retrying once.")
 
-                with _make_suppress_backend_logs(bool(suppress_backend_logs) and (log_level != "debug")):
-                    if stream_to_console:
-                        pieces: List[str] = []
-                        out = sys.__stdout__
-                        try:
-                            if text_chat_request is not None:
-                                stream_iter = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    stream=True,
-                                    **_kwargs,
-                                )
-                            else:
-                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
-                        except TypeError:
-                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                            try:
-                                if text_chat_request is not None:
-                                    stream_iter = llm.create_completion(
-                                        prompt=text_chat_request["prompt"],
-                                        stop=text_chat_request["stop"],
-                                        stream=True,
-                                        **_kwargs,
-                                    )
-                                else:
-                                    stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
-                            except TypeError:
-                                _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                                if text_chat_request is not None:
-                                    stream_iter = llm.create_completion(
-                                        prompt=text_chat_request["prompt"],
-                                        stop=text_chat_request["stop"],
-                                        stream=True,
-                                        **_kwargs,
-                                    )
-                                else:
-                                    stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
-                        for chunk in stream_iter:
-                            token = _extract_stream_content(chunk)
-                            if not token:
-                                continue
-                            pieces.append(token)
-                            try:
-                                out.write(token)
-                                out.flush()
-                            except Exception:
-                                pass
-                        assistant_text = "".join(pieces)
-                    else:
-                        try:
-                            if text_chat_request is not None:
-                                resp = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    **_kwargs,
-                                )
-                            else:
-                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
-                        except TypeError:
-                            # Older builds may require repeat_last_n instead of penalty_last_n.
-                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                            try:
-                                if text_chat_request is not None:
-                                    resp = llm.create_completion(
-                                        prompt=text_chat_request["prompt"],
-                                        stop=text_chat_request["stop"],
-                                        **_kwargs,
-                                    )
-                                else:
-                                    resp = _create_chat_completion_robust(llm, messages, **_kwargs)
-                            except TypeError:
-                                _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                                if text_chat_request is not None:
-                                    resp = llm.create_completion(
-                                        prompt=text_chat_request["prompt"],
-                                        stop=text_chat_request["stop"],
-                                        **_kwargs,
-                                    )
-                                else:
-                                    resp = _create_chat_completion_robust(llm, messages, **_kwargs)
-                        if text_chat_request is not None:
-                            assistant_text = (resp["choices"][0]["text"] or "")
-                        else:
-                            assistant_text = resp["choices"][0]["message"]["content"]
-                _dt = time.perf_counter() - _t_attempt
-                print(f"[LLM Session Chat] Generation attempt {attempts+1} succeeded in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit})")
-                break
-            except Exception as e:
-                _dt = time.perf_counter() - _t_attempt
-                print(f"[LLM Session Chat] Generation attempt {attempts+1} failed in {_dt:.2f} seconds (max_tokens={int(gen_tokens)}, turns_limit={turns_limit}): {e}")
-                if log_level == "debug":
-                    traceback.print_exc()
-                last_err = e
-                if _is_state_data_mismatch_error(e) and not state_cache_recovered:
-                    state_cache_recovered = True
-                    _clear_kv_state_for_session(session_id)
-                    if log_level != "minimal":
-                        print(
-                            "[LLM Session Chat] Cache mismatch details: "
-                            f"session_id={session_id}, cache={_cache_debug_label(_model_manager)}, error={e}"
-                        )
-                    try:
-                        _model_manager.invalidate_cache(llm, remove_disk_data=True)
-                    except Exception:
-                        pass
-                    if log_level != "minimal":
-                        print("[LLM Session Chat] Detected incompatible cache state; cache invalidated and retrying once.")
-                    attempts += 1
-                    continue
-                if dynamic_max_tokens and _is_ctx_error(e):
-                    # 1) Shrink generation budget first
-                    if gen_tokens > int(min_generation_tokens):
-                        gen_tokens = max(int(min_generation_tokens), gen_tokens // 2)
-                    else:
-                        # 2) Reduce live turns as a fallback
-                        if turns_limit is not None and turns_limit > 0:
-                            turns_limit = max(0, turns_limit - 1)
-                        else:
-                            # 3) As last resort, compact rolling summary (if any)
-                            if summarize_old_history:
-                                try:
-                                    history = maybe_compact_summary(
-                                        model=llm,
-                                        history=history,
-                                        summary_max_chars=int(summary_max_chars),
-                                        temperature=0.2,
-                                        max_tokens_summary=int(max_tokens_summary),
-                                        suppress_logs=(log_level != "debug"),
-                                        model_path=model_path,
-                                        mmproj_path=mmproj_path,
-                                        text_chat_builder_overrides=text_chat_builder_overrides,
-                                    )
-                                except Exception:
-                                    pass
-
-                    # Rebuild messages with updated limits (and possibly updated history summary)
-                    messages = build_chat_messages(
+        def _on_compact_summary() -> None:
+            nonlocal history
+            if summarize_old_history:
+                try:
+                    history = maybe_compact_summary(
+                        model=llm,
                         history=history,
-                        user_text=user_text_for_model or "",
-                        image_tensor=img_tensor,
-                        max_turns=turns_limit,
-                        summarize_old_history=bool(summarize_old_history),
-                        system_prompt=system_prompt or "",
-                    )
-                    text_chat_request = _build_text_chat_request(
+                        summary_max_chars=int(summary_max_chars),
+                        temperature=0.2,
+                        max_tokens_summary=int(max_tokens_summary),
+                        suppress_logs=(log_level != "debug"),
                         model_path=model_path,
                         mmproj_path=mmproj_path,
-                        messages=messages,
                         text_chat_builder_overrides=text_chat_builder_overrides,
                     )
-                    attempts += 1
-                    continue
+                except Exception:
+                    pass
 
-                # Non-context error: fail fast
-                print(f"[LLM Session Chat] Error during generation: {e}")
-                _log_total("Finished (error)")
-                return ("",)
+        def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
+            _messages = build_chat_messages(
+                history=history,
+                user_text=user_text_for_model or "",
+                image_tensor=img_tensor,
+                max_turns=new_turns_limit,
+                summarize_old_history=bool(summarize_old_history),
+                system_prompt=system_prompt or "",
+            )
+            _text_chat_request = _build_text_chat_request(
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                messages=_messages,
+                text_chat_builder_overrides=text_chat_builder_overrides,
+            )
+            return _messages, _text_chat_request
+
+        generation_result = run_generation_with_adaptive_retry(
+            llm=llm,
+            messages=messages,
+            text_chat_request=text_chat_request,
+            max_tokens=int(max_tokens),
+            temperature=float(temperature),
+            top_p=float(top_p),
+            repeat_penalty=float(repeat_penalty),
+            repeat_last_n=int(repeat_last_n),
+            dynamic_max_tokens=bool(dynamic_max_tokens),
+            min_generation_tokens=int(min_generation_tokens),
+            safety_margin_tokens=int(safety_margin_tokens),
+            initial_turns_limit=turns_limit,
+            stream_to_console=bool(stream_to_console),
+            max_attempts=6,
+            is_ctx_error=_is_ctx_error,
+            is_state_data_mismatch_error=_is_state_data_mismatch_error,
+            on_state_cache_mismatch=_on_state_cache_mismatch,
+            on_compact_summary=_on_compact_summary,
+            rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
+            attempt_logger=_attempt_log,
+            debug_traceback=(log_level == "debug"),
+            traceback_print_exc=traceback.print_exc,
+            suppress_backend_logs_ctx_factory=lambda: _make_suppress_backend_logs(
+                bool(suppress_backend_logs) and (log_level != "debug")
+            ),
+            iter_chat_completion_robust=_iter_chat_completion_robust,
+            create_chat_completion_robust=_create_chat_completion_robust,
+            extract_stream_content=_extract_stream_content,
+            retry_kwargs_with_repeat_last_n_fallback=_retry_kwargs_with_repeat_last_n_fallback,
+        )
+        assistant_text = generation_result.assistant_text
+        gen_tokens = generation_result.gen_tokens
+        turns_limit = generation_result.turns_limit
+        last_err = generation_result.last_err
+
+        if generation_result.non_ctx_error:
+            print(f"[LLM Session Chat] Error during generation: {last_err}")
+            _log_total("Finished (error)")
+            return ("",)
 
         assistant_text = _strip_reasoning_output(assistant_text)
         if not assistant_text:
@@ -3331,180 +3254,99 @@ def _chat_one_turn(
                 print(f"[LLM Dialogue Cycle] KV state: DISABLED ({e})")
 
     # Generate with dynamic fallback on n_ctx overflow (same pattern)
-    assistant_text = ""
-    gen_tokens = int(max_tokens)
-    # Reserve a generation margin up front to reduce n_ctx overflow retries.
-    if bool(dynamic_max_tokens):
-        gen_tokens = max(1, gen_tokens - max(0, int(safety_margin_tokens)))
     turns_limit = int(max_turns) if max_turns is not None else None
 
     def _is_ctx_error(err: Exception) -> bool:
         s = str(err)
         return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
 
-    attempts = 0
-    last_err = None
-    state_cache_recovered = False
-    while attempts < 6:
+    def _on_state_cache_mismatch(err: Exception) -> None:
+        _clear_kv_state_for_session(session_id)
+        if log_level != "minimal":
+            print(
+                "[LLM Dialogue Cycle] Cache mismatch details: "
+                f"session_id={session_id}, cache={_cache_debug_label(mgr)}, error={err}"
+            )
         try:
-            _kwargs = {
-                "temperature": float(temperature),
-                "top_p": float(top_p),
-                "max_tokens": int(gen_tokens),
-            }
-            if repeat_last_n and int(repeat_last_n) > 0:
-                _kwargs["penalty_last_n"] = int(repeat_last_n)
-            if repeat_penalty and float(repeat_penalty) != 1.0:
-                _kwargs["repeat_penalty"] = float(repeat_penalty)
+            mgr.invalidate_cache(llm, remove_disk_data=True)
+        except Exception:
+            pass
+        if log_level != "minimal":
+            print("[LLM Dialogue Cycle] Detected incompatible cache state; cache invalidated and retrying once.")
 
-            with _make_suppress_backend_logs(bool(suppress_backend_logs) and (log_level != "debug")):
-                if stream_to_console:
-                    pieces: List[str] = []
-                    out = sys.__stdout__
-                    try:
-                        if text_chat_request is not None:
-                            stream_iter = llm.create_completion(
-                                prompt=text_chat_request["prompt"],
-                                stop=text_chat_request["stop"],
-                                stream=True,
-                                **_kwargs,
-                            )
-                        else:
-                            stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
-                    except TypeError:
-                        _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                        try:
-                            if text_chat_request is not None:
-                                stream_iter = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    stream=True,
-                                    **_kwargs,
-                                )
-                            else:
-                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
-                        except TypeError:
-                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                            if text_chat_request is not None:
-                                stream_iter = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    stream=True,
-                                    **_kwargs,
-                                )
-                            else:
-                                stream_iter = _iter_chat_completion_robust(llm, messages, **_kwargs)
-                    for chunk in stream_iter:
-                        token = _extract_stream_content(chunk)
-                        if not token:
-                            continue
-                        pieces.append(token)
-                        try:
-                            out.write(token)
-                            out.flush()
-                        except Exception:
-                            pass
-                    assistant_text = "".join(pieces).strip()
-                else:
-                    try:
-                        if text_chat_request is not None:
-                            resp = llm.create_completion(
-                                prompt=text_chat_request["prompt"],
-                                stop=text_chat_request["stop"],
-                                **_kwargs,
-                            )
-                        else:
-                            resp = _create_chat_completion_robust(llm, messages, **_kwargs)
-                    except TypeError:
-                        _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                        try:
-                            if text_chat_request is not None:
-                                resp = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    **_kwargs,
-                                )
-                            else:
-                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
-                        except TypeError:
-                            _kwargs = _retry_kwargs_with_repeat_last_n_fallback(_kwargs, repeat_last_n)
-                            if text_chat_request is not None:
-                                resp = llm.create_completion(
-                                    prompt=text_chat_request["prompt"],
-                                    stop=text_chat_request["stop"],
-                                    **_kwargs,
-                                )
-                            else:
-                                resp = _create_chat_completion_robust(llm, messages, **_kwargs)
-
-                    if text_chat_request is not None:
-                        assistant_text = (resp["choices"][0]["text"] or "").strip()
-                    else:
-                        assistant_text = (resp["choices"][0]["message"]["content"] or "").strip()
-            break
-        except Exception as e:
-            if log_level == "debug":
-                traceback.print_exc()
-            last_err = e
-            if _is_state_data_mismatch_error(e) and not state_cache_recovered:
-                state_cache_recovered = True
-                _clear_kv_state_for_session(session_id)
-                if log_level != "minimal":
-                    print(
-                        "[LLM Dialogue Cycle] Cache mismatch details: "
-                        f"session_id={session_id}, cache={_cache_debug_label(mgr)}, error={e}"
-                    )
-                try:
-                    mgr.invalidate_cache(llm, remove_disk_data=True)
-                except Exception:
-                    pass
-                if log_level != "minimal":
-                    print("[LLM Dialogue Cycle] Detected incompatible cache state; cache invalidated and retrying once.")
-                attempts += 1
-                continue
-            if dynamic_max_tokens and _is_ctx_error(e):
-                # 1) shrink max_tokens
-                if gen_tokens > int(min_generation_tokens):
-                    gen_tokens = max(int(min_generation_tokens), gen_tokens // 2)
-                else:
-                    # 2) reduce live turns
-                    if turns_limit is not None and turns_limit > 0:
-                        turns_limit = max(0, turns_limit - 1)
-                    else:
-                        # 3) compact rolling summary
-                        if summarize_old_history:
-                            try:
-                                history = maybe_compact_summary(
-                                    model=llm,
-                                    history=history,
-                                    summary_max_chars=int(summary_max_chars),
-                                    temperature=0.2,
-                                    max_tokens_summary=int(max_tokens_summary),
-                                    suppress_logs=(log_level != "debug"),
-                                    model_path=model_path,
-                                    mmproj_path=mmproj_path,
-                                    text_chat_builder_overrides=text_chat_builder_overrides,
-                                )
-                            except Exception:
-                                pass
-
-                messages = build_chat_messages(
+    def _on_compact_summary() -> None:
+        nonlocal history
+        if summarize_old_history:
+            try:
+                history = maybe_compact_summary(
+                    model=llm,
                     history=history,
-                    user_text=user_text_for_model or "",
-                    image_tensor=None,
-                    max_turns=turns_limit,
-                    summarize_old_history=bool(summarize_old_history),
-                    system_prompt=system_prompt or "",
-                )
-                text_chat_request = _build_text_chat_request(
+                    summary_max_chars=int(summary_max_chars),
+                    temperature=0.2,
+                    max_tokens_summary=int(max_tokens_summary),
+                    suppress_logs=(log_level != "debug"),
                     model_path=model_path,
                     mmproj_path=mmproj_path,
-                    messages=messages,
                     text_chat_builder_overrides=text_chat_builder_overrides,
                 )
-                attempts += 1
-                continue
-            return ""
+            except Exception:
+                pass
+
+    def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
+        _messages = build_chat_messages(
+            history=history,
+            user_text=user_text_for_model or "",
+            image_tensor=None,
+            max_turns=new_turns_limit,
+            summarize_old_history=bool(summarize_old_history),
+            system_prompt=system_prompt or "",
+        )
+        _text_chat_request = _build_text_chat_request(
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            messages=_messages,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
+        return _messages, _text_chat_request
+
+    generation_result = run_generation_with_adaptive_retry(
+        llm=llm,
+        messages=messages,
+        text_chat_request=text_chat_request,
+        max_tokens=int(max_tokens),
+        temperature=float(temperature),
+        top_p=float(top_p),
+        repeat_penalty=float(repeat_penalty),
+        repeat_last_n=int(repeat_last_n),
+        dynamic_max_tokens=bool(dynamic_max_tokens),
+        min_generation_tokens=int(min_generation_tokens),
+        safety_margin_tokens=int(safety_margin_tokens),
+        initial_turns_limit=turns_limit,
+        stream_to_console=bool(stream_to_console),
+        max_attempts=6,
+        is_ctx_error=_is_ctx_error,
+        is_state_data_mismatch_error=_is_state_data_mismatch_error,
+        on_state_cache_mismatch=_on_state_cache_mismatch,
+        on_compact_summary=_on_compact_summary,
+        rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
+        attempt_logger=None,
+        debug_traceback=(log_level == "debug"),
+        traceback_print_exc=traceback.print_exc,
+        suppress_backend_logs_ctx_factory=lambda: _make_suppress_backend_logs(
+            bool(suppress_backend_logs) and (log_level != "debug")
+        ),
+        iter_chat_completion_robust=_iter_chat_completion_robust,
+        create_chat_completion_robust=_create_chat_completion_robust,
+        extract_stream_content=_extract_stream_content,
+        retry_kwargs_with_repeat_last_n_fallback=_retry_kwargs_with_repeat_last_n_fallback,
+    )
+    assistant_text = generation_result.assistant_text.strip()
+    gen_tokens = generation_result.gen_tokens
+    turns_limit = generation_result.turns_limit
+    last_err = generation_result.last_err
+
+    if generation_result.non_ctx_error:
+        return ""
 
     assistant_text = _strip_reasoning_output(assistant_text)
     if not assistant_text:
