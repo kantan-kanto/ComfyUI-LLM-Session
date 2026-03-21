@@ -1,8 +1,10 @@
-# Service skeleton for shared single-turn execution flow.
+# Service for shared single-turn execution flow (history, generation, KV state, and persistence).
 from __future__ import annotations
 
+import os
+import traceback
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
@@ -12,9 +14,47 @@ class TurnExecutionRequest:
     model: str
     mmproj: str
     system_prompt: str
-    turn_params: Dict[str, Any] = field(default_factory=dict)
-    runtime_options: Dict[str, Any] = field(default_factory=dict)
-    dependencies: Dict[str, Callable[..., Any]] = field(default_factory=dict)
+    max_tokens: int
+    temperature: float
+    top_p: float
+    n_gpu_layers: int
+    n_ctx: int
+    image: Any = None
+    max_turns: Optional[int] = 12
+    summarize_old_history: bool = True
+    summary_chunk_turns: int = 3
+    max_tokens_summary: int = 128
+    summary_max_chars: int = 1500
+    dynamic_max_tokens: bool = True
+    min_generation_tokens: int = 96
+    safety_margin_tokens: int = 64
+    persistent_cache: str = "off"
+    repeat_penalty: float = 1.12
+    repeat_last_n: int = 256
+    rewrite_continue: bool = True
+    runtime_cache: str = "LlamaTrieCache"
+    log_level: str = "timing"
+    suppress_backend_logs: bool = True
+    history_dir: str = ""
+    reset_session: bool = False
+    stream_to_console: bool = False
+    model_manager: Optional[Any] = None
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None
+
+    # Behavior switches to preserve subtle differences between legacy call paths.
+    strip_assistant_before_reasoning_filter: bool = False
+    include_image_and_stream_in_turn_params: bool = True
+    kv_log_saved_when_not_minimal: bool = False
+    kv_log_unsupported_when_not_minimal: bool = False
+    include_error_in_invalidate_message: bool = False
+    enable_attempt_logging: bool = False
+
+    # Logging label differs by caller ([LLM Session Chat] / [LLM Dialogue Cycle]).
+    log_prefix: str = "[LLM Session Chat]"
+
+    # Injected callables and constants from node layer.
+    dependencies: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -26,6 +66,408 @@ class TurnExecutionResult:
 
 
 class TurnExecutionService:
+    def _dep(self, deps: Dict[str, Any], key: str) -> Any:
+        if key not in deps:
+            raise KeyError(f"Missing dependency: {key}")
+        return deps[key]
+
+    @staticmethod
+    def _is_ctx_error(err: Exception) -> bool:
+        s = str(err)
+        return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
+
     def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
-        # Commit 1 intentionally adds only the service shape (not yet wired).
-        raise NotImplementedError("Turn execution flow is not wired yet.")
+        deps = request.dependencies
+
+        llama_cpp_available = bool(deps.get("llama_cpp_available", True))
+        if not llama_cpp_available:
+            msg = "llama_cpp is not available"
+            import_err = deps.get("llama_cpp_import_error")
+            if import_err:
+                msg += f" ({import_err})"
+            return TurnExecutionResult(assistant_text="", generation_succeeded=False, error=RuntimeError(msg))
+
+        mgr = request.model_manager
+        if mgr is None:
+            return TurnExecutionResult(
+                assistant_text="",
+                generation_succeeded=False,
+                error=RuntimeError("model_manager is required"),
+            )
+
+        is_no_models_placeholder = self._dep(deps, "is_no_models_placeholder")
+        if is_no_models_placeholder(request.model):
+            return TurnExecutionResult(assistant_text="", generation_succeeded=False)
+
+        get_llm_model_roots = self._dep(deps, "get_llm_model_roots")
+        resolve_model_and_mmproj = self._dep(deps, "resolve_model_and_mmproj")
+        roots = get_llm_model_roots()
+
+        try:
+            model_path, mmproj_path = resolve_model_and_mmproj(roots, request.model, request.mmproj)
+        except Exception as err:
+            return TurnExecutionResult(assistant_text="", generation_succeeded=False, error=err)
+
+        model_sig = {
+            "model_file": os.path.basename(model_path),
+            "mmproj_file": (
+                os.path.basename(mmproj_path)
+                if (mmproj_path and mmproj_path != deps.get("mmproj_not_required"))
+                else ""
+            ),
+            "n_ctx": int(request.n_ctx),
+            "n_gpu_layers": int(request.n_gpu_layers),
+        }
+
+        load_history = self._dep(deps, "load_history")
+        history, hist_path = load_history(
+            session_id=request.session_id,
+            history_dir=(request.history_dir or None),
+            system_prompt=request.system_prompt,
+            model_sig=model_sig,
+            reset_session=bool(request.reset_session),
+        )
+
+        clear_kv_state_for_session = self._dep(deps, "clear_kv_state_for_session")
+        if bool(request.reset_session):
+            clear_kv_state_for_session(request.session_id)
+            try:
+                if getattr(mgr, "model", None) is not None:
+                    mgr.invalidate_cache(mgr.model, remove_disk_data=False)
+            except Exception:
+                pass
+
+        rewrite_continue_prompt = self._dep(deps, "rewrite_continue_prompt")
+        detect_history_language = self._dep(deps, "detect_history_language")
+        continue_result = rewrite_continue_prompt(
+            user_text=(request.user_text or ""),
+            history=history,
+            rewrite_continue=bool(request.rewrite_continue),
+            detect_history_language=detect_history_language,
+        )
+        user_text_for_model = continue_result.user_text_for_model
+        if continue_result.rewritten and request.log_level == "debug":
+            print(f"{request.log_prefix} Continue detected, language: {continue_result.detected_language}")
+
+        session_cache_root = self._dep(deps, "session_cache_root")
+        try:
+            mgr.cache_dir_override = session_cache_root(request.session_id, request.history_dir or None)
+            os.makedirs(mgr.cache_dir_override, exist_ok=True)
+        except Exception:
+            mgr.cache_dir_override = None
+
+        try:
+            llm = mgr.load_model(
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(request.n_ctx),
+                n_gpu_layers=int(request.n_gpu_layers),
+                chat_handler_overrides=request.chat_handler_overrides,
+                verbose=False,
+            )
+        except Exception as err:
+            return TurnExecutionResult(assistant_text="", history_path=hist_path, generation_succeeded=False, error=err)
+
+        try:
+            mgr.configure_cache(
+                llm,
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                n_ctx=int(request.n_ctx),
+                n_gpu_layers=int(request.n_gpu_layers),
+                persistent_cache=request.persistent_cache,
+                runtime_cache=request.runtime_cache,
+            )
+        except Exception:
+            pass
+
+        build_chat_messages = self._dep(deps, "build_chat_messages")
+        build_text_chat_request = self._dep(deps, "build_text_chat_request")
+        messages = build_chat_messages(
+            history=history,
+            user_text=user_text_for_model or "",
+            image_tensor=request.image,
+            max_turns=int(request.max_turns) if request.max_turns is not None else None,
+            summarize_old_history=bool(request.summarize_old_history),
+            system_prompt=request.system_prompt or "",
+        )
+        text_chat_request = build_text_chat_request(
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            messages=messages,
+            text_chat_builder_overrides=request.text_chat_builder_overrides,
+        )
+
+        build_kv_state_signature = self._dep(deps, "build_kv_state_signature")
+        try_restore_kv_state = self._dep(deps, "try_restore_kv_state")
+        is_state_data_mismatch_error = self._dep(deps, "is_state_data_mismatch_error")
+        saved_llama_state_size = self._dep(deps, "saved_llama_state_size")
+        current_llama_state_size = self._dep(deps, "current_llama_state_size")
+        kv_state_debug_info = self._dep(deps, "kv_state_debug_info")
+        get_context_turns = self._dep(deps, "get_context_turns")
+
+        if (request.runtime_cache or "off") == "KV_cache" and request.image is None:
+            try:
+                kv_sig = build_kv_state_signature(
+                    history=history,
+                    max_turns=request.max_turns,
+                    summarize_old_history=bool(request.summarize_old_history),
+                    system_prompt=(request.system_prompt or ""),
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    n_ctx=int(request.n_ctx),
+                    n_gpu_layers=int(request.n_gpu_layers),
+                    get_context_turns=get_context_turns,
+                )
+                try_restore_kv_state(
+                    session_id=request.session_id,
+                    signature=kv_sig,
+                    llm=llm,
+                    mem_kv_state=self._dep(deps, "mem_kv_state"),
+                    log_prefix=request.log_prefix,
+                    log_level=request.log_level,
+                    model_path=model_path,
+                    n_ctx=int(request.n_ctx),
+                    n_gpu_layers=int(request.n_gpu_layers),
+                    clear_kv_state_for_session=clear_kv_state_for_session,
+                    is_state_data_mismatch_error=is_state_data_mismatch_error,
+                    invalidate_cache=lambda _llm, remove_disk_data: mgr.invalidate_cache(
+                        _llm, remove_disk_data=remove_disk_data
+                    ),
+                    saved_llama_state_size=saved_llama_state_size,
+                    current_llama_state_size=current_llama_state_size,
+                    kv_state_debug_info=kv_state_debug_info,
+                    include_error_in_invalidate_message=bool(request.include_error_in_invalidate_message),
+                )
+            except Exception:
+                pass
+
+        maybe_compact_summary = self._dep(deps, "maybe_compact_summary")
+
+        def _on_state_cache_mismatch(err: Exception) -> None:
+            clear_kv_state_for_session(request.session_id)
+            if request.log_level != "minimal":
+                cache_debug_label = self._dep(deps, "cache_debug_label")
+                print(
+                    f"{request.log_prefix} Cache mismatch details: "
+                    f"session_id={request.session_id}, cache={cache_debug_label(mgr)}, error={err}"
+                )
+            try:
+                mgr.invalidate_cache(llm, remove_disk_data=True)
+            except Exception:
+                pass
+            if request.log_level != "minimal":
+                print(f"{request.log_prefix} Detected incompatible cache state; cache invalidated and retrying once.")
+
+        def _on_compact_summary() -> None:
+            nonlocal history
+            if request.summarize_old_history:
+                try:
+                    history = maybe_compact_summary(
+                        model=llm,
+                        history=history,
+                        summary_max_chars=int(request.summary_max_chars),
+                        temperature=0.2,
+                        max_tokens_summary=int(request.max_tokens_summary),
+                        suppress_logs=(request.log_level != "debug"),
+                        model_path=model_path,
+                        mmproj_path=mmproj_path,
+                        text_chat_builder_overrides=request.text_chat_builder_overrides,
+                    )
+                except Exception:
+                    pass
+
+        def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
+            rebuilt_messages = build_chat_messages(
+                history=history,
+                user_text=user_text_for_model or "",
+                image_tensor=request.image,
+                max_turns=new_turns_limit,
+                summarize_old_history=bool(request.summarize_old_history),
+                system_prompt=request.system_prompt or "",
+            )
+            rebuilt_text_chat_request = build_text_chat_request(
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+                messages=rebuilt_messages,
+                text_chat_builder_overrides=request.text_chat_builder_overrides,
+            )
+            return rebuilt_messages, rebuilt_text_chat_request
+
+        attempt_logger = None
+        if request.enable_attempt_logging:
+            def _attempt_logger(ok: bool, attempt_no: int, elapsed: float, gen_tok: int, turns: Optional[int], err: Optional[Exception]) -> None:
+                if ok:
+                    print(
+                        f"{request.log_prefix} Generation attempt {attempt_no} succeeded in {elapsed:.2f} seconds "
+                        f"(max_tokens={int(gen_tok)}, turns_limit={turns})"
+                    )
+                    return
+                print(
+                    f"{request.log_prefix} Generation attempt {attempt_no} failed in {elapsed:.2f} seconds "
+                    f"(max_tokens={int(gen_tok)}, turns_limit={turns}): {err}"
+                )
+            attempt_logger = _attempt_logger
+
+        run_generation_with_adaptive_retry = self._dep(deps, "run_generation_with_adaptive_retry")
+        make_suppress_backend_logs = self._dep(deps, "make_suppress_backend_logs")
+
+        generation_result = run_generation_with_adaptive_retry(
+            llm=llm,
+            messages=messages,
+            text_chat_request=text_chat_request,
+            max_tokens=int(request.max_tokens),
+            temperature=float(request.temperature),
+            top_p=float(request.top_p),
+            repeat_penalty=float(request.repeat_penalty),
+            repeat_last_n=int(request.repeat_last_n),
+            dynamic_max_tokens=bool(request.dynamic_max_tokens),
+            min_generation_tokens=int(request.min_generation_tokens),
+            safety_margin_tokens=int(request.safety_margin_tokens),
+            initial_turns_limit=(int(request.max_turns) if request.max_turns is not None else None),
+            stream_to_console=bool(request.stream_to_console),
+            max_attempts=6,
+            is_ctx_error=self._is_ctx_error,
+            is_state_data_mismatch_error=is_state_data_mismatch_error,
+            on_state_cache_mismatch=_on_state_cache_mismatch,
+            on_compact_summary=_on_compact_summary,
+            rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
+            attempt_logger=attempt_logger,
+            debug_traceback=(request.log_level == "debug"),
+            traceback_print_exc=traceback.print_exc,
+            suppress_backend_logs_ctx_factory=lambda: make_suppress_backend_logs(
+                bool(request.suppress_backend_logs) and (request.log_level != "debug")
+            ),
+            iter_chat_completion_robust=self._dep(deps, "iter_chat_completion_robust"),
+            create_chat_completion_robust=self._dep(deps, "create_chat_completion_robust"),
+            extract_stream_content=self._dep(deps, "extract_stream_content"),
+            retry_kwargs_with_repeat_last_n_fallback=self._dep(deps, "retry_kwargs_with_repeat_last_n_fallback"),
+        )
+
+        assistant_text = generation_result.assistant_text
+        if request.strip_assistant_before_reasoning_filter:
+            assistant_text = assistant_text.strip()
+
+        if generation_result.non_ctx_error:
+            return TurnExecutionResult(
+                assistant_text="",
+                history_path=hist_path,
+                generation_succeeded=False,
+                error=generation_result.last_err,
+            )
+
+        strip_reasoning_output = self._dep(deps, "strip_reasoning_output")
+        assistant_text = strip_reasoning_output(assistant_text)
+        if not assistant_text:
+            return TurnExecutionResult(
+                assistant_text="",
+                history_path=hist_path,
+                generation_succeeded=False,
+                error=generation_result.last_err,
+            )
+
+        next_turn_id = self._dep(deps, "next_turn_id")
+        now_iso = self._dep(deps, "now_iso")
+
+        turn_params: Dict[str, Any] = {
+            "max_tokens_req": int(request.max_tokens),
+            "temperature": float(request.temperature),
+            "top_p": float(request.top_p),
+            "repeat_penalty": float(request.repeat_penalty) if request.repeat_penalty is not None else None,
+            "repeat_last_n": int(request.repeat_last_n) if request.repeat_last_n is not None else None,
+            "dynamic_max_tokens": bool(request.dynamic_max_tokens),
+            "max_tokens_used": int(generation_result.gen_tokens),
+            "turns_limit_used": int(generation_result.turns_limit) if generation_result.turns_limit is not None else None,
+        }
+        if request.include_image_and_stream_in_turn_params:
+            turn_params["image_used"] = request.image is not None
+            turn_params["streamed"] = bool(request.stream_to_console)
+
+        history.setdefault("turns", []).append(
+            {
+                "id": next_turn_id(history),
+                "t": now_iso(),
+                "user": {
+                    "text": request.user_text or "",
+                    "image_note": "",
+                },
+                "assistant": {
+                    "text": assistant_text or "",
+                },
+                "params": turn_params,
+            }
+        )
+
+        history.setdefault("meta", {})["updated_at"] = now_iso()
+        history.setdefault("meta", {})["last_params"] = {
+            "persistent_cache": (request.persistent_cache or "off"),
+            "runtime_cache": (request.runtime_cache or "off"),
+            "max_turns": int(request.max_turns) if request.max_turns is not None else None,
+            "summarize_old_history": bool(request.summarize_old_history),
+            "summary_chunk_turns": int(request.summary_chunk_turns),
+            "max_tokens_summary": int(request.max_tokens_summary),
+            "summary_max_chars": int(request.summary_max_chars),
+            "saved_at": now_iso(),
+        }
+        history["system_prompt"] = request.system_prompt or history.get("system_prompt", "")
+
+        maybe_summarize_history = self._dep(deps, "maybe_summarize_history")
+        if request.summarize_old_history and request.max_turns is not None:
+            try:
+                history = maybe_summarize_history(
+                    model=llm,
+                    history=history,
+                    max_turns=int(request.max_turns),
+                    summarize_old_history=bool(request.summarize_old_history),
+                    summary_chunk_turns=int(request.summary_chunk_turns),
+                    temperature=0.2,
+                    max_tokens_summary=int(request.max_tokens_summary),
+                    summary_max_chars=int(request.summary_max_chars),
+                    suppress_logs=(request.log_level != "debug"),
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    text_chat_builder_overrides=request.text_chat_builder_overrides,
+                )
+            except Exception:
+                pass
+
+        atomic_write_json = self._dep(deps, "atomic_write_json")
+        try:
+            atomic_write_json(hist_path, history)
+        except Exception:
+            pass
+
+        if (request.runtime_cache or "off") == "KV_cache" and request.image is None:
+            try:
+                kv_sig2 = build_kv_state_signature(
+                    history=history,
+                    max_turns=request.max_turns,
+                    summarize_old_history=bool(request.summarize_old_history),
+                    system_prompt=(request.system_prompt or ""),
+                    model_path=model_path,
+                    mmproj_path=mmproj_path,
+                    n_ctx=int(request.n_ctx),
+                    n_gpu_layers=int(request.n_gpu_layers),
+                    get_context_turns=get_context_turns,
+                )
+                try_save_kv_state = self._dep(deps, "try_save_kv_state")
+                try_save_kv_state(
+                    session_id=request.session_id,
+                    signature=kv_sig2,
+                    llm=llm,
+                    mem_kv_state=self._dep(deps, "mem_kv_state"),
+                    log_prefix=request.log_prefix,
+                    log_level=request.log_level,
+                    kv_state_debug_info=kv_state_debug_info,
+                    log_saved_when_not_minimal=bool(request.kv_log_saved_when_not_minimal),
+                    log_unsupported_when_not_minimal=bool(request.kv_log_unsupported_when_not_minimal),
+                )
+            except Exception:
+                pass
+
+        return TurnExecutionResult(
+            assistant_text=assistant_text,
+            history_path=hist_path,
+            generation_succeeded=True,
+            error=None,
+        )
