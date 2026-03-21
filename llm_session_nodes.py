@@ -1626,11 +1626,7 @@ class GGUFModelManager:
         verbose: bool = False,
     ) -> Llama:
         """Load GGUF model."""
-        if not LLAMA_CPP_AVAILABLE:
-            msg = "llama_cpp is not available"
-            if "_LLAMA_CPP_IMPORT_ERROR" in globals():
-                msg += f" ({_LLAMA_CPP_IMPORT_ERROR})"
-            raise RuntimeError(msg)
+        _require_llama_cpp_available()
 
         model_path = self._normalize_path(model_path)
 
@@ -2484,6 +2480,25 @@ def _build_turn_execution_dependencies() -> TurnExecutionDependencies:
 
 
 
+
+def _require_llama_cpp_available() -> None:
+    if not LLAMA_CPP_AVAILABLE:
+        msg = "llama_cpp is not available"
+        if "_LLAMA_CPP_IMPORT_ERROR" in globals():
+            msg += f" ({_LLAMA_CPP_IMPORT_ERROR})"
+        raise RuntimeError(msg)
+
+
+def _get_or_create_model_manager(
+    model_manager: Optional["GGUFModelManager"] = None,
+) -> "GGUFModelManager":
+    if model_manager is not None:
+        return model_manager
+
+    global _model_manager
+    if _model_manager is None:
+        _model_manager = GGUFModelManager()
+    return _model_manager
 def _execute_turn_via_service(
     *,
     user_text: str,
@@ -2625,18 +2640,13 @@ class LLMSessionChatNode:
              stream_to_console: bool = False,
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
-        global _model_manager
         _t_total = time.perf_counter()
 
         def _log_total(status: str):
             dt = time.perf_counter() - _t_total
             print(f"[LLM Session Chat] {status} in {dt:.2f} seconds")
 
-        if not LLAMA_CPP_AVAILABLE:
-            msg = "llama_cpp is not available"
-            if "_LLAMA_CPP_IMPORT_ERROR" in globals():
-                msg += f" ({_LLAMA_CPP_IMPORT_ERROR})"
-            raise RuntimeError(msg)
+        _require_llama_cpp_available()
 
         if _is_no_models_placeholder(model):
             print(f"[LLM Session Chat] Error: No GGUF models found in models/{_LLM_MODELS_DIR_NAME}/")
@@ -2650,8 +2660,7 @@ class LLMSessionChatNode:
             _log_total("Finished (error)")
             return ("",)
 
-        if _model_manager is None:
-            _model_manager = GGUFModelManager()
+        mgr = _get_or_create_model_manager()
 
         result = _execute_turn_via_service(
             user_text=user_text,
@@ -2683,7 +2692,7 @@ class LLMSessionChatNode:
             history_dir=history_dir,
             reset_session=reset_session,
             stream_to_console=stream_to_console,
-            model_manager=_model_manager,
+            model_manager=mgr,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
             strip_assistant_before_reasoning_filter=False,
@@ -2747,18 +2756,9 @@ def _chat_one_turn(
     One chat turn using the same history/summary logic as LLMSessionChatNode,
     but returns assistant_text only.
     """
-    if not LLAMA_CPP_AVAILABLE:
-        msg = "llama_cpp is not available"
-        if "_LLAMA_CPP_IMPORT_ERROR" in globals():
-            msg += f" ({_LLAMA_CPP_IMPORT_ERROR})"
-        raise RuntimeError(msg)
+    _require_llama_cpp_available()
 
-    mgr = model_manager
-    if mgr is None:
-        global _model_manager
-        if _model_manager is None:
-            _model_manager = GGUFModelManager()
-        mgr = _model_manager
+    mgr = _get_or_create_model_manager(model_manager)
 
     result = _execute_turn_via_service(
         user_text=user_text,
@@ -3160,6 +3160,7 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
 
 
 
