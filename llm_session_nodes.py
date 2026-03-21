@@ -2733,6 +2733,7 @@ class LLMSessionChatNode:
             include_error_in_invalidate_message=False,
             enable_attempt_logging=True,
             log_prefix="[LLM Session Chat]",
+            dependencies=_build_turn_execution_dependencies(),
         )
         result = service.execute_turn(request)
 
@@ -2842,6 +2843,7 @@ def _chat_one_turn(
         include_error_in_invalidate_message=True,
         enable_attempt_logging=False,
         log_prefix="[LLM Dialogue Cycle]",
+        dependencies=_build_turn_execution_dependencies(),
     )
     result = service.execute_turn(request)
     if not result.generation_succeeded:
@@ -3203,6 +3205,7 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
 
 
 
