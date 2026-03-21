@@ -22,6 +22,10 @@ import shutil
 import folder_paths
 import hashlib
 import traceback
+try:
+    from .core.continue_rewrite import rewrite_continue_prompt
+except Exception:
+    from core.continue_rewrite import rewrite_continue_prompt
 
 
 # ============================================================================
@@ -2696,40 +2700,16 @@ class LLMSessionChatNode:
             except Exception:
                 pass
 
-        # Continue rewrite with language detection (improved version)
-        _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
-        user_text_for_model = user_text or ""
-        if rewrite_continue and _is_continue:
-            # Detect language from conversation history
-            detected_lang = _detect_history_language(history)
-            
-            # Language-specific continue prompts
-            CONTINUE_PROMPTS = {
-                "zh": (
-                    "从最后一个完整的句子继续。"
-                    "不要重复之前的短语、列表、标题或段落。"
-                    "如果你开始重复词语或地名，立即停止并写一个一句话摘要。"
-                ),
-                "ja": (
-                    "最後の完全な文から続けてください。"
-                    "以前のフレーズ、リスト、見出し、セクションを繰り返さないでください。"
-                    "単語や地名を繰り返し始めたら、すぐに停止して1文の要約を書いてください。"
-                ),
-                "en": (
-                    "Continue from the last complete sentence. "
-                    "Do not repeat previous phrases, lists, headings, or sections. "
-                    "If you start repeating words or place names, stop immediately and write a 1-sentence summary instead."
-                ),
-            }
-            
-            # Use detected language prompt, fallback to English with simplified instruction
-            user_text_for_model = CONTINUE_PROMPTS.get(
-                detected_lang,
-                "Continue from the last complete sentence. Do not repeat previous content."
-            )
-            
-            if log_level == "debug":
-                print(f"[LLM Session Chat] Continue detected, language: {detected_lang}")
+        # Continue rewrite with language detection
+        continue_result = rewrite_continue_prompt(
+            user_text=(user_text or ""),
+            history=history,
+            rewrite_continue=bool(rewrite_continue),
+            detect_history_language=_detect_history_language,
+        )
+        user_text_for_model = continue_result.user_text_for_model
+        if continue_result.rewritten and log_level == "debug":
+            print(f"[LLM Session Chat] Continue detected, language: {continue_result.detected_language}")
 
 
         # Store disk cache under a session-specific root.
@@ -3296,33 +3276,15 @@ def _chat_one_turn(
             pass
 
     # Continue rewrite (same behavior as LLMSessionChatNode)
-    _is_continue = bool(re.match(r"^\s*continue\b", (user_text or ""), flags=re.IGNORECASE))
-    user_text_for_model = user_text or ""
-    if rewrite_continue and _is_continue:
-        detected_lang = _detect_history_language(history)
-        CONTINUE_PROMPTS = {
-            "zh": (
-                "从最后一个完整的句子继续。"
-                "不要重复之前的短语、列表、标题或段落。"
-                "如果你开始重复词语或地名，立即停止并写一个一句话摘要。"
-            ),
-            "ja": (
-                "最後の完全な文から続けてください。"
-                "以前のフレーズ、リスト、見出し、セクションを繰り返さないでください。"
-                "単語や地名を繰り返し始めたら、すぐに停止して1文の要約を書いてください。"
-            ),
-            "en": (
-                "Continue from the last complete sentence. "
-                "Do not repeat previous phrases, lists, headings, or sections. "
-                "If you start repeating words or place names, stop immediately and write a 1-sentence summary instead."
-            ),
-        }
-        user_text_for_model = CONTINUE_PROMPTS.get(
-            detected_lang,
-            "Continue from the last complete sentence. Do not repeat previous content."
-        )
-        if log_level == "debug":
-            print(f"[LLM Dialogue Cycle] Continue detected, language: {detected_lang}")
+    continue_result = rewrite_continue_prompt(
+        user_text=(user_text or ""),
+        history=history,
+        rewrite_continue=bool(rewrite_continue),
+        detect_history_language=_detect_history_language,
+    )
+    user_text_for_model = continue_result.user_text_for_model
+    if continue_result.rewritten and log_level == "debug":
+        print(f"[LLM Dialogue Cycle] Continue detected, language: {continue_result.detected_language}")
 
     # Store disk cache under a session-specific root.
     try:
