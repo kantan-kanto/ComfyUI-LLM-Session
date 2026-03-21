@@ -26,12 +26,12 @@ llm_session_nodes.py
   |
   | uses
   v
-+-------------------+      +-------------------+
-|      core/        |      |    services/      |
-|-------------------|      |-------------------|
-| continue_rewrite  |<-----| chat_turn_service |
-| kv_state          |      +-------------------+
-| generation_runner |
++-------------------+      +----------------------------+
+|      core/        |      |         services/          |
+|-------------------|      |----------------------------|
+| continue_rewrite  |<-----| chat_turn_service          |
+| kv_state          |<-----| turn_execution_service     |
+| generation_runner |      +----------------------------+
 | turn_types        |
 +-------------------+
   |
@@ -55,4 +55,5 @@ External:
 - `core/kv_state.py`: KV state signature/build/restore/save helpers.
 - `core/generation_runner.py`: shared generation retry and fallback flow.
 - `services/chat_turn_service.py`: dialogue-cycle orchestration service.
+- `services/turn_execution_service.py`: shared single-turn execution service for chat/cycle paths.
 - `infra/history_store.py`: history/transcript path and file I/O helpers.
