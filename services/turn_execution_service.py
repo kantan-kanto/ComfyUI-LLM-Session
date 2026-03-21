@@ -4,8 +4,44 @@ from __future__ import annotations
 import os
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypedDict
 
+class TurnExecutionDependencies(TypedDict):
+    llama_cpp_available: Any
+    llama_cpp_import_error: Any
+    is_no_models_placeholder: Any
+    get_llm_model_roots: Any
+    resolve_model_and_mmproj: Any
+    mmproj_not_required: Any
+    load_history: Any
+    clear_kv_state_for_session: Any
+    rewrite_continue_prompt: Any
+    detect_history_language: Any
+    session_cache_root: Any
+    build_chat_messages: Any
+    build_text_chat_request: Any
+    build_kv_state_signature: Any
+    try_restore_kv_state: Any
+    is_state_data_mismatch_error: Any
+    saved_llama_state_size: Any
+    current_llama_state_size: Any
+    kv_state_debug_info: Any
+    get_context_turns: Any
+    mem_kv_state: Any
+    maybe_compact_summary: Any
+    cache_debug_label: Any
+    run_generation_with_adaptive_retry: Any
+    make_suppress_backend_logs: Any
+    iter_chat_completion_robust: Any
+    create_chat_completion_robust: Any
+    extract_stream_content: Any
+    retry_kwargs_with_repeat_last_n_fallback: Any
+    strip_reasoning_output: Any
+    next_turn_id: Any
+    now_iso: Any
+    maybe_summarize_history: Any
+    atomic_write_json: Any
+    try_save_kv_state: Any
 
 @dataclass(frozen=True)
 class TurnExecutionRequest:
@@ -54,7 +90,7 @@ class TurnExecutionRequest:
     log_prefix: str = "[LLM Session Chat]"
 
     # Injected callables and constants from node layer.
-    dependencies: Dict[str, Any] = field(default_factory=dict)
+    dependencies: TurnExecutionDependencies = field(default_factory=dict)
 
     @classmethod
     def from_node_inputs(
@@ -99,7 +135,7 @@ class TurnExecutionRequest:
         include_error_in_invalidate_message: bool,
         enable_attempt_logging: bool,
         log_prefix: str,
-        dependencies: Dict[str, Any],
+        dependencies: TurnExecutionDependencies,
     ) -> "TurnExecutionRequest":
         return cls(
             user_text=user_text,
@@ -154,7 +190,7 @@ class TurnExecutionResult:
 
 
 class TurnExecutionService:
-    def _dep(self, deps: Dict[str, Any], key: str) -> Any:
+    def _dep(self, deps: TurnExecutionDependencies, key: str) -> Any:
         if key not in deps:
             raise KeyError(f"Missing dependency: {key}")
         return deps[key]
@@ -165,7 +201,7 @@ class TurnExecutionService:
         return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
 
     def _preflight(
-        self, request: TurnExecutionRequest, deps: Dict[str, Any]
+        self, request: TurnExecutionRequest, deps: TurnExecutionDependencies
     ) -> tuple[Optional[Any], Optional[TurnExecutionResult]]:
         llama_cpp_available = bool(deps.get("llama_cpp_available", True))
         if not llama_cpp_available:
@@ -190,7 +226,7 @@ class TurnExecutionService:
         return mgr, None
 
     def _resolve_model_paths(
-        self, request: TurnExecutionRequest, deps: Dict[str, Any]
+        self, request: TurnExecutionRequest, deps: TurnExecutionDependencies
     ) -> tuple[Optional[str], Optional[str], Optional[TurnExecutionResult]]:
         get_llm_model_roots = self._dep(deps, "get_llm_model_roots")
         resolve_model_and_mmproj = self._dep(deps, "resolve_model_and_mmproj")
@@ -206,7 +242,7 @@ class TurnExecutionService:
     def _build_model_sig(
         self,
         *,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         model_path: str,
         mmproj_path: Optional[str],
         n_ctx: int,
@@ -227,7 +263,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         model_sig: Dict[str, Any],
     ) -> tuple[Dict[str, Any], str]:
         load_history = self._dep(deps, "load_history")
@@ -240,7 +276,7 @@ class TurnExecutionService:
         )
 
     def _reset_state_if_needed(
-        self, *, request: TurnExecutionRequest, deps: Dict[str, Any], mgr: Any
+        self, *, request: TurnExecutionRequest, deps: TurnExecutionDependencies, mgr: Any
     ) -> Any:
         clear_kv_state_for_session = self._dep(deps, "clear_kv_state_for_session")
         if bool(request.reset_session):
@@ -256,7 +292,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         history: Dict[str, Any],
     ) -> str:
         rewrite_continue_prompt = self._dep(deps, "rewrite_continue_prompt")
@@ -275,7 +311,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         mgr: Any,
         model_path: str,
         mmproj_path: Optional[str],
@@ -327,7 +363,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         history: Dict[str, Any],
         user_text_for_model: str,
         model_path: str,
@@ -355,7 +391,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         mgr: Any,
         llm: Any,
         history: Dict[str, Any],
@@ -438,7 +474,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         history: Dict[str, Any],
         assistant_text: str,
         generation_result: Any,
@@ -524,7 +560,7 @@ class TurnExecutionService:
         self,
         *,
         request: TurnExecutionRequest,
-        deps: Dict[str, Any],
+        deps: TurnExecutionDependencies,
         llm: Any,
         history: Dict[str, Any],
         model_path: str,
@@ -758,4 +794,5 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
+
 
