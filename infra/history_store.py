@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 def ensure_dir(path: str) -> None:
@@ -61,3 +61,152 @@ def atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
         except Exception:
             pass
     os.replace(tmp, path)
+
+
+def _coerce_int(v: Any, default: int) -> int:
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def normalize_history_schema(hist: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort upgrade of older history files to the current in-memory shape."""
+    hist.setdefault("meta", {})
+    hist.setdefault("system_prompt", "")
+    hist.setdefault("turns", [])
+
+    summary = hist.setdefault("summary", {})
+    summary.setdefault("enabled", False)
+    summary.setdefault("text", "")
+    summary.setdefault("updated_at", "")
+
+    turns = hist.get("turns") or []
+    normalized_turns = []
+    next_id = 1
+    max_id = 0
+    for t in turns:
+        if not isinstance(t, dict):
+            continue
+        turn = dict(t)
+        tid = _coerce_int(turn.get("id"), 0)
+        if tid <= 0:
+            tid = next_id
+        next_id = max(next_id, tid + 1)
+        max_id = max(max_id, tid)
+        turn["id"] = tid
+        normalized_turns.append(turn)
+
+    hist["turns"] = normalized_turns
+
+    covered = _coerce_int(summary.get("covered_until_turn_id"), -1)
+    if covered < 0:
+        # Old histories may already contain a rolling summary but lack the boundary marker.
+        # Preserve the existing summary text and start tracking coverage from now on.
+        covered = 0
+    summary["covered_until_turn_id"] = min(max(0, covered), max_id)
+    summary["enabled"] = bool(summary.get("enabled") or str(summary.get("text") or "").strip())
+    return hist
+
+
+def new_history(
+    session_id: str,
+    system_prompt: str,
+    model_sig: Optional[Dict[str, Any]],
+    now_iso: Callable[[], str],
+) -> Dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "meta": {
+            "session_id": session_id,
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+            "model_signature": model_sig or {},
+        },
+        "system_prompt": system_prompt or "",
+        "summary": {
+            "enabled": False,
+            "text": "",
+            "updated_at": "",
+            "covered_until_turn_id": 0,
+        },
+        "turns": [],
+    }
+
+
+def next_turn_id(history: Dict[str, Any]) -> int:
+    turns = history.get("turns") or []
+    max_id = 0
+    for t in turns:
+        if isinstance(t, dict):
+            max_id = max(max_id, _coerce_int(t.get("id"), 0))
+    return max_id + 1
+
+
+def get_context_turns(history: Dict[str, Any], max_turns: Optional[int] = None) -> List[Dict[str, Any]]:
+    turns = history.get("turns") or []
+    covered = _coerce_int((history.get("summary") or {}).get("covered_until_turn_id"), 0)
+    pending = [
+        t for t in turns
+        if isinstance(t, dict) and _coerce_int(t.get("id"), 0) > covered
+    ]
+    if max_turns is not None:
+        mt = max(0, _coerce_int(max_turns, 0))
+        if mt > 0:
+            pending = pending[-mt:]
+        else:
+            pending = []
+    return pending
+
+
+def load_history(
+    *,
+    session_id: str,
+    history_dir: Optional[str],
+    system_prompt: str,
+    model_sig: Optional[Dict[str, Any]] = None,
+    reset_session: bool = False,
+    default_dir: str,
+    now_iso: Callable[[], str],
+) -> tuple[Dict[str, Any], str]:
+    """Load session history JSON, or create new. Returns (history, path)."""
+    path = history_path(session_id, history_dir, default_dir)
+    if reset_session:
+        hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
+        atomic_write_json(path, hist)
+        return hist, path
+
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                hist = json.load(f)
+            if not isinstance(hist, dict) or hist.get("schema_version") != 1:
+                raise ValueError("Unsupported history schema")
+            hist = normalize_history_schema(hist)
+            if system_prompt:
+                hist["system_prompt"] = system_prompt
+            if model_sig:
+                hist.setdefault("meta", {}).setdefault("model_signature", {}).update(model_sig)
+            return hist, path
+        except Exception:
+            bak = path + ".bak"
+            if os.path.exists(bak):
+                try:
+                    with open(bak, "r", encoding="utf-8") as f:
+                        hist = json.load(f)
+                    if isinstance(hist, dict) and hist.get("schema_version") == 1:
+                        hist = normalize_history_schema(hist)
+                        if system_prompt:
+                            hist["system_prompt"] = system_prompt
+                        if model_sig:
+                            hist.setdefault("meta", {}).setdefault("model_signature", {}).update(model_sig)
+                        return hist, path
+                except Exception:
+                    pass
+            hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
+            atomic_write_json(path, hist)
+            return hist, path
+
+    hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
+    atomic_write_json(path, hist)
+    return hist, path
