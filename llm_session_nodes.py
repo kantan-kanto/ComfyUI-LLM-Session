@@ -333,6 +333,43 @@ def _build_dialogue_cycle_simple_chat_kwargs(
     }
 
 
+def _build_session_chat_simple_chat_kwargs(
+    *,
+    defaults: Dict[str, Any],
+    history_dir: str,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+) -> Dict[str, Any]:
+    return {
+        "system_prompt": defaults["system_prompt"],
+        "max_tokens": int(defaults["max_tokens"]),
+        "temperature": float(defaults["temperature"]),
+        "top_p": float(defaults["top_p"]),
+        "n_gpu_layers": int(defaults["n_gpu_layers"]),
+        "n_ctx": int(defaults["n_ctx"]),
+        "max_turns": int(defaults["max_turns"]),
+        "summarize_old_history": bool(defaults["summarize_old_history"]),
+        "summary_chunk_turns": int(defaults["summary_chunk_turns"]),
+        "max_tokens_summary": int(defaults["max_tokens_summary"]),
+        "summary_max_chars": int(defaults["summary_max_chars"]),
+        "dynamic_max_tokens": bool(defaults["dynamic_max_tokens"]),
+        "min_generation_tokens": int(defaults["min_generation_tokens"]),
+        "safety_margin_tokens": int(defaults["safety_margin_tokens"]),
+        "persistent_cache": str(defaults["persistent_cache"]),
+        "repeat_penalty": float(defaults["repeat_penalty"]),
+        "repeat_last_n": int(defaults["repeat_last_n"]),
+        "rewrite_continue": bool(defaults["rewrite_continue"]),
+        "runtime_cache": str(defaults["runtime_cache"]),
+        "log_level": str(defaults["log_level"]),
+        "suppress_backend_logs": bool(defaults["suppress_backend_logs"]),
+        "history_dir": history_dir or "",
+        "reset_session": bool(defaults["reset_session"]),
+        "stream_to_console": bool(defaults["stream_to_console"]),
+        "chat_handler_overrides": chat_handler_overrides,
+        "text_chat_builder_overrides": text_chat_builder_overrides,
+    }
+
+
 # llama-cpp-python imports
 from importlib import import_module
 from collections import defaultdict
@@ -3233,6 +3270,12 @@ class LLMSessionChatSimpleNode:
         defaults, chat_handler_overrides, text_chat_builder_overrides = _load_simple_defaults_bundle(
             config_path=config_path
         )
+        chat_kwargs = _build_session_chat_simple_chat_kwargs(
+            defaults=defaults,
+            history_dir=history_dir,
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
 
         # Delegate to the full node implementation
         node = LLMSessionChatNode()
@@ -3241,33 +3284,8 @@ class LLMSessionChatSimpleNode:
             session_id=session_id,
             model=model,
             mmproj=mmproj,
-            system_prompt=defaults["system_prompt"],
-            max_tokens=int(defaults["max_tokens"]),
-            temperature=float(defaults["temperature"]),
-            top_p=float(defaults["top_p"]),
-            n_gpu_layers=int(defaults["n_gpu_layers"]),
-            n_ctx=int(defaults["n_ctx"]),
             image=image,
-            max_turns=int(defaults["max_turns"]),
-            summarize_old_history=bool(defaults["summarize_old_history"]),
-            summary_chunk_turns=int(defaults["summary_chunk_turns"]),
-            max_tokens_summary=int(defaults["max_tokens_summary"]),
-            summary_max_chars=int(defaults["summary_max_chars"]),
-            dynamic_max_tokens=bool(defaults["dynamic_max_tokens"]),
-            min_generation_tokens=int(defaults["min_generation_tokens"]),
-            safety_margin_tokens=int(defaults["safety_margin_tokens"]),
-            persistent_cache=str(defaults["persistent_cache"]),
-            repeat_penalty=float(defaults["repeat_penalty"]),
-            repeat_last_n=int(defaults["repeat_last_n"]),
-            rewrite_continue=bool(defaults["rewrite_continue"]),
-            runtime_cache=str(defaults["runtime_cache"]),
-            log_level=str(defaults["log_level"]),
-            suppress_backend_logs=bool(defaults["suppress_backend_logs"]),
-            history_dir=history_dir or "",
-            reset_session=bool(defaults["reset_session"]),
-            stream_to_console=bool(defaults["stream_to_console"]),
-            chat_handler_overrides=chat_handler_overrides,
-            text_chat_builder_overrides=text_chat_builder_overrides,
+            **chat_kwargs,
         )
 
 
