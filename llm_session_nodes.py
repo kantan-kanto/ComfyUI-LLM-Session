@@ -254,6 +254,29 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     return defaults
 
 
+def _load_simple_defaults_bundle(
+    config_path: Optional[str] = None,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Dict[str, Any]]], Optional[Dict[str, Dict[str, Any]]]]:
+    defaults = _load_simple_defaults(config_path=config_path)
+    return (
+        defaults,
+        defaults.get("chat_handler_overrides"),
+        defaults.get("text_chat_builder_overrides"),
+    )
+
+
+def _resolve_simple_system_prompts(
+    defaults: Dict[str, Any],
+    system: str,
+    systemA: str,
+    systemB: str,
+) -> tuple[str, str, str]:
+    system_prompt = (system or "").strip() or str(defaults["system_prompt"] or _DEFAULT_SYSTEM_PROMPT)
+    system_prompt_A = (systemA or "").strip() or str(defaults["system_prompt_A"] or "")
+    system_prompt_B = (systemB or "").strip() or str(defaults["system_prompt_B"] or "")
+    return system_prompt, system_prompt_A, system_prompt_B
+
+
 # llama-cpp-python imports
 from importlib import import_module
 from collections import defaultdict
@@ -3938,9 +3961,9 @@ class LLMSessionChatSimpleNode:
         config_path: str = "",
         stream_to_console: bool = True,
     ) -> tuple:
-        defaults = _load_simple_defaults(config_path=config_path)
-        chat_handler_overrides = defaults.get("chat_handler_overrides")
-        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
+        defaults, chat_handler_overrides, text_chat_builder_overrides = _load_simple_defaults_bundle(
+            config_path=config_path
+        )
 
         # Delegate to the full node implementation
         node = LLMSessionChatNode()
@@ -4023,45 +4046,48 @@ class LLMDialogueCycleSimpleNode:
             return ("",)
 
         # Load defaults from config (or fallback)
-        defaults = _load_simple_defaults(config_path or "")
-        chat_handler_overrides = defaults.get("chat_handler_overrides")
-        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
+        defaults, chat_handler_overrides, text_chat_builder_overrides = _load_simple_defaults_bundle(
+            config_path or ""
+        )
 
         # System prompts (shared + optional overrides)
         # UI fields take priority when non-empty; otherwise fall back to config/defaults.
-        system_prompt = (system or "").strip() or str(defaults.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT)
-        system_prompt_A = (systemA or "").strip() or str(defaults.get("system_prompt_A") or "")
-        system_prompt_B = (systemB or "").strip() or str(defaults.get("system_prompt_B") or "")
+        system_prompt, system_prompt_A, system_prompt_B = _resolve_simple_system_prompts(
+            defaults,
+            system,
+            systemA,
+            systemB,
+        )
 
         # Sampling / runtime parameters
-        max_tokens = int(defaults.get("max_tokens") or 512)
-        temperature = float(defaults.get("temperature") or 0.7)
-        top_p = float(defaults.get("top_p") or 0.9)
-        n_gpu_layers = int(defaults.get("n_gpu_layers") or 0)
-        n_ctx = int(defaults.get("n_ctx") or 4096)
+        max_tokens = int(defaults["max_tokens"])
+        temperature = float(defaults["temperature"])
+        top_p = float(defaults["top_p"])
+        n_gpu_layers = int(defaults["n_gpu_layers"])
+        n_ctx = int(defaults["n_ctx"])
 
         # History + summary parameters
-        max_turns = int(defaults.get("max_turns") or 6)
-        summarize_old_history = bool(defaults.get("summarize_old_history") if "summarize_old_history" in defaults else True)
-        summary_chunk_turns = int(defaults.get("summary_chunk_turns") or 6)
-        max_tokens_summary = int(defaults.get("max_tokens_summary") or 128)
-        summary_max_chars = int(defaults.get("summary_max_chars") or 1500)
+        max_turns = int(defaults["max_turns"])
+        summarize_old_history = bool(defaults["summarize_old_history"])
+        summary_chunk_turns = int(defaults["summary_chunk_turns"])
+        max_tokens_summary = int(defaults["max_tokens_summary"])
+        summary_max_chars = int(defaults["summary_max_chars"])
 
         # Dynamic context protection
-        dynamic_max_tokens = bool(defaults.get("dynamic_max_tokens") if "dynamic_max_tokens" in defaults else True)
-        min_generation_tokens = int(defaults.get("min_generation_tokens") or 96)
-        safety_margin_tokens = int(defaults.get("safety_margin_tokens") or 64)
+        dynamic_max_tokens = bool(defaults["dynamic_max_tokens"])
+        min_generation_tokens = int(defaults["min_generation_tokens"])
+        safety_margin_tokens = int(defaults["safety_margin_tokens"])
 
         # Cache + repetition controls
-        persistent_cache = str(defaults.get("persistent_cache") or "off")
-        runtime_cache = str(defaults.get("runtime_cache") or "LlamaTrieCache")
-        repeat_penalty = float(defaults.get("repeat_penalty") or 1.12)
-        repeat_last_n = int(defaults.get("repeat_last_n") or 256)
-        rewrite_continue = bool(defaults.get("rewrite_continue") if "rewrite_continue" in defaults else True)
+        persistent_cache = str(defaults["persistent_cache"])
+        runtime_cache = str(defaults["runtime_cache"])
+        repeat_penalty = float(defaults["repeat_penalty"])
+        repeat_last_n = int(defaults["repeat_last_n"])
+        rewrite_continue = bool(defaults["rewrite_continue"])
 
         # Logging
-        log_level = str(defaults.get("log_level") or "timing")
-        suppress_backend_logs = bool(defaults.get("suppress_backend_logs") if "suppress_backend_logs" in defaults else True)
+        log_level = str(defaults["log_level"])
+        suppress_backend_logs = bool(defaults["suppress_backend_logs"])
 
         # mmproj handling:
         # - Default is auto-detect for both roles.
@@ -4103,7 +4129,7 @@ class LLMDialogueCycleSimpleNode:
             suppress_backend_logs=bool(suppress_backend_logs),
             history_dir=history_dir or "",
             reset_session=bool(reset_session),
-            stream_to_console=bool(defaults.get("stream_to_console") or False),
+            stream_to_console=bool(defaults["stream_to_console"]),
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
         )
