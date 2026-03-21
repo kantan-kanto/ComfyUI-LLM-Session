@@ -44,3 +44,9 @@ changes consistent and maintainable over time.
 3. Keep a one-screen dependency-direction diagram in `ARCHITECTURE.md`, and keep `REFACTORING_RULES.md` focused on rules.
 4. Track unresolved behavior issues in `KNOWN_ISSUES.md` (not in refactor commits that preserve behavior).
 5. When architecture changes, update both `ARCHITECTURE.md` and affected package/file comments in the same change.
+
+## Line Endings
+1. Normalize all text files to LF (`\\n`) and keep `.gitattributes` with `* text=auto eol=lf`.
+2. Do not mix functional changes with line-ending normalization in the same commit.
+3. If line-ending normalization is needed, perform it in a dedicated commit with a clear message.
+
