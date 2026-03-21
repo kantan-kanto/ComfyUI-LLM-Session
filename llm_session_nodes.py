@@ -27,14 +27,14 @@ try:
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from .infra import history_store
-    from .services.chat_turn_service import ChatTurnService
+    from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
     from .services.turn_execution_service import TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from infra import history_store
-    from services.chat_turn_service import ChatTurnService
+    from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
     from services.turn_execution_service import TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 
 
@@ -2934,7 +2934,7 @@ class LLMDialogueCycleNode:
             "text_chat_builder_overrides": text_chat_builder_overrides,
         }
 
-        transcript_text = service.run_dialogue_cycle(
+        request = DialogueCycleRequest(
             initial_user_text=initial_user_text,
             session_id=session_id,
             cycles=cycles,
@@ -2945,6 +2945,10 @@ class LLMDialogueCycleNode:
             stream_to_console=bool(stream_to_console),
             reset_session=bool(reset_session),
             history_dir=history_dir,
+            turn_kwargs_A={**common_turn_kwargs, "model": modelA, "mmproj": mmprojA},
+            turn_kwargs_B={**common_turn_kwargs, "model": modelB, "mmproj": mmprojB},
+        )
+        dependencies = DialogueCycleDependencies(
             now_iso=_now_iso_jst,
             transcript_path=_transcript_path,
             append_transcript_lines=_append_transcript_lines,
@@ -2952,8 +2956,10 @@ class LLMDialogueCycleNode:
             model_manager_factory=GGUFModelManager,
             unload_model=lambda manager: manager.unload_model(),
             chat_one_turn=_chat_one_turn,
-            turn_kwargs_A={**common_turn_kwargs, "model": modelA, "mmproj": mmprojA},
-            turn_kwargs_B={**common_turn_kwargs, "model": modelB, "mmproj": mmprojB},
+        )
+        transcript_text = service.run_dialogue_cycle_with_dependencies(
+            request=request,
+            dependencies=dependencies,
         )
         return (transcript_text,)
 
@@ -3199,4 +3205,5 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
 

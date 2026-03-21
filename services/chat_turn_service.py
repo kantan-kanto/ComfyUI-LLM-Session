@@ -1,10 +1,66 @@
 # Service that orchestrates A<->B dialogue cycles and transcript updates.
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 
+@dataclass(frozen=True)
+class DialogueCycleRequest:
+    initial_user_text: str
+    session_id: str
+    cycles: int
+    system_prompt: str
+    system_prompt_A: str
+    system_prompt_B: str
+    runtime_cache: str
+    stream_to_console: bool
+    reset_session: bool
+    history_dir: str
+    turn_kwargs_A: Dict[str, Any]
+    turn_kwargs_B: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DialogueCycleDependencies:
+    now_iso: Callable[[], str]
+    transcript_path: Callable[[str, Optional[str]], str]
+    append_transcript_lines: Callable[[str, List[str]], None]
+    clear_kv_state_for_session: Callable[[str], None]
+    model_manager_factory: Callable[[], Any]
+    unload_model: Callable[[Any], None]
+    chat_one_turn: Callable[..., str]
+
+
 class ChatTurnService:
+    def run_dialogue_cycle_with_dependencies(
+        self,
+        *,
+        request: DialogueCycleRequest,
+        dependencies: DialogueCycleDependencies,
+    ) -> str:
+        return self.run_dialogue_cycle(
+            initial_user_text=request.initial_user_text,
+            session_id=request.session_id,
+            cycles=request.cycles,
+            system_prompt=request.system_prompt,
+            system_prompt_A=request.system_prompt_A,
+            system_prompt_B=request.system_prompt_B,
+            runtime_cache=request.runtime_cache,
+            stream_to_console=request.stream_to_console,
+            reset_session=request.reset_session,
+            history_dir=request.history_dir,
+            now_iso=dependencies.now_iso,
+            transcript_path=dependencies.transcript_path,
+            append_transcript_lines=dependencies.append_transcript_lines,
+            clear_kv_state_for_session=dependencies.clear_kv_state_for_session,
+            model_manager_factory=dependencies.model_manager_factory,
+            unload_model=dependencies.unload_model,
+            chat_one_turn=dependencies.chat_one_turn,
+            turn_kwargs_A=request.turn_kwargs_A,
+            turn_kwargs_B=request.turn_kwargs_B,
+        )
+
     def run_dialogue_cycle(
         self,
         *,
