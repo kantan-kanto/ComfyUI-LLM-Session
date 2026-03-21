@@ -28,14 +28,14 @@ try:
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from .infra import history_store
     from .services.chat_turn_service import ChatTurnService
-    from .services.turn_execution_service import TurnExecutionDependencies, TurnExecutionService
+    from .services.turn_execution_service import TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from infra import history_store
     from services.chat_turn_service import ChatTurnService
-    from services.turn_execution_service import TurnExecutionDependencies, TurnExecutionService
+    from services.turn_execution_service import TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 
 
 # ============================================================================
@@ -2540,7 +2540,7 @@ def _execute_turn_via_service(
     include_error_in_invalidate_message: bool,
     enable_attempt_logging: bool,
     log_prefix: str,
-):
+) -> TurnExecutionResult:
     service = TurnExecutionService()
     return service.execute_from_node_inputs(
         user_text=user_text,
@@ -3158,17 +3158,3 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
