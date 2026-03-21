@@ -26,10 +26,12 @@ try:
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
+    from .services.chat_turn_service import ChatTurnService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
+    from services.chat_turn_service import ChatTurnService
 
 
 # ============================================================================
@@ -3508,135 +3510,54 @@ class LLMDialogueCycleNode:
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
-        base_id = (session_id or "default").strip() or "default"
-        sidA = f"{base_id}_A"
-        sidB = f"{base_id}_B"
+        service = ChatTurnService()
+        common_turn_kwargs = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "n_gpu_layers": n_gpu_layers,
+            "n_ctx": n_ctx,
+            "max_turns": max_turns,
+            "summarize_old_history": summarize_old_history,
+            "summary_chunk_turns": summary_chunk_turns,
+            "max_tokens_summary": max_tokens_summary,
+            "summary_max_chars": summary_max_chars,
+            "dynamic_max_tokens": dynamic_max_tokens,
+            "min_generation_tokens": min_generation_tokens,
+            "safety_margin_tokens": safety_margin_tokens,
+            "persistent_cache": persistent_cache,
+            "repeat_penalty": repeat_penalty,
+            "repeat_last_n": repeat_last_n,
+            "rewrite_continue": rewrite_continue,
+            "runtime_cache": runtime_cache,
+            "log_level": log_level,
+            "suppress_backend_logs": suppress_backend_logs,
+            "chat_handler_overrides": chat_handler_overrides,
+            "text_chat_builder_overrides": text_chat_builder_overrides,
+        }
 
-        # transcript file
-        tpath = _transcript_path(base_id, history_dir or None)
-
-        reset = bool(reset_session)
-        if reset:
-            _clear_kv_state_for_session(sidA)
-            _clear_kv_state_for_session(sidB)
-
-        lastA = ""
-        lastB = ""
-        transcript_lines: List[str] = []
-        managerA = GGUFModelManager()
-        managerB = GGUFModelManager()
-        kv_memory_enabled = (runtime_cache or "off") == "KV_cache"
-
-        try:
-            first = initial_user_text or ""
-            line0 = f"[{_now_iso_jst()}] USER → A: {first}"
-            _append_transcript_lines(tpath, [line0])
-            transcript_lines.append(line0)
-
-            msg = first
-            for _ in range(int(max(1, cycles))):
-                # A turn
-                sysA = (system_prompt_A or "").strip() or (system_prompt or "")
-                lastA = _chat_one_turn(
-                    user_text=msg,
-                    session_id=sidA,
-                    model=modelA,
-                    mmproj=mmprojA,
-                    system_prompt=sysA,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    n_gpu_layers=n_gpu_layers,
-                    n_ctx=n_ctx,
-                    max_turns=max_turns,
-                    summarize_old_history=summarize_old_history,
-                    summary_chunk_turns=summary_chunk_turns,
-                    max_tokens_summary=max_tokens_summary,
-                    summary_max_chars=summary_max_chars,
-                    dynamic_max_tokens=dynamic_max_tokens,
-                    min_generation_tokens=min_generation_tokens,
-                    safety_margin_tokens=safety_margin_tokens,
-                    persistent_cache=persistent_cache,
-                    repeat_penalty=repeat_penalty,
-                    repeat_last_n=repeat_last_n,
-                    rewrite_continue=rewrite_continue,
-                    runtime_cache=runtime_cache,
-                    log_level=log_level,
-                    suppress_backend_logs=suppress_backend_logs,
-                    history_dir=history_dir,
-                    reset_session=reset,
-                    stream_to_console=bool(stream_to_console),
-                    model_manager=managerA,
-                    chat_handler_overrides=chat_handler_overrides,
-                    text_chat_builder_overrides=text_chat_builder_overrides,
-                )
-                lineA = f"[{_now_iso_jst()}] A: {lastA}"
-                _append_transcript_lines(tpath, [lineA])
-                transcript_lines.append(lineA)
-                msg = lastA or ""
-                if not kv_memory_enabled:
-                    try:
-                        managerA.unload_model()
-                    except Exception:
-                        pass
-                reset_for_b = reset
-                reset = False  # reset only on first cycle
-
-                # B turn
-                sysB = (system_prompt_B or "").strip() or (system_prompt or "")
-                lastB = _chat_one_turn(
-                    user_text=msg,
-                    session_id=sidB,
-                    model=modelB,
-                    mmproj=mmprojB,
-                    system_prompt=sysB,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    n_gpu_layers=n_gpu_layers,
-                    n_ctx=n_ctx,
-                    max_turns=max_turns,
-                    summarize_old_history=summarize_old_history,
-                    summary_chunk_turns=summary_chunk_turns,
-                    max_tokens_summary=max_tokens_summary,
-                    summary_max_chars=summary_max_chars,
-                    dynamic_max_tokens=dynamic_max_tokens,
-                    min_generation_tokens=min_generation_tokens,
-                    safety_margin_tokens=safety_margin_tokens,
-                    persistent_cache=persistent_cache,
-                    repeat_penalty=repeat_penalty,
-                    repeat_last_n=repeat_last_n,
-                    rewrite_continue=rewrite_continue,
-                    runtime_cache=runtime_cache,
-                    log_level=log_level,
-                    suppress_backend_logs=suppress_backend_logs,
-                    history_dir=history_dir,
-                    reset_session=reset_for_b,
-                    stream_to_console=bool(stream_to_console),
-                    model_manager=managerB,
-                    chat_handler_overrides=chat_handler_overrides,
-                    text_chat_builder_overrides=text_chat_builder_overrides,
-                )
-                lineB = f"[{_now_iso_jst()}] B: {lastB}"
-                _append_transcript_lines(tpath, [lineB])
-                transcript_lines.append(lineB)
-                msg = lastB or ""
-                if not kv_memory_enabled:
-                    try:
-                        managerB.unload_model()
-                    except Exception:
-                        pass
-        finally:
-            try:
-                managerA.unload_model()
-            except Exception:
-                pass
-            try:
-                managerB.unload_model()
-            except Exception:
-                pass
-
-        return ("\n".join(transcript_lines),)
+        transcript_text = service.run_dialogue_cycle(
+            initial_user_text=initial_user_text,
+            session_id=session_id,
+            cycles=cycles,
+            system_prompt=system_prompt,
+            system_prompt_A=system_prompt_A,
+            system_prompt_B=system_prompt_B,
+            runtime_cache=runtime_cache,
+            stream_to_console=bool(stream_to_console),
+            reset_session=bool(reset_session),
+            history_dir=history_dir,
+            now_iso=_now_iso_jst,
+            transcript_path=_transcript_path,
+            append_transcript_lines=_append_transcript_lines,
+            clear_kv_state_for_session=_clear_kv_state_for_session,
+            model_manager_factory=GGUFModelManager,
+            unload_model=lambda manager: manager.unload_model(),
+            chat_one_turn=_chat_one_turn,
+            turn_kwargs_A={**common_turn_kwargs, "model": modelA, "mmproj": mmprojA},
+            turn_kwargs_B={**common_turn_kwargs, "model": modelB, "mmproj": mmprojB},
+        )
+        return (transcript_text,)
 
 
 # =============================================================================
