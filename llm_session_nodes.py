@@ -2654,6 +2654,36 @@ def _resolve_model_path_for_session_chat(model: str) -> str:
     return _resolve_llm_relpath(model, roots=roots)
 
 
+def _log_session_chat_total(start_time: float, status: str) -> None:
+    dt = time.perf_counter() - start_time
+    print(f"[LLM Session Chat] {status} in {dt:.2f} seconds")
+
+
+def _session_chat_error_return(start_time: float, message: Optional[str] = None) -> tuple:
+    if message:
+        print(message)
+    _log_session_chat_total(start_time, "Finished (error)")
+    return ("",)
+
+
+def _resolve_valid_session_chat_model_path(model: str, start_time: float) -> Optional[str]:
+    if _is_no_models_placeholder(model):
+        _session_chat_error_return(
+            start_time,
+            f"[LLM Session Chat] Error: No GGUF models found in models/{_LLM_MODELS_DIR_NAME}/",
+        )
+        return None
+
+    model_path = _resolve_model_path_for_session_chat(model)
+    if not os.path.exists(model_path):
+        _session_chat_error_return(
+            start_time,
+            f"[LLM Session Chat] Error: Model not found: {model_path}",
+        )
+        return None
+    return model_path
+
+
 def _require_llama_cpp_available() -> None:
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
@@ -2871,21 +2901,8 @@ class LLMSessionChatNode:
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
         _t_total = time.perf_counter()
 
-        def _log_total(status: str):
-            dt = time.perf_counter() - _t_total
-            print(f"[LLM Session Chat] {status} in {dt:.2f} seconds")
-
         _require_llama_cpp_available()
-
-        if _is_no_models_placeholder(model):
-            print(f"[LLM Session Chat] Error: No GGUF models found in models/{_LLM_MODELS_DIR_NAME}/")
-            _log_total("Finished (error)")
-            return ("",)
-
-        model_path = _resolve_model_path_for_session_chat(model)
-        if not os.path.exists(model_path):
-            print(f"[LLM Session Chat] Error: Model not found: {model_path}")
-            _log_total("Finished (error)")
+        if _resolve_valid_session_chat_model_path(model, _t_total) is None:
             return ("",)
 
         mgr = _get_or_create_model_manager()
@@ -2928,11 +2945,13 @@ class LLMSessionChatNode:
 
         if not result.generation_succeeded:
             if result.error is not None:
-                print(f"[LLM Session Chat] Error during generation: {result.error}")
-            _log_total("Finished (error)")
-            return ("",)
+                return _session_chat_error_return(
+                    _t_total,
+                    f"[LLM Session Chat] Error during generation: {result.error}",
+                )
+            return _session_chat_error_return(_t_total)
 
-        _log_total("Finished")
+        _log_session_chat_total(_t_total, "Finished")
         return (result.assistant_text,)
 
 
