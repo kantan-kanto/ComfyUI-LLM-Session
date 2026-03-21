@@ -2493,6 +2493,40 @@ def _build_dialogue_cycle_dependencies() -> DialogueCycleDependencies:
     }
 
 
+def _build_dialogue_cycle_request(
+    *,
+    initial_user_text: str,
+    session_id: str,
+    cycles: int,
+    system_prompt: str,
+    system_prompt_A: str,
+    system_prompt_B: str,
+    runtime_cache: str,
+    stream_to_console: bool,
+    reset_session: bool,
+    history_dir: str,
+    common_turn_kwargs: Dict[str, Any],
+    model_a: str,
+    mmproj_a: str,
+    model_b: str,
+    mmproj_b: str,
+) -> DialogueCycleRequest:
+    return DialogueCycleRequest(
+        initial_user_text=initial_user_text,
+        session_id=session_id,
+        cycles=cycles,
+        system_prompt=system_prompt,
+        system_prompt_A=system_prompt_A,
+        system_prompt_B=system_prompt_B,
+        runtime_cache=runtime_cache,
+        stream_to_console=bool(stream_to_console),
+        reset_session=bool(reset_session),
+        history_dir=history_dir,
+        turn_kwargs_A={**common_turn_kwargs, "model": model_a, "mmproj": mmproj_a},
+        turn_kwargs_B={**common_turn_kwargs, "model": model_b, "mmproj": mmproj_b},
+    )
+
+
 def _require_llama_cpp_available() -> None:
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
@@ -2946,7 +2980,7 @@ class LLMDialogueCycleNode:
             "text_chat_builder_overrides": text_chat_builder_overrides,
         }
 
-        request = DialogueCycleRequest(
+        request = _build_dialogue_cycle_request(
             initial_user_text=initial_user_text,
             session_id=session_id,
             cycles=cycles,
@@ -2954,11 +2988,14 @@ class LLMDialogueCycleNode:
             system_prompt_A=system_prompt_A,
             system_prompt_B=system_prompt_B,
             runtime_cache=runtime_cache,
-            stream_to_console=bool(stream_to_console),
-            reset_session=bool(reset_session),
+            stream_to_console=stream_to_console,
+            reset_session=reset_session,
             history_dir=history_dir,
-            turn_kwargs_A={**common_turn_kwargs, "model": modelA, "mmproj": mmprojA},
-            turn_kwargs_B={**common_turn_kwargs, "model": modelB, "mmproj": mmprojB},
+            common_turn_kwargs=common_turn_kwargs,
+            model_a=modelA,
+            mmproj_a=mmprojA,
+            model_b=modelB,
+            mmproj_b=mmprojB,
         )
         dependencies = _build_dialogue_cycle_dependencies()
         transcript_text = service.run_dialogue_cycle_with_dependencies(
