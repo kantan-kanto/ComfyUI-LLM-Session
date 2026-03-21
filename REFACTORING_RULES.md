@@ -31,6 +31,9 @@ changes consistent and maintainable over time.
 1. Keep UI definitions thin by using shared UI helper functions (e.g., input builder helpers).
 2. Preserve UI enum/choice labels and sentinel strings to avoid breaking saved workflows.
 3. Prefer small refactors that keep public node inputs stable unless a separate change is agreed.
+4. Keep node execution methods thin (orchestration-focused). If a node method grows beyond roughly 150 lines, move logic to services/helpers.
+5. Avoid duplicated core logic. Continue rewrite, generation retry flow, and KV state load/save logic must be implemented once and reused.
+6. Preserve compatibility-critical surface by default: node class names, input keys, enum/choice labels, and sentinel strings must stay stable unless a spec-change step is explicitly separated.
 
 ## Notes
 - If a potential bug is found but fixing it would change behavior, record it and handle it later.
