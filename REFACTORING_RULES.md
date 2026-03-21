@@ -50,3 +50,14 @@ changes consistent and maintainable over time.
 2. Do not mix functional changes with line-ending normalization in the same commit.
 3. If line-ending normalization is needed, perform it in a dedicated commit with a clear message.
 
+
+## P0 Safety Net Baseline (2026-03-21)
+1. Add pytest scaffolding under `tests/`.
+2. Lock behavior for `core/continue_rewrite.py`.
+3. Lock behavior for `core/kv_state.py`.
+4. Lock behavior for `core/generation_runner.py`.
+5. Lock orchestration behavior for `services/turn_execution_service.py`.
+
+Note:
+- These tests are intended to preserve current behavior during refactoring.
+- KNOWN_ISSUES remain tracked separately and are not changed by P0 test commits.
