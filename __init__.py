@@ -8,10 +8,21 @@
 
 __version__ = "1.0.4"
 
-from .llm_session_nodes import (
-    NODE_CLASS_MAPPINGS as sNODE_CLASS_MAPPINGS,
-    NODE_DISPLAY_NAME_MAPPINGS as sNODE_DISPLAY_NAME_MAPPINGS,
-)
+try:
+    from .llm_session_nodes import (
+        NODE_CLASS_MAPPINGS as sNODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as sNODE_DISPLAY_NAME_MAPPINGS,
+    )
+except Exception:
+    try:
+        from llm_session_nodes import (
+            NODE_CLASS_MAPPINGS as sNODE_CLASS_MAPPINGS,
+            NODE_DISPLAY_NAME_MAPPINGS as sNODE_DISPLAY_NAME_MAPPINGS,
+        )
+    except Exception as e:
+        print(f"[LLM Session] Warning: node mappings unavailable during init: {e}")
+        sNODE_CLASS_MAPPINGS = {}
+        sNODE_DISPLAY_NAME_MAPPINGS = {}
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
