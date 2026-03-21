@@ -220,3 +220,120 @@ def test_execute_from_node_inputs_matches_execute_turn_path() -> None:
     assert result.generation_succeeded is True
     assert result.assistant_text == "assistant reply"
     assert writes and writes[0][0] == "hist.json"
+
+
+def test_execute_session_chat_turn_adds_image_stream_params() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+
+    result = service.execute_session_chat_turn(
+        user_text="hello",
+        session_id="sid",
+        model="model.gguf",
+        mmproj="(Auto detect)",
+        system_prompt="sys",
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        n_gpu_layers=0,
+        n_ctx=1024,
+        image=None,
+        max_turns=12,
+        summarize_old_history=True,
+        summary_chunk_turns=3,
+        max_tokens_summary=128,
+        summary_max_chars=1500,
+        dynamic_max_tokens=True,
+        min_generation_tokens=96,
+        safety_margin_tokens=64,
+        persistent_cache="off",
+        repeat_penalty=1.12,
+        repeat_last_n=256,
+        rewrite_continue=True,
+        runtime_cache="off",
+        log_level="timing",
+        suppress_backend_logs=True,
+        history_dir="",
+        reset_session=False,
+        stream_to_console=False,
+        model_manager=mgr,
+        chat_handler_overrides=None,
+        text_chat_builder_overrides=None,
+        dependencies=deps,
+    )
+
+    assert result.generation_succeeded is True
+    params = history["turns"][0]["params"]
+    assert "image_used" in params
+    assert "streamed" in params
+
+
+def test_execute_dialogue_cycle_turn_strips_and_omits_image_stream_params() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="  assistant reply  ",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+
+    result = service.execute_dialogue_cycle_turn(
+        user_text="hello",
+        session_id="sid",
+        model="model.gguf",
+        mmproj="(Auto detect)",
+        system_prompt="sys",
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        n_gpu_layers=0,
+        n_ctx=1024,
+        image=None,
+        max_turns=12,
+        summarize_old_history=True,
+        summary_chunk_turns=3,
+        max_tokens_summary=128,
+        summary_max_chars=1500,
+        dynamic_max_tokens=True,
+        min_generation_tokens=96,
+        safety_margin_tokens=64,
+        persistent_cache="off",
+        repeat_penalty=1.12,
+        repeat_last_n=256,
+        rewrite_continue=True,
+        runtime_cache="off",
+        log_level="timing",
+        suppress_backend_logs=True,
+        history_dir="",
+        reset_session=False,
+        stream_to_console=False,
+        model_manager=mgr,
+        chat_handler_overrides=None,
+        text_chat_builder_overrides=None,
+        dependencies=deps,
+    )
+
+    assert result.generation_succeeded is True
+    assert result.assistant_text == "assistant reply"
+    params = history["turns"][0]["params"]
+    assert "image_used" not in params
+    assert "streamed" not in params

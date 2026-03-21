@@ -2499,93 +2499,6 @@ def _get_or_create_model_manager(
     if _model_manager is None:
         _model_manager = GGUFModelManager()
     return _model_manager
-def _execute_turn_via_service(
-    *,
-    user_text: str,
-    session_id: str,
-    model: str,
-    mmproj: str,
-    system_prompt: str,
-    max_tokens: int,
-    temperature: float,
-    top_p: float,
-    n_gpu_layers: int,
-    n_ctx: int,
-    image: Any,
-    max_turns: Optional[int],
-    summarize_old_history: bool,
-    summary_chunk_turns: int,
-    max_tokens_summary: int,
-    summary_max_chars: int,
-    dynamic_max_tokens: bool,
-    min_generation_tokens: int,
-    safety_margin_tokens: int,
-    persistent_cache: str,
-    repeat_penalty: float,
-    repeat_last_n: int,
-    rewrite_continue: bool,
-    runtime_cache: str,
-    log_level: str,
-    suppress_backend_logs: bool,
-    history_dir: str,
-    reset_session: bool,
-    stream_to_console: bool,
-    model_manager: Optional[Any],
-    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
-    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
-    strip_assistant_before_reasoning_filter: bool,
-    include_image_and_stream_in_turn_params: bool,
-    kv_log_saved_when_not_minimal: bool,
-    kv_log_unsupported_when_not_minimal: bool,
-    include_error_in_invalidate_message: bool,
-    enable_attempt_logging: bool,
-    log_prefix: str,
-) -> TurnExecutionResult:
-    service = TurnExecutionService()
-    return service.execute_from_node_inputs(
-        user_text=user_text,
-        session_id=session_id,
-        model=model,
-        mmproj=mmproj,
-        system_prompt=system_prompt,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        n_gpu_layers=n_gpu_layers,
-        n_ctx=n_ctx,
-        image=image,
-        max_turns=max_turns,
-        summarize_old_history=summarize_old_history,
-        summary_chunk_turns=summary_chunk_turns,
-        max_tokens_summary=max_tokens_summary,
-        summary_max_chars=summary_max_chars,
-        dynamic_max_tokens=dynamic_max_tokens,
-        min_generation_tokens=min_generation_tokens,
-        safety_margin_tokens=safety_margin_tokens,
-        persistent_cache=persistent_cache,
-        repeat_penalty=repeat_penalty,
-        repeat_last_n=repeat_last_n,
-        rewrite_continue=rewrite_continue,
-        runtime_cache=runtime_cache,
-        log_level=log_level,
-        suppress_backend_logs=suppress_backend_logs,
-        history_dir=history_dir,
-        reset_session=reset_session,
-        stream_to_console=stream_to_console,
-        model_manager=model_manager,
-        chat_handler_overrides=chat_handler_overrides,
-        text_chat_builder_overrides=text_chat_builder_overrides,
-        strip_assistant_before_reasoning_filter=strip_assistant_before_reasoning_filter,
-        include_image_and_stream_in_turn_params=include_image_and_stream_in_turn_params,
-        kv_log_saved_when_not_minimal=kv_log_saved_when_not_minimal,
-        kv_log_unsupported_when_not_minimal=kv_log_unsupported_when_not_minimal,
-        include_error_in_invalidate_message=include_error_in_invalidate_message,
-        enable_attempt_logging=enable_attempt_logging,
-        log_prefix=log_prefix,
-        dependencies=_build_turn_execution_dependencies(),
-    )
-
-
 def _execute_session_chat_turn(
     *,
     user_text: str,
@@ -2621,7 +2534,8 @@ def _execute_session_chat_turn(
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
 ) -> TurnExecutionResult:
-    return _execute_turn_via_service(
+    service = TurnExecutionService()
+    return service.execute_session_chat_turn(
         user_text=user_text,
         session_id=session_id,
         model=model,
@@ -2654,13 +2568,7 @@ def _execute_session_chat_turn(
         model_manager=model_manager,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
-        strip_assistant_before_reasoning_filter=False,
-        include_image_and_stream_in_turn_params=True,
-        kv_log_saved_when_not_minimal=False,
-        kv_log_unsupported_when_not_minimal=False,
-        include_error_in_invalidate_message=False,
-        enable_attempt_logging=True,
-        log_prefix="[LLM Session Chat]",
+        dependencies=_build_turn_execution_dependencies(),
     )
 
 
@@ -2698,7 +2606,8 @@ def _execute_dialogue_cycle_turn(
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
 ) -> TurnExecutionResult:
-    return _execute_turn_via_service(
+    service = TurnExecutionService()
+    return service.execute_dialogue_cycle_turn(
         user_text=user_text,
         session_id=session_id,
         model=model,
@@ -2731,13 +2640,7 @@ def _execute_dialogue_cycle_turn(
         model_manager=model_manager,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
-        strip_assistant_before_reasoning_filter=True,
-        include_image_and_stream_in_turn_params=False,
-        kv_log_saved_when_not_minimal=True,
-        kv_log_unsupported_when_not_minimal=True,
-        include_error_in_invalidate_message=True,
-        enable_attempt_logging=False,
-        log_prefix="[LLM Dialogue Cycle]",
+        dependencies=_build_turn_execution_dependencies(),
     )
 
 class LLMSessionChatNode:
@@ -3296,3 +3199,4 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
