@@ -337,3 +337,45 @@ def test_execute_dialogue_cycle_turn_strips_and_omits_image_stream_params() -> N
     params = history["turns"][0]["params"]
     assert "image_used" not in params
     assert "streamed" not in params
+
+
+def test_execute_session_chat_turn_sets_profile_flags() -> None:
+    service = TurnExecutionService()
+    captured: dict[str, object] = {}
+
+    def _spy_execute_from_node_inputs(**kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    service.execute_from_node_inputs = _spy_execute_from_node_inputs  # type: ignore[method-assign]
+    result = service.execute_session_chat_turn(user_text="hello")
+
+    assert result == "ok"
+    assert captured["strip_assistant_before_reasoning_filter"] is False
+    assert captured["include_image_and_stream_in_turn_params"] is True
+    assert captured["kv_log_saved_when_not_minimal"] is False
+    assert captured["kv_log_unsupported_when_not_minimal"] is False
+    assert captured["include_error_in_invalidate_message"] is False
+    assert captured["enable_attempt_logging"] is True
+    assert captured["log_prefix"] == "[LLM Session Chat]"
+
+
+def test_execute_dialogue_cycle_turn_sets_profile_flags() -> None:
+    service = TurnExecutionService()
+    captured: dict[str, object] = {}
+
+    def _spy_execute_from_node_inputs(**kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    service.execute_from_node_inputs = _spy_execute_from_node_inputs  # type: ignore[method-assign]
+    result = service.execute_dialogue_cycle_turn(user_text="hello")
+
+    assert result == "ok"
+    assert captured["strip_assistant_before_reasoning_filter"] is True
+    assert captured["include_image_and_stream_in_turn_params"] is False
+    assert captured["kv_log_saved_when_not_minimal"] is True
+    assert captured["kv_log_unsupported_when_not_minimal"] is True
+    assert captured["include_error_in_invalidate_message"] is True
+    assert captured["enable_attempt_logging"] is False
+    assert captured["log_prefix"] == "[LLM Dialogue Cycle]"
