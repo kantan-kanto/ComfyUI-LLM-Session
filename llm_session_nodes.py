@@ -26,11 +26,13 @@ try:
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
+    from .infra import history_store
     from .services.chat_turn_service import ChatTurnService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
+    from infra import history_store
     from services.chat_turn_service import ChatTurnService
 
 
@@ -822,60 +824,32 @@ def default_sessions_dir() -> str:
     return os.path.join(_safe_output_dir(), "llm_session_sessions")
 
 def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+    history_store.ensure_dir(path)
 
 def _safe_session_name(session_id: str) -> str:
-    session_id = (session_id or "default").strip()
-    safe = "".join(c for c in session_id if c.isalnum() or c in ("-", "_", "."))
-    return safe or "default"
+    return history_store.safe_session_name(session_id)
 
 def _session_base_dir(history_dir: Optional[str]) -> str:
-    base = (history_dir or "").strip() or default_sessions_dir()
-    _ensure_dir(base)
-    return base
+    return history_store.session_base_dir(history_dir, default_sessions_dir())
 
 def _history_path(session_id: str, history_dir: Optional[str] = None) -> str:
-    safe = _safe_session_name(session_id)
-    base = _session_base_dir(history_dir)
-    return os.path.join(base, f"{safe}.json")
+    return history_store.history_path(session_id, history_dir, default_sessions_dir())
 
 
 def _transcript_path(session_id: str, history_dir: Optional[str] = None) -> str:
     """Return transcript file path: {session_id}.txt under the same base as history files."""
-    safe = _safe_session_name(session_id)
-    base = _session_base_dir(history_dir)
-    return os.path.join(base, f"{safe}.txt")
+    return history_store.transcript_path(session_id, history_dir, default_sessions_dir())
 
 
 def _append_transcript_lines(path: str, lines: List[str]) -> None:
-    _ensure_dir(os.path.dirname(path))
-    with open(path, "a", encoding="utf-8", newline="\n") as f:
-        for ln in lines:
-            f.write(ln.rstrip("\n") + "\n")
+    history_store.append_transcript_lines(path, lines)
 
 def _session_cache_root(session_id: str, history_dir: Optional[str] = None) -> str:
-    base = _session_base_dir(history_dir)
-    cache_root = os.path.join(base, "cache", _safe_session_name(session_id))
-    _ensure_dir(cache_root)
-    return cache_root
+    return history_store.session_cache_root(session_id, history_dir, default_sessions_dir())
 
 def _atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
     """Write JSON atomically-ish with .tmp + .bak."""
-    _ensure_dir(os.path.dirname(path))
-    tmp = path + ".tmp"
-    bak = path + ".bak"
-    data = json.dumps(obj, ensure_ascii=False, indent=2)
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    if os.path.exists(path):
-        try:
-            os.replace(path, bak)
-        except Exception:
-            # If replace fails, keep going; tmp->path is the important part
-            pass
-    os.replace(tmp, path)
+    history_store.atomic_write_json(path, obj)
 
 def _new_history(session_id: str, system_prompt: str, model_sig: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return {
