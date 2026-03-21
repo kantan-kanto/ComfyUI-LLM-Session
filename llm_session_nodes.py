@@ -24,14 +24,14 @@ import hashlib
 import traceback
 try:
     from .core.continue_rewrite import rewrite_continue_prompt
-    from .core.generation_runner import run_generation_with_adaptive_retry
+    from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from .infra import history_store
     from .services.chat_turn_service import ChatTurnService
     from .services.turn_execution_service import TurnExecutionDependencies, TurnExecutionRequest, TurnExecutionService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
-    from core.generation_runner import run_generation_with_adaptive_retry
+    from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from infra import history_store
     from services.chat_turn_service import ChatTurnService
@@ -1281,36 +1281,22 @@ def _create_text_or_chat_completion(
         )
 
     completion_kwargs = dict(kwargs)
-    try:
+
+    def _execute_completion(active_kwargs: Dict[str, Any]):
         if text_chat_request is not None:
-            resp = llm.create_completion(
+            return llm.create_completion(
                 prompt=text_chat_request["prompt"],
                 stop=text_chat_request["stop"],
-                **completion_kwargs,
+                **active_kwargs,
             )
-        else:
-            resp = _create_chat_completion_robust(llm, messages, **completion_kwargs)
-    except TypeError:
-        completion_kwargs = _retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
-        try:
-            if text_chat_request is not None:
-                resp = llm.create_completion(
-                    prompt=text_chat_request["prompt"],
-                    stop=text_chat_request["stop"],
-                    **completion_kwargs,
-                )
-            else:
-                resp = _create_chat_completion_robust(llm, messages, **completion_kwargs)
-        except TypeError:
-            completion_kwargs = _retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
-            if text_chat_request is not None:
-                resp = llm.create_completion(
-                    prompt=text_chat_request["prompt"],
-                    stop=text_chat_request["stop"],
-                    **completion_kwargs,
-                )
-            else:
-                resp = _create_chat_completion_robust(llm, messages, **completion_kwargs)
+        return _create_chat_completion_robust(llm, messages, **active_kwargs)
+
+    resp = run_with_typeerror_fallback(
+        execute_with_kwargs=_execute_completion,
+        completion_kwargs=completion_kwargs,
+        retry_kwargs_with_repeat_last_n_fallback=_retry_kwargs_with_repeat_last_n_fallback,
+        repeat_last_n=int(repeat_last_n or 0),
+    )
 
     return resp, bool(text_chat_request is not None)
 
@@ -3205,6 +3191,7 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
 
 
 

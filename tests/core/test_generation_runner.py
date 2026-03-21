@@ -2,11 +2,31 @@ from __future__ import annotations
 
 import contextlib
 
-from core.generation_runner import run_generation_with_adaptive_retry
+from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
 
 
 def _noop_attempt_logger(*_args, **_kwargs):
     return None
+
+
+def test_run_with_typeerror_fallback_retries_then_succeeds() -> None:
+    attempts = {"n": 0}
+
+    def _execute(kwargs):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise TypeError("unsupported argument")
+        return kwargs.get("ok", False)
+
+    result = run_with_typeerror_fallback(
+        execute_with_kwargs=_execute,
+        completion_kwargs={"ok": True},
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+        repeat_last_n=0,
+    )
+
+    assert result is True
+    assert attempts["n"] == 3
 
 
 def test_generation_success_first_attempt() -> None:

@@ -3,12 +3,35 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 try:
     from .turn_types import GenerationRunResult
 except Exception:
     from core.turn_types import GenerationRunResult
+
+
+T = TypeVar("T")
+
+
+def run_with_typeerror_fallback(
+    *,
+    execute_with_kwargs: Callable[[Dict[str, Any]], T],
+    completion_kwargs: Dict[str, Any],
+    retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
+    repeat_last_n: int,
+) -> T:
+    """Retry execution with fallback kwargs on TypeError (max 3 attempts total)."""
+    active_kwargs = dict(completion_kwargs)
+    try:
+        return execute_with_kwargs(active_kwargs)
+    except TypeError:
+        active_kwargs = retry_kwargs_with_repeat_last_n_fallback(active_kwargs, repeat_last_n)
+        try:
+            return execute_with_kwargs(active_kwargs)
+        except TypeError:
+            active_kwargs = retry_kwargs_with_repeat_last_n_fallback(active_kwargs, repeat_last_n)
+            return execute_with_kwargs(active_kwargs)
 
 
 def _run_generation_once(
@@ -25,43 +48,35 @@ def _run_generation_once(
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
     repeat_last_n: int,
 ) -> str:
+    def _stream_execute(active_kwargs: Dict[str, Any]):
+        if text_chat_request is not None:
+            return llm.create_completion(
+                prompt=text_chat_request["prompt"],
+                stop=text_chat_request["stop"],
+                stream=True,
+                **active_kwargs,
+            )
+        return iter_chat_completion_robust(llm, messages, **active_kwargs)
+
+    def _non_stream_execute(active_kwargs: Dict[str, Any]):
+        if text_chat_request is not None:
+            return llm.create_completion(
+                prompt=text_chat_request["prompt"],
+                stop=text_chat_request["stop"],
+                **active_kwargs,
+            )
+        return create_chat_completion_robust(llm, messages, **active_kwargs)
+
     with suppress_backend_logs_ctx:
         if stream_to_console:
             pieces: List[str] = []
             out = sys.__stdout__
-            try:
-                if text_chat_request is not None:
-                    stream_iter = llm.create_completion(
-                        prompt=text_chat_request["prompt"],
-                        stop=text_chat_request["stop"],
-                        stream=True,
-                        **completion_kwargs,
-                    )
-                else:
-                    stream_iter = iter_chat_completion_robust(llm, messages, **completion_kwargs)
-            except TypeError:
-                completion_kwargs = retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
-                try:
-                    if text_chat_request is not None:
-                        stream_iter = llm.create_completion(
-                            prompt=text_chat_request["prompt"],
-                            stop=text_chat_request["stop"],
-                            stream=True,
-                            **completion_kwargs,
-                        )
-                    else:
-                        stream_iter = iter_chat_completion_robust(llm, messages, **completion_kwargs)
-                except TypeError:
-                    completion_kwargs = retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
-                    if text_chat_request is not None:
-                        stream_iter = llm.create_completion(
-                            prompt=text_chat_request["prompt"],
-                            stop=text_chat_request["stop"],
-                            stream=True,
-                            **completion_kwargs,
-                        )
-                    else:
-                        stream_iter = iter_chat_completion_robust(llm, messages, **completion_kwargs)
+            stream_iter = run_with_typeerror_fallback(
+                execute_with_kwargs=_stream_execute,
+                completion_kwargs=completion_kwargs,
+                retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
+                repeat_last_n=int(repeat_last_n),
+            )
 
             for chunk in stream_iter:
                 token = extract_stream_content(chunk)
@@ -75,36 +90,12 @@ def _run_generation_once(
                     pass
             return "".join(pieces)
 
-        try:
-            if text_chat_request is not None:
-                resp = llm.create_completion(
-                    prompt=text_chat_request["prompt"],
-                    stop=text_chat_request["stop"],
-                    **completion_kwargs,
-                )
-            else:
-                resp = create_chat_completion_robust(llm, messages, **completion_kwargs)
-        except TypeError:
-            completion_kwargs = retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
-            try:
-                if text_chat_request is not None:
-                    resp = llm.create_completion(
-                        prompt=text_chat_request["prompt"],
-                        stop=text_chat_request["stop"],
-                        **completion_kwargs,
-                    )
-                else:
-                    resp = create_chat_completion_robust(llm, messages, **completion_kwargs)
-            except TypeError:
-                completion_kwargs = retry_kwargs_with_repeat_last_n_fallback(completion_kwargs, repeat_last_n)
-                if text_chat_request is not None:
-                    resp = llm.create_completion(
-                        prompt=text_chat_request["prompt"],
-                        stop=text_chat_request["stop"],
-                        **completion_kwargs,
-                    )
-                else:
-                    resp = create_chat_completion_robust(llm, messages, **completion_kwargs)
+        resp = run_with_typeerror_fallback(
+            execute_with_kwargs=_non_stream_execute,
+            completion_kwargs=completion_kwargs,
+            retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
+            repeat_last_n=int(repeat_last_n),
+        )
 
         if text_chat_request is not None:
             return resp["choices"][0]["text"] or ""
