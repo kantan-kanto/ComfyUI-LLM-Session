@@ -25,6 +25,23 @@ import traceback
 
 
 # ============================================================================
+# Module Layout (for future file split)
+# ============================================================================
+# - Simple defaults (config-driven)
+# - Chat handler configuration (llama-cpp)
+# - Text/chat prompt builders
+# - Model discovery and path resolution
+# - Image + language utilities
+# - History I/O and session storage
+# - Message building + generation wrappers
+# - Summarization helpers
+# - Cache + model manager
+# - UI definition helpers
+# - ComfyUI node implementations
+# - Simple wrappers
+# - Node registration + cleanup
+
+# ============================================================================
 # Simple Defaults (config-driven)
 # ============================================================================
 # LLM Session Chat (Simple) loads optional defaults from:
@@ -35,9 +52,11 @@ import traceback
 #
 # This keeps the Simple node easy to use while still allowing customization.
 
+_DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
 _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
     "schema_version": 1,
-    "system_prompt": "You are a helpful assistant.",
+    "system_prompt": _DEFAULT_SYSTEM_PROMPT,
     "max_tokens": 512,
     "temperature": 0.7,
     "top_p": 0.9,
@@ -235,25 +254,14 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     return defaults
 
 
-def _retry_kwargs_with_repeat_last_n_fallback(
-    kwargs: Dict[str, Any],
-    repeat_last_n: Optional[int],
-) -> Dict[str, Any]:
-    retried_kwargs = dict(kwargs)
-    if "penalty_last_n" in retried_kwargs:
-        retried_kwargs.pop("penalty_last_n", None)
-        if repeat_last_n and int(repeat_last_n) > 0:
-            retried_kwargs["repeat_last_n"] = int(repeat_last_n)
-            return retried_kwargs
-    retried_kwargs.pop("repeat_last_n", None)
-    retried_kwargs.pop("repeat_penalty", None)
-    retried_kwargs.pop("top_p", None)
-    return retried_kwargs
-
 # llama-cpp-python imports
 from importlib import import_module
 from collections import defaultdict
 from typing import Any, Callable
+
+# ============================================================================
+# Chat Handler Configuration (llama-cpp)
+# ============================================================================
 
 # chat_format -> ChatHandler class name
 chat_handler_map = {
@@ -400,6 +408,10 @@ def _detect_model_family(model_path: str) -> Optional[str]:
     return None
 
 
+# ============================================================================
+# Text/Chat Prompt Builders
+# ============================================================================
+
 def _merge_text_chat_builder_overrides(
     model_path: Optional[str],
     base_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -424,80 +436,6 @@ def _merge_text_chat_builder_overrides(
     current.update(forced_values)
     merged[model_family] = current
     return merged
-
-
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: List[str] = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                parts.append(str(part.get("text") or ""))
-        return "\n".join([p for p in parts if p]).strip()
-    return str(content or "")
-
-
-def _build_qwen35_text_prompt(messages: List[Dict[str, Any]], config: dict[str, Any]) -> tuple[str, list[str]]:
-    system_message = "You are a helpful assistant."
-    prompt_parts: List[str] = []
-    enable_thinking = bool(config.get("enable_thinking", False))
-
-    for message in messages:
-        role = str((message or {}).get("role") or "")
-        content = _message_content_to_text((message or {}).get("content"))
-        if role == "system":
-            if content.strip():
-                system_message = content
-            continue
-        if role == "user":
-            prompt_parts.append(f"<|im_start|>user\n{content}<|im_end|>")
-            continue
-        if role == "assistant":
-            prompt_parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
-
-    prompt = f"<|im_start|>system\n{system_message}<|im_end|>\n"
-    if prompt_parts:
-        prompt += "\n".join(prompt_parts) + "\n"
-    prompt += "<|im_start|>assistant\n"
-    if enable_thinking:
-        prompt += "<think>\n"
-    else:
-        prompt += "<think>\n\n</think>\n\n"
-    return prompt, ["<|im_end|>", "<|endoftext|>"]
-
-
-def _build_text_chat_request(
-    model_path: str,
-    mmproj_path: Optional[str],
-    messages: List[Dict[str, Any]],
-    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
-) -> Optional[Dict[str, Any]]:
-    if mmproj_path not in (None, "", "(Not required)"):
-        return None
-    for message in messages:
-        content = (message or {}).get("content")
-        if isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and part.get("type") != "text":
-                    return None
-    model_family = _detect_model_family(model_path)
-    if not model_family or model_family not in TEXT_CHAT_BUILDER_CONFIG_MAP:
-        return None
-    config = _get_text_chat_builder_config(
-        model_family,
-        text_chat_builder_overrides=text_chat_builder_overrides,
-    )
-    if model_family == "qwen3.5":
-        prompt, stop = _build_qwen35_text_prompt(messages, config)
-        return {
-            "mode": "completion",
-            "model_family": model_family,
-            "prompt": prompt,
-            "stop": stop,
-            "config": config,
-        }
-    return None
 
 
 def _load_available_chat_handlers(
@@ -534,6 +472,10 @@ def _reset_chat_handlers(handler_map: dict[str, str]) -> None:
         globals()[handler_name] = None
 
 
+# ============================================================================
+# llama-cpp-python Integration
+# ============================================================================
+
 try:
     from llama_cpp import Llama
 
@@ -560,8 +502,17 @@ except Exception as e:
     print(f"[LLM Session] Warning: llama-cpp-python not available: {_LLAMA_CPP_IMPORT_ERROR}")
 
 # ============================================================================
-# Utility Functions
+# Model Discovery & Path Resolution
 # ============================================================================
+
+_LLM_MODELS_DIR_NAME = "LLM"
+_LLM_SESSION_CATEGORY = "LLM/Session"
+_NO_GGUF_MODELS_PLACEHOLDER = f"(No GGUF models found in models/{_LLM_MODELS_DIR_NAME}/)"
+_MMPROJ_AUTO = "(Auto-detect)"
+_MMPROJ_NOT_REQUIRED = "(Not required)"
+_LOG_LEVEL_OPTIONS = ["minimal", "timing", "debug"]
+_PERSISTENT_CACHE_OPTIONS = ["LlamaDiskCache", "off"]
+_RUNTIME_CACHE_OPTIONS = ["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"]
 
 def _list_gguf_recursive(models_dir: str) -> tuple[list[str], list[str]]:
     """
@@ -611,7 +562,7 @@ def _get_llm_model_roots() -> list[str]:
         roots.append(norm)
 
     # Primary ComfyUI models/LLM
-    _add(os.path.join(folder_paths.models_dir, "LLM"))
+    _add(os.path.join(folder_paths.models_dir, _LLM_MODELS_DIR_NAME))
 
     # Extra paths loaded via extra_model_paths.yaml
     if hasattr(folder_paths, "get_folder_paths"):
@@ -653,6 +604,9 @@ def _list_gguf_recursive_multi(roots: list[str]) -> tuple[list[str], list[str]]:
     mmprojs.sort(key=str.lower)
     return models, mmprojs
 
+def _is_no_models_placeholder(model: Optional[str]) -> bool:
+    return _NO_GGUF_MODELS_PLACEHOLDER in (model or "")
+
 def _safe_join_under(base_dir: str, rel_path: str) -> str:
     base = Path(base_dir).resolve()
     p = (base / rel_path).resolve()
@@ -668,7 +622,7 @@ def _resolve_llm_relpath(rel_path: str, roots: Optional[list[str]] = None) -> st
     """
     roots = roots or _get_llm_model_roots()
     if not roots:
-        default_root = os.path.join(folder_paths.models_dir, "LLM")
+        default_root = os.path.join(folder_paths.models_dir, _LLM_MODELS_DIR_NAME)
         return _safe_join_under(default_root, rel_path)
 
     for root in roots:
@@ -680,6 +634,27 @@ def _resolve_llm_relpath(rel_path: str, roots: Optional[list[str]] = None) -> st
             return candidate
 
     return _safe_join_under(roots[0], rel_path)
+
+
+def _resolve_model_and_mmproj(roots: list[str], model: str, mmproj: str) -> tuple[str, Optional[str]]:
+    model_path = _resolve_llm_relpath(model, roots=roots)
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model not found: {model_path}")
+
+    mmproj_path = None
+    if mmproj == _MMPROJ_NOT_REQUIRED:
+        mmproj_path = _MMPROJ_NOT_REQUIRED  # sentinel
+    elif mmproj != _MMPROJ_AUTO:
+        mmproj_path = _resolve_llm_relpath(mmproj, roots=roots)
+        if not os.path.exists(mmproj_path):
+            mmproj_path = None  # fall back to auto-detect
+
+    return model_path, mmproj_path
+
+
+# ============================================================================
+# Image + Language Utilities
+# ============================================================================
 
 def encode_image_base64(pil_image: Image.Image, max_pixels: int = 262144) -> str:
     """
@@ -787,34 +762,13 @@ def _detect_history_language(history: Dict[str, Any]) -> str:
     return detect_language(recent_text)
 
 # ============================================================================
-# Model Manager
+# History I/O and Session Storage (file-based, ComfyUI hidden)
 # ============================================================================
-
-
-# =============================================================================
-# Chat session history (file-based, ComfyUI hidden)
-# =============================================================================
 
 def _now_iso_jst() -> str:
     """Return current time in ISO8601 with JST offset."""
     # Avoid depending on system tz; format explicitly as +09:00
     return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
-
-def _make_suppress_backend_logs(suppress: bool):
-    """Return a context manager that suppresses stdout/stderr if suppress is True."""
-    if not suppress:
-        return contextlib.nullcontext()
-    class _Suppress:
-        def __enter__(self):
-            self._stdout = sys.stdout
-            self._stderr = sys.stderr
-            sys.stdout = io.StringIO()
-            sys.stderr = io.StringIO()
-        def __exit__(self, exc_type, exc, tb):
-            sys.stdout = self._stdout
-            sys.stderr = self._stderr
-            return False
-    return _Suppress()
 
 def _safe_output_dir() -> str:
     """Best-effort output dir resolution across ComfyUI versions."""
@@ -842,14 +796,32 @@ def _safe_session_name(session_id: str) -> str:
     safe = "".join(c for c in session_id if c.isalnum() or c in ("-", "_", "."))
     return safe or "default"
 
-def _history_path(session_id: str, history_dir: Optional[str] = None) -> str:
-    safe = _safe_session_name(session_id)
+def _session_base_dir(history_dir: Optional[str]) -> str:
     base = (history_dir or "").strip() or default_sessions_dir()
     _ensure_dir(base)
+    return base
+
+def _history_path(session_id: str, history_dir: Optional[str] = None) -> str:
+    safe = _safe_session_name(session_id)
+    base = _session_base_dir(history_dir)
     return os.path.join(base, f"{safe}.json")
 
+
+def _transcript_path(session_id: str, history_dir: Optional[str] = None) -> str:
+    """Return transcript file path: {session_id}.txt under the same base as history files."""
+    safe = _safe_session_name(session_id)
+    base = _session_base_dir(history_dir)
+    return os.path.join(base, f"{safe}.txt")
+
+
+def _append_transcript_lines(path: str, lines: List[str]) -> None:
+    _ensure_dir(os.path.dirname(path))
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
+        for ln in lines:
+            f.write(ln.rstrip("\n") + "\n")
+
 def _session_cache_root(session_id: str, history_dir: Optional[str] = None) -> str:
-    base = (history_dir or "").strip() or default_sessions_dir()
+    base = _session_base_dir(history_dir)
     cache_root = os.path.join(base, "cache", _safe_session_name(session_id))
     _ensure_dir(cache_root)
     return cache_root
@@ -890,6 +862,12 @@ def _new_history(session_id: str, system_prompt: str, model_sig: Optional[Dict[s
         },
         "turns": []
     }
+
+def _coerce_int(v, default: int) -> int:
+    try:
+        return int(v)
+    except Exception:
+        return default
 
 def _normalize_history_schema(hist: Dict[str, Any]) -> Dict[str, Any]:
     """Best-effort upgrade of older history files to the current in-memory shape."""
@@ -1001,11 +979,13 @@ def load_history(session_id: str, history_dir: Optional[str], system_prompt: str
     _atomic_write_json(path, hist)
     return hist, path
 
-def _coerce_int(v, default: int) -> int:
-    try:
-        return int(v)
-    except Exception:
-        return default
+# ============================================================================
+# Message Building + Generation Wrappers
+# ============================================================================
+# Some GGUF models / chat templates do not support the "system" role.
+# For those models, we fall back by folding system messages into the first user turn.
+# This keeps the node compatible with a broader set of instruction-tuned GGUF models
+# without requiring model-specific templates.
 
 def build_chat_messages(history: Dict[str, Any],
                         user_text: str,
@@ -1063,14 +1043,6 @@ def build_chat_messages(history: Dict[str, Any],
     return messages
 
 
-# ============================================================================
-# Chat completion compatibility helpers
-# ============================================================================
-# Some GGUF models / chat templates do not support the "system" role.
-# For those models, we fall back by folding system messages into the first user turn.
-# This keeps the node compatible with a broader set of instruction-tuned GGUF models
-# without requiring model-specific templates.
-
 def _fold_system_into_user_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Return a new messages list with all system-role contents folded into the first user message."""
     sys_parts: List[str] = []
@@ -1123,6 +1095,115 @@ def _fold_system_into_user_messages(messages: List[Dict[str, Any]]) -> List[Dict
     # No user message exists; prepend one
     return [{"role": "user", "content": sys_text}] + out
 
+
+# Text-chat builders (for chat formats that prefer completion-style prompts)
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(str(part.get("text") or ""))
+        return "\n".join([p for p in parts if p]).strip()
+    return str(content or "")
+
+
+def _build_qwen35_text_prompt(messages: List[Dict[str, Any]], config: dict[str, Any]) -> tuple[str, list[str]]:
+    system_message = _DEFAULT_SYSTEM_PROMPT
+    prompt_parts: List[str] = []
+    enable_thinking = bool(config.get("enable_thinking", False))
+
+    for message in messages:
+        role = str((message or {}).get("role") or "")
+        content = _message_content_to_text((message or {}).get("content"))
+        if role == "system":
+            if content.strip():
+                system_message = content
+            continue
+        if role == "user":
+            prompt_parts.append(f"<|im_start|>user\n{content}<|im_end|>")
+            continue
+        if role == "assistant":
+            prompt_parts.append(f"<|im_start|>assistant\n{content}<|im_end|>")
+
+    prompt = f"<|im_start|>system\n{system_message}<|im_end|>\n"
+    if prompt_parts:
+        prompt += "\n".join(prompt_parts) + "\n"
+    prompt += "<|im_start|>assistant\n"
+    if enable_thinking:
+        prompt += "<think>\n"
+    else:
+        prompt += "<think>\n\n</think>\n\n"
+    return prompt, ["<|im_end|>", "<|endoftext|>"]
+
+
+def _build_text_chat_request(
+    model_path: str,
+    mmproj_path: Optional[str],
+    messages: List[Dict[str, Any]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    if mmproj_path not in (None, "", _MMPROJ_NOT_REQUIRED):
+        return None
+    for message in messages:
+        content = (message or {}).get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") != "text":
+                    return None
+    model_family = _detect_model_family(model_path)
+    if not model_family or model_family not in TEXT_CHAT_BUILDER_CONFIG_MAP:
+        return None
+    config = _get_text_chat_builder_config(
+        model_family,
+        text_chat_builder_overrides=text_chat_builder_overrides,
+    )
+    if model_family == "qwen3.5":
+        prompt, stop = _build_qwen35_text_prompt(messages, config)
+        return {
+            "mode": "completion",
+            "model_family": model_family,
+            "prompt": prompt,
+            "stop": stop,
+            "config": config,
+        }
+    return None
+
+
+# Completion helpers
+def _retry_kwargs_with_repeat_last_n_fallback(
+    kwargs: Dict[str, Any],
+    repeat_last_n: Optional[int],
+) -> Dict[str, Any]:
+    retried_kwargs = dict(kwargs)
+    if "penalty_last_n" in retried_kwargs:
+        retried_kwargs.pop("penalty_last_n", None)
+        if repeat_last_n and int(repeat_last_n) > 0:
+            retried_kwargs["repeat_last_n"] = int(repeat_last_n)
+            return retried_kwargs
+    retried_kwargs.pop("repeat_last_n", None)
+    retried_kwargs.pop("repeat_penalty", None)
+    retried_kwargs.pop("top_p", None)
+    return retried_kwargs
+
+
+def _make_suppress_backend_logs(suppress: bool):
+    """Return a context manager that suppresses stdout/stderr if suppress is True."""
+    if not suppress:
+        return contextlib.nullcontext()
+    class _Suppress:
+        def __enter__(self):
+            self._stdout = sys.stdout
+            self._stderr = sys.stderr
+            sys.stdout = io.StringIO()
+            sys.stderr = io.StringIO()
+        def __exit__(self, exc_type, exc, tb):
+            sys.stdout = self._stdout
+            sys.stderr = self._stderr
+            return False
+    return _Suppress()
+
 def _create_chat_completion_robust(llm: "Llama", messages: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
     """create_chat_completion with a fallback for models that do not support system role."""
     try:
@@ -1145,6 +1226,24 @@ def _iter_chat_completion_robust(llm: "Llama", messages: List[Dict[str, Any]], *
             raise
         folded = _fold_system_into_user_messages(messages)
         return llm.create_chat_completion(messages=folded, stream=True, **kwargs)
+
+def _extract_stream_content(chunk: Any) -> str:
+    """Best-effort extraction of streamed text from llama-cpp-python chunks."""
+    try:
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        if not choices:
+            return ""
+        choice = choices[0] or {}
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            return delta.get("content") or ""
+        msg = choice.get("message")
+        if isinstance(msg, dict):
+            return msg.get("content") or ""
+        txt = choice.get("text")
+        return txt or ""
+    except Exception:
+        return ""
 
 def _create_text_or_chat_completion(
     llm: "Llama",
@@ -1206,24 +1305,6 @@ def _create_text_or_chat_completion(
 
     return resp, bool(text_chat_request is not None)
 
-def _extract_stream_content(chunk: Any) -> str:
-    """Best-effort extraction of streamed text from llama-cpp-python chunks."""
-    try:
-        choices = chunk.get("choices") if isinstance(chunk, dict) else None
-        if not choices:
-            return ""
-        choice = choices[0] or {}
-        delta = choice.get("delta")
-        if isinstance(delta, dict):
-            return delta.get("content") or ""
-        msg = choice.get("message")
-        if isinstance(msg, dict):
-            return msg.get("content") or ""
-        txt = choice.get("text")
-        return txt or ""
-    except Exception:
-        return ""
-
 def _strip_reasoning_output(text: str) -> str:
     """Best-effort removal of exposed reasoning sections from model output."""
     s = str(text or "")
@@ -1282,6 +1363,11 @@ def _strip_reasoning_output(text: str) -> str:
         return ""
 
     return s
+
+
+# ============================================================================
+# Summarization Helpers
+# ============================================================================
 
 def _make_summary_prompt(existing_summary: str, turns_chunk: list) -> list:
     """
@@ -1495,6 +1581,10 @@ def maybe_summarize_history(model: "Llama",
     return history
 
 
+# ============================================================================
+# Cache + Model Manager
+# ============================================================================
+
 class _LayeredCache:
     """
     Two-level cache wrapper.
@@ -1664,7 +1754,7 @@ class GGUFModelManager:
         model_path = self._normalize_path(model_path)
 
         # If user explicitly selected "(Not required)", force text-only.
-        force_no_mmproj = (mmproj_path == "(Not required)")
+        force_no_mmproj = (mmproj_path == _MMPROJ_NOT_REQUIRED)
         if force_no_mmproj:
             mmproj_path = None
 
@@ -2102,309 +2192,371 @@ def _current_llama_state_size(llm: Any) -> Optional[int]:
         return None
 
 
+def _build_mmproj_options(available_mmprojs: list[str]) -> list[str]:
+    if available_mmprojs:
+        return available_mmprojs + [_MMPROJ_AUTO, _MMPROJ_NOT_REQUIRED]
+    return [_MMPROJ_AUTO, _MMPROJ_NOT_REQUIRED]
+
+
 # ============================================================================
-# ComfyUI Node Registration
+# UI Definition Helpers
+# ============================================================================
+
+def _get_available_models_and_mmprojs() -> tuple[list[str], list[str]]:
+    roots = _get_llm_model_roots()
+    available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
+
+    mmproj_options = _build_mmproj_options(available_mmprojs)
+
+    if not available_models:
+        available_models = [_NO_GGUF_MODELS_PLACEHOLDER]
+
+    return available_models, mmproj_options
+
+
+def _ui_model_input(available_models: list[str], tooltip: str) -> tuple:
+    return (available_models, {"default": available_models[0], "tooltip": tooltip})
+
+
+def _ui_mmproj_input(mmproj_options: list[str], tooltip: str) -> tuple:
+    return (mmproj_options, {"default": _MMPROJ_AUTO, "tooltip": tooltip})
+
+def _ui_int_input(
+    default: int,
+    *,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+    step: Optional[int] = None,
+    tooltip: Optional[str] = None,
+) -> tuple:
+    options: Dict[str, Any] = {"default": default}
+    if min_value is not None:
+        options["min"] = min_value
+    if max_value is not None:
+        options["max"] = max_value
+    if step is not None:
+        options["step"] = step
+    if tooltip:
+        options["tooltip"] = tooltip
+    return ("INT", options)
+
+
+def _ui_float_input(
+    default: float,
+    *,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+    step: Optional[float] = None,
+    tooltip: Optional[str] = None,
+) -> tuple:
+    options: Dict[str, Any] = {"default": default}
+    if min_value is not None:
+        options["min"] = min_value
+    if max_value is not None:
+        options["max"] = max_value
+    if step is not None:
+        options["step"] = step
+    if tooltip:
+        options["tooltip"] = tooltip
+    return ("FLOAT", options)
+
+
+def _ui_bool_input(default: bool, *, tooltip: Optional[str] = None) -> tuple:
+    options: Dict[str, Any] = {"default": default}
+    if tooltip:
+        options["tooltip"] = tooltip
+    return ("BOOLEAN", options)
+
+
+def _input_types_session_chat_simple() -> dict:
+    available_models, mmproj_options = _get_available_models_and_mmprojs()
+    return {
+        "required": {
+            "user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "User message for this turn"}),
+            "session_id": ("STRING", {"default": "default", "tooltip": "Session ID (maps to a history file). Same ID continues the chat."}),
+            "model": _ui_model_input(available_models, f"GGUF model file in models/{_LLM_MODELS_DIR_NAME}/"),
+            "mmproj": _ui_mmproj_input(mmproj_options, "Manual selection is recommended."),
+            "history_dir": ("STRING", {"default": "", "tooltip": "Optional directory for history/caches. Empty uses output/llm_session_sessions/."}),
+        },
+        "optional": {
+            "image": ("IMAGE", {"tooltip": "Optional image input for this turn only (never saved to history)"}),
+            "config_path": ("STRING", {"default": "", "tooltip": "Optional override path to simple_defaults.json (advanced)."}),
+        },
+    }
+
+
+def _input_types_dialogue_cycle_simple() -> dict:
+    available_models, _ = _get_available_models_and_mmprojs()
+    return {
+        "required": {
+            "initial_user_text": ("STRING", {
+                "multiline": True,
+                "default": "",
+                "tooltip": "Initial user message (sent to Model A only)."
+            }),
+            "system": ("STRING", {
+                "multiline": True,
+                "default": "",
+                "tooltip": "Shared system prompt. Leave empty to use config/default."
+            }),
+            "systemA": ("STRING", {
+                "multiline": True,
+                "default": "",
+                "tooltip": "System prompt override for Model A. Leave empty to use config/default."
+            }),
+            "systemB": ("STRING", {
+                "multiline": True,
+                "default": "",
+                "tooltip": "System prompt override for Model B. Leave empty to use config/default."
+            }),
+            "session_id": ("STRING", {
+                "default": "default",
+                "tooltip": "Session id. A uses {id}_A, B uses {id}_B."
+            }),
+            "cycles": ("INT", {
+                "default": 1,
+                "min": 1,
+                "max": 100,
+                "step": 1,
+                "tooltip": "Number of turns. 1 = A then B."
+            }),
+            "modelA": _ui_model_input(available_models, "GGUF model for role A"),
+            "modelB": _ui_model_input(available_models, "GGUF model for role B"),
+            "history_dir": ("STRING", {
+                "default": "",
+                "tooltip": "Directory to store histories, summaries, transcript, and session-scoped disk caches. Empty uses ComfyUI output."
+            }),
+        },
+        "optional": {
+            "config_path": ("STRING", {
+                "default": "",
+                "tooltip": "Optional path to a JSON config file. If empty, uses <node_dir>/config/simple_defaults.json."
+            }),
+            "force_text_only": ("BOOLEAN", {
+                "default": False,
+                "tooltip": "Force text-only mode for both models (disables mmproj auto-detect)."
+            }),
+            "reset_session": ("BOOLEAN", {
+                "default": False,
+                "tooltip": "If true, overwrite existing session history with a fresh session. Session disk cache is kept."
+            }),
+        }
+    }
+
+
+def _input_types_session_chat() -> dict:
+    available_models, mmproj_options = _get_available_models_and_mmprojs()
+    return {
+        "required": {
+            "user_text": ("STRING", {
+                "multiline": True,
+                "default": "",
+                "tooltip": "User message for this turn"
+            }),
+            "session_id": ("STRING", {
+                "default": "default",
+                "tooltip": "Session ID (maps to a history file). Same ID continues the chat."
+            }),
+                "model": _ui_model_input(available_models, f"GGUF model file in models/{_LLM_MODELS_DIR_NAME}/"),
+            "mmproj": _ui_mmproj_input(mmproj_options, "Manual selection is recommended."),
+            "system_prompt": ("STRING", {
+                "multiline": True,
+                "default": _DEFAULT_SYSTEM_PROMPT,
+                "tooltip": "System prompt (conversation policy). Saved into the history file."
+            }),
+            "max_tokens": _ui_int_input(
+                512,
+                min_value=1,
+                max_value=8192,
+                tooltip="Maximum tokens to generate for this turn",
+            ),
+            "temperature": _ui_float_input(
+                0.7,
+                min_value=0.0,
+                max_value=2.0,
+                step=0.05,
+                tooltip="Sampling temperature",
+            ),
+            "top_p": _ui_float_input(
+                0.9,
+                min_value=0.05,
+                max_value=1.0,
+                step=0.01,
+                tooltip="Nucleus sampling (top_p). Lower = safer/more conservative.",
+            ),
+            "n_gpu_layers": _ui_int_input(
+                0,
+                min_value=-1,
+                max_value=200,
+                step=1,
+                tooltip="Number of layers to offload to GPU. 0=CPU. -1=all.",
+            ),
+            "n_ctx": _ui_int_input(
+                4096,
+                min_value=512,
+                max_value=131072,
+                step=256,
+                tooltip="Context length (must be supported by the model)",
+            ),
+        },
+        "optional": {
+            "image": ("IMAGE", {
+                "tooltip": "Optional image input for this turn only (never saved to history)"
+            }),
+            "persistent_cache": (_PERSISTENT_CACHE_OPTIONS, {
+                "default": "off",
+                "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under a session-specific cache directory in output/llm_session_sessions/cache/."
+            }),
+            "runtime_cache": (_RUNTIME_CACHE_OPTIONS, {
+                "default": "LlamaTrieCache",
+                "tooltip": "Runtime cache backend. KV_cache uses save_state/load_state, RAM/Trie use llama.cpp cache in memory."
+            }),
+            "log_level": (_LOG_LEVEL_OPTIONS, {
+                "default": "timing",
+                "tooltip": "Console logging verbosity for LLM Session Chat."
+            }),
+            "suppress_backend_logs": _ui_bool_input(
+                True,
+                tooltip="Suppress backend stdout/stderr during generation.",
+            ),
+            "repeat_penalty": _ui_float_input(
+                1.12,
+                min_value=1.0,
+                max_value=2.0,
+                step=0.01,
+                tooltip="Repetition penalty to reduce looping outputs (especially on continue).",
+            ),
+            "repeat_last_n": _ui_int_input(
+                256,
+                min_value=0,
+                max_value=4096,
+                tooltip="Apply repeat_penalty over the last N tokens. 0 disables.",
+            ),
+            "rewrite_continue": _ui_bool_input(
+                True,
+                tooltip="Rewrite inputs starting with 'continue' into an explicit continuation instruction to reduce repetition.",
+            ),
+            "max_turns": _ui_int_input(
+                12,
+                min_value=0,
+                max_value=200,
+                tooltip="Keep only the last N turns in live context. 0 means no prior turns.",
+            ),
+            "summarize_old_history": _ui_bool_input(
+                True,
+                tooltip="Summarize overflow turns into a rolling summary when turns exceed max_turns.",
+            ),
+            "summary_chunk_turns": _ui_int_input(
+                3,
+                min_value=1,
+                max_value=50,
+                tooltip="Summarize overflow in chunks of this many turns (reduces summary frequency).",
+            ),
+            "max_tokens_summary": _ui_int_input(
+                128,
+                min_value=16,
+                max_value=2048,
+                tooltip="Max tokens for summary generation (kept small for speed).",
+            ),
+            "summary_max_chars": _ui_int_input(
+                1500,
+                min_value=200,
+                max_value=20000,
+                tooltip="If the rolling summary exceeds this size, it will be re-summarized to stay compact.",
+            ),
+            "dynamic_max_tokens": _ui_bool_input(
+                True,
+                tooltip="Dynamically shrink max_tokens (and/or turns) when prompt would exceed n_ctx.",
+            ),
+            "min_generation_tokens": _ui_int_input(
+                96,
+                min_value=1,
+                max_value=4096,
+                tooltip="Minimum tokens to allow for generation when dynamic_max_tokens is enabled.",
+            ),
+            "safety_margin_tokens": _ui_int_input(
+                64,
+                min_value=0,
+                max_value=2048,
+                tooltip="Token margin reserved to reduce the chance of exceeding n_ctx.",
+            ),
+            "history_dir": ("STRING", {
+                "default": "",
+                "tooltip": "Optional directory for history files and session-scoped disk caches. Empty uses output/llm_session_sessions/"
+            }),
+            "reset_session": _ui_bool_input(
+                False,
+                tooltip="If true, overwrite existing session history file with a fresh session. Session disk cache is kept.",
+            ),
+            "stream_to_console": _ui_bool_input(
+                False,
+                tooltip="Stream tokens to console while generating.",
+            ),
+        }
+    }
+
+
+def _input_types_dialogue_cycle() -> dict:
+    available_models, mmproj_options = _get_available_models_and_mmprojs()
+    return {
+        "required": {
+            "initial_user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "Initial user message (sent to Model A only)"}),
+            "session_id": ("STRING", {"default": "default", "tooltip": "Base session id. A uses {id}_A, B uses {id}_B, transcript uses {id}.txt"}),
+            "cycles": ("INT", {"default": 1, "min": 1, "max": 50, "step": 1, "tooltip": "Number of round trips. 1 = A then B."}),
+
+            "modelA": _ui_model_input(available_models, "GGUF model for role A"),
+            "mmprojA": _ui_mmproj_input(mmproj_options, "mmproj for modelA"),
+
+            "modelB": _ui_model_input(available_models, "GGUF model for role B"),
+            "mmprojB": _ui_mmproj_input(mmproj_options, "mmproj for modelB"),
+
+            "system_prompt": ("STRING", {"multiline": True, "default": _DEFAULT_SYSTEM_PROMPT, "tooltip": "Shared system prompt for both roles"}),
+            "system_prompt_A": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),
+            "system_prompt_B": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model B (overrides shared prompt if set)"}),
+
+            "max_tokens": _ui_int_input(512, min_value=1, max_value=8192),
+            "temperature": _ui_float_input(0.7, min_value=0.0, max_value=2.0, step=0.05),
+            "top_p": _ui_float_input(0.9, min_value=0.05, max_value=1.0, step=0.01),
+            "n_gpu_layers": _ui_int_input(0, min_value=-1, max_value=200, step=1),
+            "n_ctx": _ui_int_input(4096, min_value=512, max_value=131072, step=256),
+        },
+        "optional": {
+            "max_turns": _ui_int_input(12, min_value=0, max_value=200),
+            "summarize_old_history": _ui_bool_input(True),
+            "summary_chunk_turns": _ui_int_input(3, min_value=1, max_value=50),
+            "max_tokens_summary": _ui_int_input(128, min_value=16, max_value=2048),
+            "summary_max_chars": _ui_int_input(1500, min_value=200, max_value=20000),
+
+            "dynamic_max_tokens": _ui_bool_input(True),
+            "min_generation_tokens": _ui_int_input(96, min_value=1, max_value=4096),
+            "safety_margin_tokens": _ui_int_input(64, min_value=0, max_value=2048),
+
+            "persistent_cache": (_PERSISTENT_CACHE_OPTIONS, {"default": "off", "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
+            "runtime_cache": (_RUNTIME_CACHE_OPTIONS, {"default": "LlamaTrieCache"}),
+
+            "repeat_penalty": _ui_float_input(1.12, min_value=1.0, max_value=2.0, step=0.01),
+            "repeat_last_n": _ui_int_input(256, min_value=0, max_value=4096),
+            "rewrite_continue": _ui_bool_input(True),
+            "log_level": (_LOG_LEVEL_OPTIONS, {"default": "timing"}),
+            "suppress_backend_logs": _ui_bool_input(True),
+
+            "history_dir": ("STRING", {"default": "", "tooltip": "Optional history directory. Empty => output/llm_session_sessions/. Disk caches are also stored there, separated by session id."}),
+            "reset_session": _ui_bool_input(
+                False,
+                tooltip="If true, resets both {id}_A and {id}_B histories (transcript file is not deleted). Session disk caches are kept.",
+            ),
+            "stream_to_console": _ui_bool_input(False, tooltip="Stream tokens to console while generating."),
+        }
+    }
+
+
+# ============================================================================
+# ComfyUI Node Implementations
 # ============================================================================
 
 
 # =============================================================================
-# LLM Session Chat (Simple)
-# =============================================================================
-
-class LLMSessionChatSimpleNode:
-    """LLM Session Chat (Simple)
-
-    Minimal UI inputs with config-driven defaults.
-    Defaults are loaded from config/simple_defaults.json when present.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        roots = _get_llm_model_roots()
-        available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
-
-        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
-        if not available_mmprojs:
-            mmproj_options = ["(Auto-detect)", "(Not required)"]
-
-        if not available_models:
-            available_models = ["(No GGUF models found in models/LLM/)"]
-
-        return {
-            "required": {
-                "user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "User message for this turn"}),
-                "session_id": ("STRING", {"default": "default", "tooltip": "Session ID (maps to a history file). Same ID continues the chat."}),
-                "model": (available_models, {"default": available_models[0], "tooltip": "GGUF model file in models/LLM/"}),
-                "mmproj": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "Manual selection is recommended."}),
-                "history_dir": ("STRING", {"default": "", "tooltip": "Optional directory for history/caches. Empty uses output/llm_session_sessions/."}),
-            },
-            "optional": {
-                "image": ("IMAGE", {"tooltip": "Optional image input for this turn only (never saved to history)"}),
-                "config_path": ("STRING", {"default": "", "tooltip": "Optional override path to simple_defaults.json (advanced)."}),
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("assistant_text",)
-    FUNCTION = "chat_stream"
-    CATEGORY = "LLM/Session"
-    DESCRIPTION = "Minimal entry node for persistent local GGUF chat sessions (config-driven defaults)."
-
-    def chat_stream(
-        self,
-        user_text: str,
-        session_id: str,
-        model: str,
-        mmproj: str,
-        history_dir: str,
-        image=None,
-        config_path: str = "",
-        stream_to_console: bool = True,
-    ) -> tuple:
-        defaults = _load_simple_defaults(config_path=config_path)
-        chat_handler_overrides = defaults.get("chat_handler_overrides")
-        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
-
-        # Delegate to the full node implementation
-        node = LLMSessionChatNode()
-        return node.chat_stream(
-            user_text=user_text,
-            session_id=session_id,
-            model=model,
-            mmproj=mmproj,
-            system_prompt=defaults["system_prompt"],
-            max_tokens=int(defaults["max_tokens"]),
-            temperature=float(defaults["temperature"]),
-            top_p=float(defaults["top_p"]),
-            n_gpu_layers=int(defaults["n_gpu_layers"]),
-            n_ctx=int(defaults["n_ctx"]),
-            image=image,
-            max_turns=int(defaults["max_turns"]),
-            summarize_old_history=bool(defaults["summarize_old_history"]),
-            summary_chunk_turns=int(defaults["summary_chunk_turns"]),
-            max_tokens_summary=int(defaults["max_tokens_summary"]),
-            summary_max_chars=int(defaults["summary_max_chars"]),
-            dynamic_max_tokens=bool(defaults["dynamic_max_tokens"]),
-            min_generation_tokens=int(defaults["min_generation_tokens"]),
-            safety_margin_tokens=int(defaults["safety_margin_tokens"]),
-            persistent_cache=str(defaults["persistent_cache"]),
-            repeat_penalty=float(defaults["repeat_penalty"]),
-            repeat_last_n=int(defaults["repeat_last_n"]),
-            rewrite_continue=bool(defaults["rewrite_continue"]),
-            runtime_cache=str(defaults["runtime_cache"]),
-            log_level=str(defaults["log_level"]),
-            suppress_backend_logs=bool(defaults["suppress_backend_logs"]),
-            history_dir=history_dir or "",
-            reset_session=bool(defaults["reset_session"]),
-            stream_to_console=bool(defaults["stream_to_console"]),
-            chat_handler_overrides=chat_handler_overrides,
-            text_chat_builder_overrides=text_chat_builder_overrides,
-        )
-
-
-# =============================================================================
-# LLM Session Chat - file-based hidden history (Phase 1)
-# =============================================================================
-
-class LLMDialogueCycleSimpleNode:
-    """
-    LLM Dialogue Cycle (Simple)
-
-    Minimal-input wrapper around LLM Dialogue Cycle using a JSON config file for defaults.
-    - Keeps UI simple (few parameters)
-    - Users can override defaults via config/simple_defaults.json
-    - Safe fallback to built-in defaults if the config is missing or invalid
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        roots = _get_llm_model_roots()
-        available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
-
-        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
-        if not available_mmprojs:
-            mmproj_options = ["(Auto-detect)", "(Not required)"]
-
-        if not available_models:
-            available_models = ["(No GGUF models found in models/LLM/)"]
-
-        return {
-            "required": {
-                "initial_user_text": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "Initial user message (sent to Model A only)."
-                }),
-                
-                "system": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "Shared system prompt. Leave empty to use config/default."
-                }),
-                "systemA": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "System prompt override for Model A. Leave empty to use config/default."
-                }),
-                "systemB": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "System prompt override for Model B. Leave empty to use config/default."
-                }),
-"session_id": ("STRING", {
-                    "default": "default",
-                    "tooltip": "Session id. A uses {id}_A, B uses {id}_B."
-                }),
-                "cycles": ("INT", {
-                    "default": 1,
-                    "min": 1,
-                    "max": 100,
-                    "step": 1,
-                    "tooltip": "Number of turns. 1 = A then B."
-                }),
-                "modelA": (available_models, {
-                    "default": available_models[0],
-                    "tooltip": "GGUF model for role A"
-                }),
-                "modelB": (available_models, {
-                    "default": available_models[0],
-                    "tooltip": "GGUF model for role B"
-                }),
-                "history_dir": ("STRING", {
-                    "default": "",
-                    "tooltip": "Directory to store histories, summaries, transcript, and session-scoped disk caches. Empty uses ComfyUI output."
-                }),
-            },
-            "optional": {
-                "config_path": ("STRING", {
-                    "default": "",
-                    "tooltip": "Optional path to a JSON config file. If empty, uses <node_dir>/config/simple_defaults.json."
-                }),
-                "force_text_only": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Force text-only mode for both models (disables mmproj auto-detect)."
-                }),
-                "reset_session": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "If true, overwrite existing session history with a fresh session. Session disk cache is kept."
-                }),
-            }
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("transcript_text",)
-    FUNCTION = "chat_cycle_simple"
-    CATEGORY = "LLM/Session"
-    DESCRIPTION = "Run a two-model dialogue cycle with minimal UI; defaults are configurable via JSON."
-
-    def chat_cycle_simple(
-        self,
-        initial_user_text: str,
-        system: str,
-        systemA: str,
-        systemB: str,
-        session_id: str,
-        cycles: int,
-        modelA: str,
-        modelB: str,
-        history_dir: str,
-        config_path: str = "",
-        force_text_only: bool = False,
-        reset_session: bool = False,
-    ) -> tuple:
-        # Resolve models list placeholder
-        if "(No GGUF models found" in (modelA or "") or "(No GGUF models found" in (modelB or ""):
-            return ("",)
-
-        # Load defaults from config (or fallback)
-        defaults = _load_simple_defaults(config_path or "")
-        chat_handler_overrides = defaults.get("chat_handler_overrides")
-        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
-
-        # System prompts (shared + optional overrides)
-        # UI fields take priority when non-empty; otherwise fall back to config/defaults.
-        system_prompt = (system or "").strip() or str(defaults.get("system_prompt") or "You are a helpful assistant.")
-        system_prompt_A = (systemA or "").strip() or str(defaults.get("system_prompt_A") or "")
-        system_prompt_B = (systemB or "").strip() or str(defaults.get("system_prompt_B") or "")
-
-        # Sampling / runtime parameters
-        max_tokens = int(defaults.get("max_tokens") or 512)
-        temperature = float(defaults.get("temperature") or 0.7)
-        top_p = float(defaults.get("top_p") or 0.9)
-        n_gpu_layers = int(defaults.get("n_gpu_layers") or 0)
-        n_ctx = int(defaults.get("n_ctx") or 4096)
-
-        # History + summary parameters
-        max_turns = int(defaults.get("max_turns") or 6)
-        summarize_old_history = bool(defaults.get("summarize_old_history") if "summarize_old_history" in defaults else True)
-        summary_chunk_turns = int(defaults.get("summary_chunk_turns") or 6)
-        max_tokens_summary = int(defaults.get("max_tokens_summary") or 128)
-        summary_max_chars = int(defaults.get("summary_max_chars") or 1500)
-
-        # Dynamic context protection
-        dynamic_max_tokens = bool(defaults.get("dynamic_max_tokens") if "dynamic_max_tokens" in defaults else True)
-        min_generation_tokens = int(defaults.get("min_generation_tokens") or 96)
-        safety_margin_tokens = int(defaults.get("safety_margin_tokens") or 64)
-
-        # Cache + repetition controls
-        persistent_cache = str(defaults.get("persistent_cache") or "off")
-        runtime_cache = str(defaults.get("runtime_cache") or "LlamaTrieCache")
-        repeat_penalty = float(defaults.get("repeat_penalty") or 1.12)
-        repeat_last_n = int(defaults.get("repeat_last_n") or 256)
-        rewrite_continue = bool(defaults.get("rewrite_continue") if "rewrite_continue" in defaults else True)
-
-        # Logging
-        log_level = str(defaults.get("log_level") or "timing")
-        suppress_backend_logs = bool(defaults.get("suppress_backend_logs") if "suppress_backend_logs" in defaults else True)
-
-        # mmproj handling:
-        # - Default is auto-detect for both roles.
-        # - Force text-only disables mmproj auto-detect.
-        mmprojA = "(Not required)" if force_text_only else "(Auto-detect)"
-        mmprojB = "(Not required)" if force_text_only else "(Auto-detect)"
-
-        node = LLMDialogueCycleNode()
-        return node.chat_cycle(
-            initial_user_text=initial_user_text,
-            session_id=session_id,
-            cycles=int(cycles),
-            modelA=modelA,
-            mmprojA=mmprojA,
-            modelB=modelB,
-            mmprojB=mmprojB,
-            system_prompt=system_prompt,
-            system_prompt_A=system_prompt_A,
-            system_prompt_B=system_prompt_B,
-            max_tokens=int(max_tokens),
-            temperature=float(temperature),
-            top_p=float(top_p),
-            n_gpu_layers=int(n_gpu_layers),
-            n_ctx=int(n_ctx),
-            max_turns=int(max_turns),
-            summarize_old_history=bool(summarize_old_history),
-            summary_chunk_turns=int(summary_chunk_turns),
-            max_tokens_summary=int(max_tokens_summary),
-            summary_max_chars=int(summary_max_chars),
-            dynamic_max_tokens=bool(dynamic_max_tokens),
-            min_generation_tokens=int(min_generation_tokens),
-            safety_margin_tokens=int(safety_margin_tokens),
-            persistent_cache=persistent_cache,
-            runtime_cache=runtime_cache,
-            repeat_penalty=float(repeat_penalty),
-            repeat_last_n=int(repeat_last_n),
-            rewrite_continue=bool(rewrite_continue),
-            log_level=log_level,
-            suppress_backend_logs=bool(suppress_backend_logs),
-            history_dir=history_dir or "",
-            reset_session=bool(reset_session),
-            stream_to_console=bool(defaults.get("stream_to_console") or False),
-            chat_handler_overrides=chat_handler_overrides,
-            text_chat_builder_overrides=text_chat_builder_overrides,
-        )
-
-
-# =============================================================================
-# LLM Dialogue Cycle (Simple)
+# LLM Session Chat
 # =============================================================================
 
 class LLMSessionChatNode:
@@ -2420,176 +2572,12 @@ class LLMSessionChatNode:
 
     @classmethod
     def INPUT_TYPES(cls):
-        roots = _get_llm_model_roots()
-        available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
-
-        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
-        if not available_mmprojs:
-            mmproj_options = ["(Auto-detect)", "(Not required)"]
-
-        if not available_models:
-            available_models = ["(No GGUF models found in models/LLM/)"]
-
-        return {
-            "required": {
-                "user_text": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "User message for this turn"
-                }),
-                "session_id": ("STRING", {
-                    "default": "default",
-                    "tooltip": "Session ID (maps to a history file). Same ID continues the chat."
-                }),
-                "model": (available_models, {
-                    "default": available_models[0],
-                    "tooltip": "GGUF model file in models/LLM/"
-                }),
-                "mmproj": (mmproj_options, {
-                    "default": "(Auto-detect)",
-                    "tooltip": "Manual selection is recommended."
-                }),
-                "system_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": "You are a helpful assistant.",
-                    "tooltip": "System prompt (conversation policy). Saved into the history file."
-                }),
-                "max_tokens": ("INT", {
-                    "default": 512,
-                    "min": 1,
-                    "max": 8192,
-                    "tooltip": "Maximum tokens to generate for this turn"
-                }),
-                "temperature": ("FLOAT", {
-                    "default": 0.7,
-                    "min": 0.0,
-                    "max": 2.0,
-                    "step": 0.05,
-                    "tooltip": "Sampling temperature"
-                }),
-                "top_p": ("FLOAT", {
-                    "default": 0.9,
-                    "min": 0.05,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "tooltip": "Nucleus sampling (top_p). Lower = safer/more conservative."
-                }),
-                "n_gpu_layers": ("INT", {
-                    "default": 0,
-                    "min": -1,
-                    "max": 200,
-                    "step": 1,
-                    "tooltip": "Number of layers to offload to GPU. 0=CPU. -1=all."
-                }),
-                "n_ctx": ("INT", {
-                    "default": 4096,
-                    "min": 512,
-                    "max": 131072,
-                    "step": 256,
-                    "tooltip": "Context length (must be supported by the model)"
-                }),
-            },
-            "optional": {
-                "image": ("IMAGE", {
-                    "tooltip": "Optional image input for this turn only (never saved to history)"
-                }),
-                "persistent_cache": (["LlamaDiskCache", "off"], {
-                    "default": "off",
-                    "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under a session-specific cache directory in output/llm_session_sessions/cache/."
-                }),
-                "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {
-                    "default": "LlamaTrieCache",
-                    "tooltip": "Runtime cache backend. KV_cache uses save_state/load_state, RAM/Trie use llama.cpp cache in memory."
-                }),
-                "log_level": (["minimal", "timing", "debug"], {
-                    "default": "timing",
-                    "tooltip": "Console logging verbosity for LLM Session Chat."
-                }),
-                "suppress_backend_logs": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Suppress backend stdout/stderr during generation."
-                }),
-                "repeat_penalty": ("FLOAT", {
-                    "default": 1.12,
-                    "min": 1.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "tooltip": "Repetition penalty to reduce looping outputs (especially on continue)."
-                }),
-                "repeat_last_n": ("INT", {
-                    "default": 256,
-                    "min": 0,
-                    "max": 4096,
-                    "tooltip": "Apply repeat_penalty over the last N tokens. 0 disables."
-                }),
-                "rewrite_continue": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Rewrite inputs starting with 'continue' into an explicit continuation instruction to reduce repetition."
-                }),
-                "max_turns": ("INT", {
-                    "default": 12,
-                    "min": 0,
-                    "max": 200,
-                    "tooltip": "Keep only the last N turns in live context. 0 means no prior turns."
-                }),
-                "summarize_old_history": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Summarize overflow turns into a rolling summary when turns exceed max_turns."
-                }),
-                
-                "summary_chunk_turns": ("INT", {
-                    "default": 3,
-                    "min": 1,
-                    "max": 50,
-                    "tooltip": "Summarize overflow in chunks of this many turns (reduces summary frequency)."
-                }),
-                "max_tokens_summary": ("INT", {
-                    "default": 128,
-                    "min": 16,
-                    "max": 2048,
-                    "tooltip": "Max tokens for summary generation (kept small for speed)."
-                }),
-                "summary_max_chars": ("INT", {
-                    "default": 1500,
-                    "min": 200,
-                    "max": 20000,
-                    "tooltip": "If the rolling summary exceeds this size, it will be re-summarized to stay compact."
-                }),
-                "dynamic_max_tokens": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Dynamically shrink max_tokens (and/or turns) when prompt would exceed n_ctx."
-                }),
-                "min_generation_tokens": ("INT", {
-                    "default": 96,
-                    "min": 1,
-                    "max": 4096,
-                    "tooltip": "Minimum tokens to allow for generation when dynamic_max_tokens is enabled."
-                }),
-                "safety_margin_tokens": ("INT", {
-                    "default": 64,
-                    "min": 0,
-                    "max": 2048,
-                    "tooltip": "Token margin reserved to reduce the chance of exceeding n_ctx."
-                }),
-                "history_dir": ("STRING", {
-                    "default": "",
-                    "tooltip": "Optional directory for history files and session-scoped disk caches. Empty uses output/llm_session_sessions/"
-                }),
-                "reset_session": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "If true, overwrite existing session history file with a fresh session. Session disk cache is kept."
-                }),
-                "stream_to_console": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Stream tokens to console while generating."
-                }),
-            }
-        }
+        return _input_types_session_chat()
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("assistant_text",)
     FUNCTION = "chat_stream"
-    CATEGORY = "LLM/Session"
+    CATEGORY = _LLM_SESSION_CATEGORY
     DESCRIPTION = "Persistent multi-turn chat with local GGUF models using file-based history."
 
     def chat_stream(self,
@@ -2638,8 +2626,8 @@ class LLMSessionChatNode:
             _log_total("Finished (error)")
             return ("",)
 
-        if "(No GGUF models found" in model:
-            print("[LLM Session Chat] Error: No GGUF models found in models/LLM/")
+        if _is_no_models_placeholder(model):
+            print(f"[LLM Session Chat] Error: No GGUF models found in models/{_LLM_MODELS_DIR_NAME}/")
             _log_total("Finished (error)")
             return ("",)
 
@@ -2652,10 +2640,10 @@ class LLMSessionChatNode:
             return ("",)
 
         mmproj_path = None
-        if mmproj == "(Not required)":
+        if mmproj == _MMPROJ_NOT_REQUIRED:
             # Sentinel to force text-only (prevents mmproj auto-detect / VL handler)
-            mmproj_path = "(Not required)"
-        elif mmproj != "(Auto-detect)":
+            mmproj_path = _MMPROJ_NOT_REQUIRED
+        elif mmproj != _MMPROJ_AUTO:
             mmproj_path = os.path.normpath(_resolve_llm_relpath(mmproj, roots=roots))
             if not os.path.exists(mmproj_path):
                 print(f"[LLM Session Chat] Warning: mmproj not found: {mmproj_path}")
@@ -3198,39 +3186,8 @@ class LLMSessionChatNode:
 
 
 # =============================================================================
-# LLM Dialogue Cycle - single node A<->B loop (no graph cycle)
+# LLM Dialogue Cycle Helpers
 # =============================================================================
-
-def _transcript_path(session_id: str, history_dir: Optional[str] = None) -> str:
-    """Return transcript file path: {session_id}.txt under the same base as history files."""
-    session_id = (session_id or "default").strip()
-    safe = "".join(c for c in session_id if c.isalnum() or c in ("-", "_", "."))
-    if not safe:
-        safe = "default"
-    base = (history_dir or "").strip() or default_sessions_dir()
-    _ensure_dir(base)
-    return os.path.join(base, f"{safe}.txt")
-
-def _append_transcript_lines(path: str, lines: List[str]) -> None:
-    _ensure_dir(os.path.dirname(path))
-    with open(path, "a", encoding="utf-8", newline="\n") as f:
-        for ln in lines:
-            f.write(ln.rstrip("\n") + "\n")
-
-def _resolve_model_and_mmproj(roots: list[str], model: str, mmproj: str) -> tuple[str, Optional[str]]:
-    model_path = _resolve_llm_relpath(model, roots=roots)
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model not found: {model_path}")
-
-    mmproj_path = None
-    if mmproj == "(Not required)":
-        mmproj_path = "(Not required)"  # sentinel
-    elif mmproj != "(Auto-detect)":
-        mmproj_path = _resolve_llm_relpath(mmproj, roots=roots)
-        if not os.path.exists(mmproj_path):
-            mmproj_path = None  # fall back to auto-detect
-
-    return model_path, mmproj_path
 
 def _chat_one_turn(
     *,
@@ -3283,7 +3240,7 @@ def _chat_one_turn(
             _model_manager = GGUFModelManager()
         mgr = _model_manager
 
-    if "(No GGUF models found" in model:
+    if _is_no_models_placeholder(model):
         return ""
 
     roots = _get_llm_model_roots()
@@ -3294,7 +3251,7 @@ def _chat_one_turn(
 
     model_sig = {
         "model_file": os.path.basename(model_path),
-        "mmproj_file": os.path.basename(mmproj_path) if (mmproj_path and mmproj_path != "(Not required)") else "",
+        "mmproj_file": os.path.basename(mmproj_path) if (mmproj_path and mmproj_path != _MMPROJ_NOT_REQUIRED) else "",
         "n_ctx": int(n_ctx),
         "n_gpu_layers": int(n_gpu_layers),
     }
@@ -3754,6 +3711,10 @@ def _chat_one_turn(
     return assistant_text
 
 
+# =============================================================================
+# LLM Dialogue Cycle
+# =============================================================================
+
 class LLMDialogueCycleNode:
     """
     LLM Dialogue Cycle
@@ -3764,68 +3725,12 @@ class LLMDialogueCycleNode:
 
     @classmethod
     def INPUT_TYPES(cls):
-        roots = _get_llm_model_roots()
-        available_models, available_mmprojs = _list_gguf_recursive_multi(roots)
-
-        mmproj_options = available_mmprojs + ["(Auto-detect)", "(Not required)"]
-        if not available_mmprojs:
-            mmproj_options = ["(Auto-detect)", "(Not required)"]
-
-        if not available_models:
-            available_models = ["(No GGUF models found in models/LLM/)"]
-
-        return {
-            "required": {
-                "initial_user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "Initial user message (sent to Model A only)"}),
-                "session_id": ("STRING", {"default": "default", "tooltip": "Base session id. A uses {id}_A, B uses {id}_B, transcript uses {id}.txt"}),
-                "cycles": ("INT", {"default": 1, "min": 1, "max": 50, "step": 1, "tooltip": "Number of round trips. 1 = A then B."}),
-
-                "modelA": (available_models, {"default": available_models[0], "tooltip": "GGUF model for role A"}),
-                "mmprojA": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for modelA"}),
-
-                "modelB": (available_models, {"default": available_models[0], "tooltip": "GGUF model for role B"}),
-                "mmprojB": (mmproj_options, {"default": "(Auto-detect)", "tooltip": "mmproj for modelB"}),
-
-                "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant.", "tooltip": "Shared system prompt for both roles"}),
-                "system_prompt_A": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),
-                "system_prompt_B": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model B (overrides shared prompt if set)"}),
-
-                "max_tokens": ("INT", {"default": 512, "min": 1, "max": 8192}),
-                "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.05, "max": 1.0, "step": 0.01}),
-                "n_gpu_layers": ("INT", {"default": 0, "min": -1, "max": 200, "step": 1}),
-                "n_ctx": ("INT", {"default": 4096, "min": 512, "max": 131072, "step": 256}),
-            },
-            "optional": {
-                "max_turns": ("INT", {"default": 12, "min": 0, "max": 200}),
-                "summarize_old_history": ("BOOLEAN", {"default": True}),
-                "summary_chunk_turns": ("INT", {"default": 3, "min": 1, "max": 50}),
-                "max_tokens_summary": ("INT", {"default": 128, "min": 16, "max": 2048}),
-                "summary_max_chars": ("INT", {"default": 1500, "min": 200, "max": 20000}),
-
-                "dynamic_max_tokens": ("BOOLEAN", {"default": True}),
-                "min_generation_tokens": ("INT", {"default": 96, "min": 1, "max": 4096}),
-                "safety_margin_tokens": ("INT", {"default": 64, "min": 0, "max": 2048}),
-
-                "persistent_cache": (["LlamaDiskCache", "off"], {"default": "off", "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
-                "runtime_cache": (["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"], {"default": "LlamaTrieCache"}),
-
-                "repeat_penalty": ("FLOAT", {"default": 1.12, "min": 1.0, "max": 2.0, "step": 0.01}),
-                "repeat_last_n": ("INT", {"default": 256, "min": 0, "max": 4096}),
-                "rewrite_continue": ("BOOLEAN", {"default": True}),
-                "log_level": (["minimal", "timing", "debug"], {"default": "timing"}),
-                "suppress_backend_logs": ("BOOLEAN", {"default": True}),
-
-                "history_dir": ("STRING", {"default": "", "tooltip": "Optional history directory. Empty => output/llm_session_sessions/. Disk caches are also stored there, separated by session id."}),
-                "reset_session": ("BOOLEAN", {"default": False, "tooltip": "If true, resets both {id}_A and {id}_B histories (transcript file is not deleted). Session disk caches are kept."}),
-                "stream_to_console": ("BOOLEAN", {"default": False, "tooltip": "Stream tokens to console while generating."}),
-            }
-        }
+        return _input_types_dialogue_cycle()
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("transcript_text",)
     FUNCTION = "chat_cycle"
-    CATEGORY = "LLM/Session"
+    CATEGORY = _LLM_SESSION_CATEGORY
     DESCRIPTION = "Run a chat cycle between two local GGUF models inside one node (A<->B), saving transcript."
 
     def chat_cycle(
@@ -3995,6 +3900,213 @@ class LLMDialogueCycleNode:
                 pass
 
         return ("\n".join(transcript_lines),)
+
+
+# =============================================================================
+# Simple Wrappers
+# =============================================================================
+
+# =============================================================================
+# LLM Session Chat (Simple)
+# =============================================================================
+
+class LLMSessionChatSimpleNode:
+    """LLM Session Chat (Simple)
+
+    Minimal UI inputs with config-driven defaults.
+    Defaults are loaded from config/simple_defaults.json when present.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return _input_types_session_chat_simple()
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("assistant_text",)
+    FUNCTION = "chat_stream"
+    CATEGORY = _LLM_SESSION_CATEGORY
+    DESCRIPTION = "Minimal entry node for persistent local GGUF chat sessions (config-driven defaults)."
+
+    def chat_stream(
+        self,
+        user_text: str,
+        session_id: str,
+        model: str,
+        mmproj: str,
+        history_dir: str,
+        image=None,
+        config_path: str = "",
+        stream_to_console: bool = True,
+    ) -> tuple:
+        defaults = _load_simple_defaults(config_path=config_path)
+        chat_handler_overrides = defaults.get("chat_handler_overrides")
+        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
+
+        # Delegate to the full node implementation
+        node = LLMSessionChatNode()
+        return node.chat_stream(
+            user_text=user_text,
+            session_id=session_id,
+            model=model,
+            mmproj=mmproj,
+            system_prompt=defaults["system_prompt"],
+            max_tokens=int(defaults["max_tokens"]),
+            temperature=float(defaults["temperature"]),
+            top_p=float(defaults["top_p"]),
+            n_gpu_layers=int(defaults["n_gpu_layers"]),
+            n_ctx=int(defaults["n_ctx"]),
+            image=image,
+            max_turns=int(defaults["max_turns"]),
+            summarize_old_history=bool(defaults["summarize_old_history"]),
+            summary_chunk_turns=int(defaults["summary_chunk_turns"]),
+            max_tokens_summary=int(defaults["max_tokens_summary"]),
+            summary_max_chars=int(defaults["summary_max_chars"]),
+            dynamic_max_tokens=bool(defaults["dynamic_max_tokens"]),
+            min_generation_tokens=int(defaults["min_generation_tokens"]),
+            safety_margin_tokens=int(defaults["safety_margin_tokens"]),
+            persistent_cache=str(defaults["persistent_cache"]),
+            repeat_penalty=float(defaults["repeat_penalty"]),
+            repeat_last_n=int(defaults["repeat_last_n"]),
+            rewrite_continue=bool(defaults["rewrite_continue"]),
+            runtime_cache=str(defaults["runtime_cache"]),
+            log_level=str(defaults["log_level"]),
+            suppress_backend_logs=bool(defaults["suppress_backend_logs"]),
+            history_dir=history_dir or "",
+            reset_session=bool(defaults["reset_session"]),
+            stream_to_console=bool(defaults["stream_to_console"]),
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
+
+
+# =============================================================================
+# LLM Dialogue Cycle (Simple)
+# =============================================================================
+
+class LLMDialogueCycleSimpleNode:
+    """
+    LLM Dialogue Cycle (Simple)
+
+    Minimal-input wrapper around LLM Dialogue Cycle using a JSON config file for defaults.
+    - Keeps UI simple (few parameters)
+    - Users can override defaults via config/simple_defaults.json
+    - Safe fallback to built-in defaults if the config is missing or invalid
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return _input_types_dialogue_cycle_simple()
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("transcript_text",)
+    FUNCTION = "chat_cycle_simple"
+    CATEGORY = _LLM_SESSION_CATEGORY
+    DESCRIPTION = "Run a two-model dialogue cycle with minimal UI; defaults are configurable via JSON."
+
+    def chat_cycle_simple(
+        self,
+        initial_user_text: str,
+        system: str,
+        systemA: str,
+        systemB: str,
+        session_id: str,
+        cycles: int,
+        modelA: str,
+        modelB: str,
+        history_dir: str,
+        config_path: str = "",
+        force_text_only: bool = False,
+        reset_session: bool = False,
+    ) -> tuple:
+        # Resolve models list placeholder
+        if _is_no_models_placeholder(modelA) or _is_no_models_placeholder(modelB):
+            return ("",)
+
+        # Load defaults from config (or fallback)
+        defaults = _load_simple_defaults(config_path or "")
+        chat_handler_overrides = defaults.get("chat_handler_overrides")
+        text_chat_builder_overrides = defaults.get("text_chat_builder_overrides")
+
+        # System prompts (shared + optional overrides)
+        # UI fields take priority when non-empty; otherwise fall back to config/defaults.
+        system_prompt = (system or "").strip() or str(defaults.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT)
+        system_prompt_A = (systemA or "").strip() or str(defaults.get("system_prompt_A") or "")
+        system_prompt_B = (systemB or "").strip() or str(defaults.get("system_prompt_B") or "")
+
+        # Sampling / runtime parameters
+        max_tokens = int(defaults.get("max_tokens") or 512)
+        temperature = float(defaults.get("temperature") or 0.7)
+        top_p = float(defaults.get("top_p") or 0.9)
+        n_gpu_layers = int(defaults.get("n_gpu_layers") or 0)
+        n_ctx = int(defaults.get("n_ctx") or 4096)
+
+        # History + summary parameters
+        max_turns = int(defaults.get("max_turns") or 6)
+        summarize_old_history = bool(defaults.get("summarize_old_history") if "summarize_old_history" in defaults else True)
+        summary_chunk_turns = int(defaults.get("summary_chunk_turns") or 6)
+        max_tokens_summary = int(defaults.get("max_tokens_summary") or 128)
+        summary_max_chars = int(defaults.get("summary_max_chars") or 1500)
+
+        # Dynamic context protection
+        dynamic_max_tokens = bool(defaults.get("dynamic_max_tokens") if "dynamic_max_tokens" in defaults else True)
+        min_generation_tokens = int(defaults.get("min_generation_tokens") or 96)
+        safety_margin_tokens = int(defaults.get("safety_margin_tokens") or 64)
+
+        # Cache + repetition controls
+        persistent_cache = str(defaults.get("persistent_cache") or "off")
+        runtime_cache = str(defaults.get("runtime_cache") or "LlamaTrieCache")
+        repeat_penalty = float(defaults.get("repeat_penalty") or 1.12)
+        repeat_last_n = int(defaults.get("repeat_last_n") or 256)
+        rewrite_continue = bool(defaults.get("rewrite_continue") if "rewrite_continue" in defaults else True)
+
+        # Logging
+        log_level = str(defaults.get("log_level") or "timing")
+        suppress_backend_logs = bool(defaults.get("suppress_backend_logs") if "suppress_backend_logs" in defaults else True)
+
+        # mmproj handling:
+        # - Default is auto-detect for both roles.
+        # - Force text-only disables mmproj auto-detect.
+        mmprojA = _MMPROJ_NOT_REQUIRED if force_text_only else _MMPROJ_AUTO
+        mmprojB = _MMPROJ_NOT_REQUIRED if force_text_only else _MMPROJ_AUTO
+
+        node = LLMDialogueCycleNode()
+        return node.chat_cycle(
+            initial_user_text=initial_user_text,
+            session_id=session_id,
+            cycles=int(cycles),
+            modelA=modelA,
+            mmprojA=mmprojA,
+            modelB=modelB,
+            mmprojB=mmprojB,
+            system_prompt=system_prompt,
+            system_prompt_A=system_prompt_A,
+            system_prompt_B=system_prompt_B,
+            max_tokens=int(max_tokens),
+            temperature=float(temperature),
+            top_p=float(top_p),
+            n_gpu_layers=int(n_gpu_layers),
+            n_ctx=int(n_ctx),
+            max_turns=int(max_turns),
+            summarize_old_history=bool(summarize_old_history),
+            summary_chunk_turns=int(summary_chunk_turns),
+            max_tokens_summary=int(max_tokens_summary),
+            summary_max_chars=int(summary_max_chars),
+            dynamic_max_tokens=bool(dynamic_max_tokens),
+            min_generation_tokens=int(min_generation_tokens),
+            safety_margin_tokens=int(safety_margin_tokens),
+            persistent_cache=persistent_cache,
+            runtime_cache=runtime_cache,
+            repeat_penalty=float(repeat_penalty),
+            repeat_last_n=int(repeat_last_n),
+            rewrite_continue=bool(rewrite_continue),
+            log_level=log_level,
+            suppress_backend_logs=bool(suppress_backend_logs),
+            history_dir=history_dir or "",
+            reset_session=bool(reset_session),
+            stream_to_console=bool(defaults.get("stream_to_console") or False),
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
 
 
 # ============================================================================
