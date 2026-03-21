@@ -7,6 +7,7 @@ This document describes the module layering and dependency direction for the ref
 - `core/`: Reusable pure-ish logic (prompt rewrite, KV signature/load/save flow, generation retry loop, shared result types).
 - `services/`: Orchestration logic that coordinates multi-step application flows.
 - `infra/`: Side-effect helpers for filesystem/path persistence.
+- `tests/`: Refactoring safety-net tests that lock current behavior for core and service orchestration paths.
 
 ## Dependency Direction
 Allowed:
@@ -14,10 +15,12 @@ Allowed:
 - `services/` -> `core/` (and injected callbacks)
 - `core/` -> standard library only
 - `infra/` -> standard library only
+- `tests/` -> `llm_session_nodes.py`, `core/`, `services/`, `infra/`
 
 Disallowed:
 - `core/` -> `services/` or node layer
 - `infra/` -> `services/` or node layer
+- production layers (`llm_session_nodes.py`, `core/`, `services/`, `infra/`) -> `tests/`
 
 ## One-Screen Dependency Diagram
 ```text
