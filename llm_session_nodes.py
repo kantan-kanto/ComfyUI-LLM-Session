@@ -2527,6 +2527,57 @@ def _build_dialogue_cycle_request(
     )
 
 
+def _build_dialogue_cycle_common_turn_kwargs(
+    *,
+    max_tokens: int,
+    temperature: float,
+    top_p: float,
+    n_gpu_layers: int,
+    n_ctx: int,
+    max_turns: int,
+    summarize_old_history: bool,
+    summary_chunk_turns: int,
+    max_tokens_summary: int,
+    summary_max_chars: int,
+    dynamic_max_tokens: bool,
+    min_generation_tokens: int,
+    safety_margin_tokens: int,
+    persistent_cache: str,
+    repeat_penalty: float,
+    repeat_last_n: int,
+    rewrite_continue: bool,
+    runtime_cache: str,
+    log_level: str,
+    suppress_backend_logs: bool,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+) -> Dict[str, Any]:
+    return {
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "n_gpu_layers": n_gpu_layers,
+        "n_ctx": n_ctx,
+        "max_turns": max_turns,
+        "summarize_old_history": summarize_old_history,
+        "summary_chunk_turns": summary_chunk_turns,
+        "max_tokens_summary": max_tokens_summary,
+        "summary_max_chars": summary_max_chars,
+        "dynamic_max_tokens": dynamic_max_tokens,
+        "min_generation_tokens": min_generation_tokens,
+        "safety_margin_tokens": safety_margin_tokens,
+        "persistent_cache": persistent_cache,
+        "repeat_penalty": repeat_penalty,
+        "repeat_last_n": repeat_last_n,
+        "rewrite_continue": rewrite_continue,
+        "runtime_cache": runtime_cache,
+        "log_level": log_level,
+        "suppress_backend_logs": suppress_backend_logs,
+        "chat_handler_overrides": chat_handler_overrides,
+        "text_chat_builder_overrides": text_chat_builder_overrides,
+    }
+
+
 def _require_llama_cpp_available() -> None:
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
@@ -2955,30 +3006,30 @@ class LLMDialogueCycleNode:
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
         service = ChatTurnService()
-        common_turn_kwargs = {
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "n_gpu_layers": n_gpu_layers,
-            "n_ctx": n_ctx,
-            "max_turns": max_turns,
-            "summarize_old_history": summarize_old_history,
-            "summary_chunk_turns": summary_chunk_turns,
-            "max_tokens_summary": max_tokens_summary,
-            "summary_max_chars": summary_max_chars,
-            "dynamic_max_tokens": dynamic_max_tokens,
-            "min_generation_tokens": min_generation_tokens,
-            "safety_margin_tokens": safety_margin_tokens,
-            "persistent_cache": persistent_cache,
-            "repeat_penalty": repeat_penalty,
-            "repeat_last_n": repeat_last_n,
-            "rewrite_continue": rewrite_continue,
-            "runtime_cache": runtime_cache,
-            "log_level": log_level,
-            "suppress_backend_logs": suppress_backend_logs,
-            "chat_handler_overrides": chat_handler_overrides,
-            "text_chat_builder_overrides": text_chat_builder_overrides,
-        }
+        common_turn_kwargs = _build_dialogue_cycle_common_turn_kwargs(
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            max_turns=max_turns,
+            summarize_old_history=summarize_old_history,
+            summary_chunk_turns=summary_chunk_turns,
+            max_tokens_summary=max_tokens_summary,
+            summary_max_chars=summary_max_chars,
+            dynamic_max_tokens=dynamic_max_tokens,
+            min_generation_tokens=min_generation_tokens,
+            safety_margin_tokens=safety_margin_tokens,
+            persistent_cache=persistent_cache,
+            repeat_penalty=repeat_penalty,
+            repeat_last_n=repeat_last_n,
+            rewrite_continue=rewrite_continue,
+            runtime_cache=runtime_cache,
+            log_level=log_level,
+            suppress_backend_logs=suppress_backend_logs,
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
 
         request = _build_dialogue_cycle_request(
             initial_user_text=initial_user_text,
