@@ -2481,6 +2481,18 @@ def _build_turn_execution_dependencies() -> TurnExecutionDependencies:
 
 
 
+def _build_dialogue_cycle_dependencies() -> DialogueCycleDependencies:
+    return {
+        "now_iso": _now_iso_jst,
+        "transcript_path": _transcript_path,
+        "append_transcript_lines": _append_transcript_lines,
+        "clear_kv_state_for_session": _clear_kv_state_for_session,
+        "model_manager_factory": GGUFModelManager,
+        "unload_model": lambda manager: manager.unload_model(),
+        "chat_one_turn": _chat_one_turn,
+    }
+
+
 def _require_llama_cpp_available() -> None:
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
@@ -2948,15 +2960,7 @@ class LLMDialogueCycleNode:
             turn_kwargs_A={**common_turn_kwargs, "model": modelA, "mmproj": mmprojA},
             turn_kwargs_B={**common_turn_kwargs, "model": modelB, "mmproj": mmprojB},
         )
-        dependencies = DialogueCycleDependencies(
-            now_iso=_now_iso_jst,
-            transcript_path=_transcript_path,
-            append_transcript_lines=_append_transcript_lines,
-            clear_kv_state_for_session=_clear_kv_state_for_session,
-            model_manager_factory=GGUFModelManager,
-            unload_model=lambda manager: manager.unload_model(),
-            chat_one_turn=_chat_one_turn,
-        )
+        dependencies = _build_dialogue_cycle_dependencies()
         transcript_text = service.run_dialogue_cycle_with_dependencies(
             request=request,
             dependencies=dependencies,
