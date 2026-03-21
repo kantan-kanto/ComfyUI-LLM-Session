@@ -291,6 +291,48 @@ def _resolve_simple_system_prompts(
     return system_prompt, system_prompt_A, system_prompt_B
 
 
+def _build_dialogue_cycle_simple_chat_kwargs(
+    *,
+    defaults: Dict[str, Any],
+    force_text_only: bool,
+    history_dir: str,
+    reset_session: bool,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+) -> Dict[str, Any]:
+    mmproj_a = _MMPROJ_NOT_REQUIRED if force_text_only else _MMPROJ_AUTO
+    mmproj_b = _MMPROJ_NOT_REQUIRED if force_text_only else _MMPROJ_AUTO
+    return {
+        "mmprojA": mmproj_a,
+        "mmprojB": mmproj_b,
+        "max_tokens": int(defaults["max_tokens"]),
+        "temperature": float(defaults["temperature"]),
+        "top_p": float(defaults["top_p"]),
+        "n_gpu_layers": int(defaults["n_gpu_layers"]),
+        "n_ctx": int(defaults["n_ctx"]),
+        "max_turns": int(defaults["max_turns"]),
+        "summarize_old_history": bool(defaults["summarize_old_history"]),
+        "summary_chunk_turns": int(defaults["summary_chunk_turns"]),
+        "max_tokens_summary": int(defaults["max_tokens_summary"]),
+        "summary_max_chars": int(defaults["summary_max_chars"]),
+        "dynamic_max_tokens": bool(defaults["dynamic_max_tokens"]),
+        "min_generation_tokens": int(defaults["min_generation_tokens"]),
+        "safety_margin_tokens": int(defaults["safety_margin_tokens"]),
+        "persistent_cache": str(defaults["persistent_cache"]),
+        "runtime_cache": str(defaults["runtime_cache"]),
+        "repeat_penalty": float(defaults["repeat_penalty"]),
+        "repeat_last_n": int(defaults["repeat_last_n"]),
+        "rewrite_continue": bool(defaults["rewrite_continue"]),
+        "log_level": str(defaults["log_level"]),
+        "suppress_backend_logs": bool(defaults["suppress_backend_logs"]),
+        "history_dir": history_dir or "",
+        "reset_session": bool(reset_session),
+        "stream_to_console": bool(defaults["stream_to_console"]),
+        "chat_handler_overrides": chat_handler_overrides,
+        "text_chat_builder_overrides": text_chat_builder_overrides,
+    }
+
+
 # llama-cpp-python imports
 from importlib import import_module
 from collections import defaultdict
@@ -3285,42 +3327,14 @@ class LLMDialogueCycleSimpleNode:
             systemA,
             systemB,
         )
-
-        # Sampling / runtime parameters
-        max_tokens = int(defaults["max_tokens"])
-        temperature = float(defaults["temperature"])
-        top_p = float(defaults["top_p"])
-        n_gpu_layers = int(defaults["n_gpu_layers"])
-        n_ctx = int(defaults["n_ctx"])
-
-        # History + summary parameters
-        max_turns = int(defaults["max_turns"])
-        summarize_old_history = bool(defaults["summarize_old_history"])
-        summary_chunk_turns = int(defaults["summary_chunk_turns"])
-        max_tokens_summary = int(defaults["max_tokens_summary"])
-        summary_max_chars = int(defaults["summary_max_chars"])
-
-        # Dynamic context protection
-        dynamic_max_tokens = bool(defaults["dynamic_max_tokens"])
-        min_generation_tokens = int(defaults["min_generation_tokens"])
-        safety_margin_tokens = int(defaults["safety_margin_tokens"])
-
-        # Cache + repetition controls
-        persistent_cache = str(defaults["persistent_cache"])
-        runtime_cache = str(defaults["runtime_cache"])
-        repeat_penalty = float(defaults["repeat_penalty"])
-        repeat_last_n = int(defaults["repeat_last_n"])
-        rewrite_continue = bool(defaults["rewrite_continue"])
-
-        # Logging
-        log_level = str(defaults["log_level"])
-        suppress_backend_logs = bool(defaults["suppress_backend_logs"])
-
-        # mmproj handling:
-        # - Default is auto-detect for both roles.
-        # - Force text-only disables mmproj auto-detect.
-        mmprojA = _MMPROJ_NOT_REQUIRED if force_text_only else _MMPROJ_AUTO
-        mmprojB = _MMPROJ_NOT_REQUIRED if force_text_only else _MMPROJ_AUTO
+        chat_kwargs = _build_dialogue_cycle_simple_chat_kwargs(
+            defaults=defaults,
+            force_text_only=force_text_only,
+            history_dir=history_dir,
+            reset_session=reset_session,
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
 
         node = LLMDialogueCycleNode()
         return node.chat_cycle(
@@ -3328,37 +3342,11 @@ class LLMDialogueCycleSimpleNode:
             session_id=session_id,
             cycles=int(cycles),
             modelA=modelA,
-            mmprojA=mmprojA,
             modelB=modelB,
-            mmprojB=mmprojB,
             system_prompt=system_prompt,
             system_prompt_A=system_prompt_A,
             system_prompt_B=system_prompt_B,
-            max_tokens=int(max_tokens),
-            temperature=float(temperature),
-            top_p=float(top_p),
-            n_gpu_layers=int(n_gpu_layers),
-            n_ctx=int(n_ctx),
-            max_turns=int(max_turns),
-            summarize_old_history=bool(summarize_old_history),
-            summary_chunk_turns=int(summary_chunk_turns),
-            max_tokens_summary=int(max_tokens_summary),
-            summary_max_chars=int(summary_max_chars),
-            dynamic_max_tokens=bool(dynamic_max_tokens),
-            min_generation_tokens=int(min_generation_tokens),
-            safety_margin_tokens=int(safety_margin_tokens),
-            persistent_cache=persistent_cache,
-            runtime_cache=runtime_cache,
-            repeat_penalty=float(repeat_penalty),
-            repeat_last_n=int(repeat_last_n),
-            rewrite_continue=bool(rewrite_continue),
-            log_level=log_level,
-            suppress_backend_logs=bool(suppress_backend_logs),
-            history_dir=history_dir or "",
-            reset_session=bool(reset_session),
-            stream_to_console=bool(defaults["stream_to_console"]),
-            chat_handler_overrides=chat_handler_overrides,
-            text_chat_builder_overrides=text_chat_builder_overrides,
+            **chat_kwargs,
         )
 
 
