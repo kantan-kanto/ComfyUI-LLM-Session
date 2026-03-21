@@ -1,1 +1,1 @@
-# Infrastructure helpers for file/path side effects.
+# infra/: side-effect layer for filesystem/path persistence helpers.

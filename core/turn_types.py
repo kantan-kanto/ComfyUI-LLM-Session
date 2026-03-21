@@ -1,3 +1,4 @@
+# Shared result types used across core/service helpers.
 from __future__ import annotations
 
 from dataclasses import dataclass

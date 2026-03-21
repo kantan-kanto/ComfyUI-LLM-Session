@@ -1,3 +1,4 @@
+# KV state signature/restore/save helpers shared by chat and cycle flows.
 from __future__ import annotations
 
 import hashlib

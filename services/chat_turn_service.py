@@ -1,3 +1,4 @@
+# Service that orchestrates A<->B dialogue cycles and transcript updates.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional

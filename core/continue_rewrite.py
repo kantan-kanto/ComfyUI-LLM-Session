@@ -1,3 +1,4 @@
+# Continue-input rewrite helper with language-aware prompt mapping.
 from __future__ import annotations
 
 import re

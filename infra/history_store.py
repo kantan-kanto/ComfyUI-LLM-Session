@@ -1,3 +1,4 @@
+# Filesystem helpers for history/transcript paths and atomic JSON writes.
 from __future__ import annotations
 
 import json

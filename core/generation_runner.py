@@ -1,3 +1,4 @@
+# Shared generation execution + adaptive retry loop with fallback handling.
 from __future__ import annotations
 
 import sys

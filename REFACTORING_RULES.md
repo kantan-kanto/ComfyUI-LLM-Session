@@ -37,3 +37,10 @@ changes consistent and maintainable over time.
 
 ## Notes
 - If a potential bug is found but fixing it would change behavior, record it and handle it later.
+
+## Documentation & Architecture
+1. Keep folder-role comments in each layer package `__init__.py` (e.g., `core/`, `services/`, `infra/`).
+2. Add a short top-of-file purpose comment for extracted modules so intent is clear without cross-reading.
+3. Keep a one-screen dependency-direction diagram in `ARCHITECTURE.md`, and keep `REFACTORING_RULES.md` focused on rules.
+4. Track unresolved behavior issues in `KNOWN_ISSUES.md` (not in refactor commits that preserve behavior).
+5. When architecture changes, update both `ARCHITECTURE.md` and affected package/file comments in the same change.

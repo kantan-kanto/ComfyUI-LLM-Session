@@ -1,2 +1,1 @@
-# Core helpers for LLM Session nodes.
-
+# core/: reusable logic layer (prompt rewrite, KV helpers, retry flow, shared types).
