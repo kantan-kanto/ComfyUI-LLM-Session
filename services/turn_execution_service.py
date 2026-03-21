@@ -4,44 +4,44 @@ from __future__ import annotations
 import os
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 class TurnExecutionDependencies(TypedDict):
-    llama_cpp_available: Any
+    llama_cpp_available: bool
     llama_cpp_import_error: Any
-    is_no_models_placeholder: Any
-    get_llm_model_roots: Any
-    resolve_model_and_mmproj: Any
-    mmproj_not_required: Any
-    load_history: Any
-    clear_kv_state_for_session: Any
-    rewrite_continue_prompt: Any
-    detect_history_language: Any
-    session_cache_root: Any
-    build_chat_messages: Any
-    build_text_chat_request: Any
-    build_kv_state_signature: Any
-    try_restore_kv_state: Any
-    is_state_data_mismatch_error: Any
-    saved_llama_state_size: Any
-    current_llama_state_size: Any
-    kv_state_debug_info: Any
-    get_context_turns: Any
-    mem_kv_state: Any
-    maybe_compact_summary: Any
-    cache_debug_label: Any
-    run_generation_with_adaptive_retry: Any
-    make_suppress_backend_logs: Any
-    iter_chat_completion_robust: Any
-    create_chat_completion_robust: Any
-    extract_stream_content: Any
-    retry_kwargs_with_repeat_last_n_fallback: Any
-    strip_reasoning_output: Any
-    next_turn_id: Any
-    now_iso: Any
-    maybe_summarize_history: Any
-    atomic_write_json: Any
-    try_save_kv_state: Any
+    is_no_models_placeholder: Callable[[Optional[str]], bool]
+    get_llm_model_roots: Callable[[], List[str]]
+    resolve_model_and_mmproj: Callable[[List[str], str, str], tuple[str, Optional[str]]]
+    mmproj_not_required: str
+    load_history: Callable[..., tuple[Dict[str, Any], str]]
+    clear_kv_state_for_session: Callable[[str], None]
+    rewrite_continue_prompt: Callable[..., Any]
+    detect_history_language: Callable[[Dict[str, Any]], str]
+    session_cache_root: Callable[[str, Optional[str]], str]
+    build_chat_messages: Callable[..., List[Dict[str, Any]]]
+    build_text_chat_request: Callable[..., Optional[Dict[str, Any]]]
+    build_kv_state_signature: Callable[..., str]
+    try_restore_kv_state: Callable[..., None]
+    is_state_data_mismatch_error: Callable[[Exception], bool]
+    saved_llama_state_size: Callable[[Any], Optional[int]]
+    current_llama_state_size: Callable[[Any], Optional[int]]
+    kv_state_debug_info: Callable[[Any], str]
+    get_context_turns: Callable[..., List[Dict[str, Any]]]
+    mem_kv_state: Dict[str, Any]
+    maybe_compact_summary: Callable[..., Dict[str, Any]]
+    cache_debug_label: Callable[[Any], str]
+    run_generation_with_adaptive_retry: Callable[..., Any]
+    make_suppress_backend_logs: Callable[[bool], Any]
+    iter_chat_completion_robust: Callable[..., Any]
+    create_chat_completion_robust: Callable[..., Dict[str, Any]]
+    extract_stream_content: Callable[[Any], str]
+    retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]]
+    strip_reasoning_output: Callable[[str], str]
+    next_turn_id: Callable[[Dict[str, Any]], int]
+    now_iso: Callable[[], str]
+    maybe_summarize_history: Callable[..., Dict[str, Any]]
+    atomic_write_json: Callable[[str, Dict[str, Any]], None]
+    try_save_kv_state: Callable[..., None]
 
 @dataclass(frozen=True)
 class TurnExecutionRequest:
