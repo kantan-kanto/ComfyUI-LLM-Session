@@ -7,12 +7,22 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 try:
-    from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+    from ..core.logging_utils import (
+        log_error_safely,
+        get_module_logger,
+        LOG_LEVEL_MINIMAL,
+        LOG_LEVEL_DEBUG,
+    )
     from .generation_execution_service import GenerationExecutionService
     from .kv_state_service import KvStateService
     from .history_persistence_service import HistoryPersistenceService
 except Exception:
-    from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+    from core.logging_utils import (
+        log_error_safely,
+        get_module_logger,
+        LOG_LEVEL_MINIMAL,
+        LOG_LEVEL_DEBUG,
+    )
     from services.generation_execution_service import GenerationExecutionService
     from services.kv_state_service import KvStateService
     from services.history_persistence_service import HistoryPersistenceService
@@ -552,6 +562,7 @@ class TurnExecutionService:
 
     def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
         deps = request.dependencies
+        module_logger = get_module_logger("TurnExecutionService")
 
         mgr, early_result = self._preflight(request, deps)
         if early_result is not None:
@@ -595,6 +606,41 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
         )
+
+        def _message_chars(msgs: Any) -> int:
+            total = 0
+            if not isinstance(msgs, list):
+                return total
+            for m in msgs:
+                if not isinstance(m, dict):
+                    continue
+                c = m.get("content", "")
+                if isinstance(c, list):
+                    for part in c:
+                        if isinstance(part, dict) and isinstance(part.get("text"), str):
+                            total += len(part["text"])
+                elif isinstance(c, str):
+                    total += len(c)
+            return total
+
+        def _prompt_chars(req_obj: Any) -> int:
+            if isinstance(req_obj, dict) and isinstance(req_obj.get("prompt"), str):
+                return len(req_obj["prompt"])
+            return 0
+
+        def _log_prompt_metrics(stage: str, turns_limit: Optional[int], msgs: Any, req_obj: Any) -> None:
+            if request.log_level != "debug":
+                return
+            message_count = len(msgs) if isinstance(msgs, list) else 0
+            msg_chars = _message_chars(msgs)
+            prompt_chars = _prompt_chars(req_obj)
+            module_logger(
+                f"{request.log_prefix} {stage}: turns_limit={turns_limit}, "
+                f"messages={message_count}, message_chars={msg_chars}, prompt_chars={prompt_chars}",
+                LOG_LEVEL_DEBUG,
+            )
+
+        _log_prompt_metrics("Prompt metrics (initial)", request.max_turns, messages, text_chat_request)
 
         is_state_data_mismatch_error, kv_state_debug_info, get_context_turns = self._maybe_restore_kv_state(
             request=request,
@@ -653,6 +699,7 @@ class TurnExecutionService:
                 messages=rebuilt_messages,
                 text_chat_builder_overrides=request.text_chat_builder_overrides,
             )
+            _log_prompt_metrics("Prompt metrics (retry rebuild)", new_turns_limit, rebuilt_messages, rebuilt_text_chat_request)
             return rebuilt_messages, rebuilt_text_chat_request
 
         generation_outcome = self._generation_execution_service.execute(
