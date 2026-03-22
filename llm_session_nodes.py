@@ -23,7 +23,7 @@ import folder_paths
 import hashlib
 import traceback
 try:
-    from .core.defaults import DEFAULT_SYSTEM_PROMPT, SIMPLE_DEFAULTS
+    from .core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -32,7 +32,7 @@ try:
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
     from .core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 except Exception:
-    from core.defaults import DEFAULT_SYSTEM_PROMPT, SIMPLE_DEFAULTS
+    from core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -2280,6 +2280,7 @@ def _input_types_dialogue_cycle_simple() -> dict:
 
 def _input_types_session_chat() -> dict:
     available_models, mmproj_options = _get_available_models_and_mmprojs()
+    session_chat_defaults = FULL_UI_DEFAULTS["session_chat"]
     return {
         "required": {
             "user_text": ("STRING", {
@@ -2295,38 +2296,38 @@ def _input_types_session_chat() -> dict:
             "mmproj": _ui_mmproj_input(mmproj_options, "Manual selection is recommended."),
             "system_prompt": ("STRING", {
                 "multiline": True,
-                "default": _DEFAULT_SYSTEM_PROMPT,
+                "default": str(session_chat_defaults["system_prompt"]),
                 "tooltip": "System prompt (conversation policy). Saved into the history file."
             }),
             "max_tokens": _ui_int_input(
-                512,
+                int(session_chat_defaults["max_tokens"]),
                 min_value=1,
                 max_value=8192,
                 tooltip="Maximum tokens to generate for this turn",
             ),
             "temperature": _ui_float_input(
-                0.7,
+                float(session_chat_defaults["temperature"]),
                 min_value=0.0,
                 max_value=2.0,
                 step=0.05,
                 tooltip="Sampling temperature",
             ),
             "top_p": _ui_float_input(
-                0.9,
+                float(session_chat_defaults["top_p"]),
                 min_value=0.05,
                 max_value=1.0,
                 step=0.01,
                 tooltip="Nucleus sampling (top_p). Lower = safer/more conservative.",
             ),
             "n_gpu_layers": _ui_int_input(
-                0,
+                int(session_chat_defaults["n_gpu_layers"]),
                 min_value=-1,
                 max_value=200,
                 step=1,
                 tooltip="Number of layers to offload to GPU. 0=CPU. -1=all.",
             ),
             "n_ctx": _ui_int_input(
-                4096,
+                int(session_chat_defaults["n_ctx"]),
                 min_value=512,
                 max_value=131072,
                 step=256,
@@ -2338,78 +2339,78 @@ def _input_types_session_chat() -> dict:
                 "tooltip": "Optional image input for this turn only (never saved to history)"
             }),
             "persistent_cache": (_PERSISTENT_CACHE_OPTIONS, {
-                "default": "off",
+                "default": str(session_chat_defaults["persistent_cache"]),
                 "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under a session-specific cache directory in output/llm_session_sessions/cache/."
             }),
             "runtime_cache": (_RUNTIME_CACHE_OPTIONS, {
-                "default": "LlamaTrieCache",
+                "default": str(session_chat_defaults["runtime_cache"]),
                 "tooltip": "Runtime cache backend. KV_cache uses save_state/load_state, RAM/Trie use llama.cpp cache in memory."
             }),
             "log_level": (_LOG_LEVEL_OPTIONS, {
-                "default": "timing",
+                "default": str(session_chat_defaults["log_level"]),
                 "tooltip": "Console logging verbosity for LLM Session Chat."
             }),
             "suppress_backend_logs": _ui_bool_input(
-                True,
+                bool(session_chat_defaults["suppress_backend_logs"]),
                 tooltip="Suppress backend stdout/stderr during generation.",
             ),
             "repeat_penalty": _ui_float_input(
-                1.12,
+                float(session_chat_defaults["repeat_penalty"]),
                 min_value=1.0,
                 max_value=2.0,
                 step=0.01,
                 tooltip="Repetition penalty to reduce looping outputs (especially on continue).",
             ),
             "repeat_last_n": _ui_int_input(
-                256,
+                int(session_chat_defaults["repeat_last_n"]),
                 min_value=0,
                 max_value=4096,
                 tooltip="Apply repeat_penalty over the last N tokens. 0 disables.",
             ),
             "rewrite_continue": _ui_bool_input(
-                True,
+                bool(session_chat_defaults["rewrite_continue"]),
                 tooltip="Rewrite inputs starting with 'continue' into an explicit continuation instruction to reduce repetition.",
             ),
             "max_turns": _ui_int_input(
-                12,
+                int(session_chat_defaults["max_turns"]),
                 min_value=0,
                 max_value=200,
                 tooltip="Keep only the last N turns in live context. 0 means no prior turns.",
             ),
             "summarize_old_history": _ui_bool_input(
-                True,
+                bool(session_chat_defaults["summarize_old_history"]),
                 tooltip="Summarize overflow turns into a rolling summary when turns exceed max_turns.",
             ),
             "summary_chunk_turns": _ui_int_input(
-                3,
+                int(session_chat_defaults["summary_chunk_turns"]),
                 min_value=1,
                 max_value=50,
                 tooltip="Summarize overflow in chunks of this many turns (reduces summary frequency).",
             ),
             "max_tokens_summary": _ui_int_input(
-                128,
+                int(session_chat_defaults["max_tokens_summary"]),
                 min_value=16,
                 max_value=2048,
                 tooltip="Max tokens for summary generation (kept small for speed).",
             ),
             "summary_max_chars": _ui_int_input(
-                1500,
+                int(session_chat_defaults["summary_max_chars"]),
                 min_value=200,
                 max_value=20000,
                 tooltip="If the rolling summary exceeds this size, it will be re-summarized to stay compact.",
             ),
             "dynamic_max_tokens": _ui_bool_input(
-                True,
+                bool(session_chat_defaults["dynamic_max_tokens"]),
                 tooltip="Dynamically shrink max_tokens (and/or turns) when prompt would exceed n_ctx.",
             ),
             "min_generation_tokens": _ui_int_input(
-                96,
+                int(session_chat_defaults["min_generation_tokens"]),
                 min_value=1,
                 max_value=4096,
                 tooltip="Minimum tokens to allow for generation when dynamic_max_tokens is enabled.",
             ),
             "safety_margin_tokens": _ui_int_input(
-                64,
+                int(session_chat_defaults["safety_margin_tokens"]),
                 min_value=0,
                 max_value=2048,
                 tooltip="Token margin reserved to reduce the chance of exceeding n_ctx.",
@@ -2419,11 +2420,11 @@ def _input_types_session_chat() -> dict:
                 "tooltip": "Optional directory for history files and session-scoped disk caches. Empty uses output/llm_session_sessions/"
             }),
             "reset_session": _ui_bool_input(
-                False,
+                bool(session_chat_defaults["reset_session"]),
                 tooltip="If true, overwrite existing session history file with a fresh session. Session disk cache is kept.",
             ),
             "stream_to_console": _ui_bool_input(
-                False,
+                bool(session_chat_defaults["stream_to_console"]),
                 tooltip="Stream tokens to console while generating.",
             ),
         }
@@ -2432,11 +2433,12 @@ def _input_types_session_chat() -> dict:
 
 def _input_types_dialogue_cycle() -> dict:
     available_models, mmproj_options = _get_available_models_and_mmprojs()
+    dialogue_cycle_defaults = FULL_UI_DEFAULTS["dialogue_cycle"]
     return {
         "required": {
             "initial_user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "Initial user message (sent to Model A only)"}),
             "session_id": ("STRING", {"default": "default", "tooltip": "Base session id. A uses {id}_A, B uses {id}_B, transcript uses {id}.txt"}),
-            "cycles": ("INT", {"default": 1, "min": 1, "max": 50, "step": 1, "tooltip": "Number of round trips. 1 = A then B."}),
+            "cycles": ("INT", {"default": int(dialogue_cycle_defaults["cycles"]), "min": 1, "max": 50, "step": 1, "tooltip": "Number of round trips. 1 = A then B."}),
 
             "modelA": _ui_model_input(available_models, "GGUF model for role A"),
             "mmprojA": _ui_mmproj_input(mmproj_options, "mmproj for modelA"),
@@ -2444,42 +2446,42 @@ def _input_types_dialogue_cycle() -> dict:
             "modelB": _ui_model_input(available_models, "GGUF model for role B"),
             "mmprojB": _ui_mmproj_input(mmproj_options, "mmproj for modelB"),
 
-            "system_prompt": ("STRING", {"multiline": True, "default": _DEFAULT_SYSTEM_PROMPT, "tooltip": "Shared system prompt for both roles"}),
-            "system_prompt_A": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),
-            "system_prompt_B": ("STRING", {"multiline": True, "default": "", "tooltip": "Role-specific system prompt for model B (overrides shared prompt if set)"}),
+            "system_prompt": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt"]), "tooltip": "Shared system prompt for both roles"}),
+            "system_prompt_A": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt_A"]), "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),
+            "system_prompt_B": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt_B"]), "tooltip": "Role-specific system prompt for model B (overrides shared prompt if set)"}),
 
-            "max_tokens": _ui_int_input(512, min_value=1, max_value=8192),
-            "temperature": _ui_float_input(0.7, min_value=0.0, max_value=2.0, step=0.05),
-            "top_p": _ui_float_input(0.9, min_value=0.05, max_value=1.0, step=0.01),
-            "n_gpu_layers": _ui_int_input(0, min_value=-1, max_value=200, step=1),
-            "n_ctx": _ui_int_input(4096, min_value=512, max_value=131072, step=256),
+            "max_tokens": _ui_int_input(int(dialogue_cycle_defaults["max_tokens"]), min_value=1, max_value=8192),
+            "temperature": _ui_float_input(float(dialogue_cycle_defaults["temperature"]), min_value=0.0, max_value=2.0, step=0.05),
+            "top_p": _ui_float_input(float(dialogue_cycle_defaults["top_p"]), min_value=0.05, max_value=1.0, step=0.01),
+            "n_gpu_layers": _ui_int_input(int(dialogue_cycle_defaults["n_gpu_layers"]), min_value=-1, max_value=200, step=1),
+            "n_ctx": _ui_int_input(int(dialogue_cycle_defaults["n_ctx"]), min_value=512, max_value=131072, step=256),
         },
         "optional": {
-            "max_turns": _ui_int_input(12, min_value=0, max_value=200),
-            "summarize_old_history": _ui_bool_input(True),
-            "summary_chunk_turns": _ui_int_input(3, min_value=1, max_value=50),
-            "max_tokens_summary": _ui_int_input(128, min_value=16, max_value=2048),
-            "summary_max_chars": _ui_int_input(1500, min_value=200, max_value=20000),
+            "max_turns": _ui_int_input(int(dialogue_cycle_defaults["max_turns"]), min_value=0, max_value=200),
+            "summarize_old_history": _ui_bool_input(bool(dialogue_cycle_defaults["summarize_old_history"])),
+            "summary_chunk_turns": _ui_int_input(int(dialogue_cycle_defaults["summary_chunk_turns"]), min_value=1, max_value=50),
+            "max_tokens_summary": _ui_int_input(int(dialogue_cycle_defaults["max_tokens_summary"]), min_value=16, max_value=2048),
+            "summary_max_chars": _ui_int_input(int(dialogue_cycle_defaults["summary_max_chars"]), min_value=200, max_value=20000),
 
-            "dynamic_max_tokens": _ui_bool_input(True),
-            "min_generation_tokens": _ui_int_input(96, min_value=1, max_value=4096),
-            "safety_margin_tokens": _ui_int_input(64, min_value=0, max_value=2048),
+            "dynamic_max_tokens": _ui_bool_input(bool(dialogue_cycle_defaults["dynamic_max_tokens"])),
+            "min_generation_tokens": _ui_int_input(int(dialogue_cycle_defaults["min_generation_tokens"]), min_value=1, max_value=4096),
+            "safety_margin_tokens": _ui_int_input(int(dialogue_cycle_defaults["safety_margin_tokens"]), min_value=0, max_value=2048),
 
-            "persistent_cache": (_PERSISTENT_CACHE_OPTIONS, {"default": "off", "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
-            "runtime_cache": (_RUNTIME_CACHE_OPTIONS, {"default": "LlamaTrieCache"}),
+            "persistent_cache": (_PERSISTENT_CACHE_OPTIONS, {"default": str(dialogue_cycle_defaults["persistent_cache"]), "tooltip": "Persistent cache backend. LlamaDiskCache stores cache data under separate cache directories for each session id."}),
+            "runtime_cache": (_RUNTIME_CACHE_OPTIONS, {"default": str(dialogue_cycle_defaults["runtime_cache"])}),
 
-            "repeat_penalty": _ui_float_input(1.12, min_value=1.0, max_value=2.0, step=0.01),
-            "repeat_last_n": _ui_int_input(256, min_value=0, max_value=4096),
-            "rewrite_continue": _ui_bool_input(True),
-            "log_level": (_LOG_LEVEL_OPTIONS, {"default": "timing"}),
-            "suppress_backend_logs": _ui_bool_input(True),
+            "repeat_penalty": _ui_float_input(float(dialogue_cycle_defaults["repeat_penalty"]), min_value=1.0, max_value=2.0, step=0.01),
+            "repeat_last_n": _ui_int_input(int(dialogue_cycle_defaults["repeat_last_n"]), min_value=0, max_value=4096),
+            "rewrite_continue": _ui_bool_input(bool(dialogue_cycle_defaults["rewrite_continue"])),
+            "log_level": (_LOG_LEVEL_OPTIONS, {"default": str(dialogue_cycle_defaults["log_level"])}),
+            "suppress_backend_logs": _ui_bool_input(bool(dialogue_cycle_defaults["suppress_backend_logs"])),
 
             "history_dir": ("STRING", {"default": "", "tooltip": "Optional history directory. Empty => output/llm_session_sessions/. Disk caches are also stored there, separated by session id."}),
             "reset_session": _ui_bool_input(
-                False,
+                bool(dialogue_cycle_defaults["reset_session"]),
                 tooltip="If true, resets both {id}_A and {id}_B histories (transcript file is not deleted). Session disk caches are kept.",
             ),
-            "stream_to_console": _ui_bool_input(False, tooltip="Stream tokens to console while generating."),
+            "stream_to_console": _ui_bool_input(bool(dialogue_cycle_defaults["stream_to_console"]), tooltip="Stream tokens to console while generating."),
         }
     }
 
