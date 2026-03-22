@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any, Dict
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+LOG_LEVEL_OPTIONS = ("minimal", "timing", "debug")
+PERSISTENT_CACHE_OPTIONS = ("LlamaDiskCache", "off")
+RUNTIME_CACHE_OPTIONS = ("KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off")
 
 SIMPLE_DEFAULTS: Dict[str, Any] = {
     "schema_version": 1,

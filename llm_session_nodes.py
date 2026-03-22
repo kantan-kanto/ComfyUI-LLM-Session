@@ -23,7 +23,15 @@ import folder_paths
 import hashlib
 import traceback
 try:
-    from .core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS, SUMMARY_HELPER_DEFAULTS
+    from .core.defaults import (
+        DEFAULT_SYSTEM_PROMPT,
+        FULL_UI_DEFAULTS,
+        LOG_LEVEL_OPTIONS,
+        PERSISTENT_CACHE_OPTIONS,
+        RUNTIME_CACHE_OPTIONS,
+        SIMPLE_DEFAULTS,
+        SUMMARY_HELPER_DEFAULTS,
+    )
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -32,7 +40,15 @@ try:
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
     from .core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 except Exception:
-    from core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS, SUMMARY_HELPER_DEFAULTS
+    from core.defaults import (
+        DEFAULT_SYSTEM_PROMPT,
+        FULL_UI_DEFAULTS,
+        LOG_LEVEL_OPTIONS,
+        PERSISTENT_CACHE_OPTIONS,
+        RUNTIME_CACHE_OPTIONS,
+        SIMPLE_DEFAULTS,
+        SUMMARY_HELPER_DEFAULTS,
+    )
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -604,9 +620,9 @@ _LLM_SESSION_CATEGORY = "LLM/Session"
 _NO_GGUF_MODELS_PLACEHOLDER = f"(No GGUF models found in models/{_LLM_MODELS_DIR_NAME}/)"
 _MMPROJ_AUTO = "(Auto-detect)"
 _MMPROJ_NOT_REQUIRED = "(Not required)"
-_LOG_LEVEL_OPTIONS = ["minimal", "timing", "debug"]
-_PERSISTENT_CACHE_OPTIONS = ["LlamaDiskCache", "off"]
-_RUNTIME_CACHE_OPTIONS = ["KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"]
+_LOG_LEVEL_OPTIONS = list(LOG_LEVEL_OPTIONS)
+_PERSISTENT_CACHE_OPTIONS = list(PERSISTENT_CACHE_OPTIONS)
+_RUNTIME_CACHE_OPTIONS = list(RUNTIME_CACHE_OPTIONS)
 
 def _list_gguf_recursive(models_dir: str) -> tuple[list[str], list[str]]:
     """

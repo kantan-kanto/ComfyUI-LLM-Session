@@ -4,6 +4,8 @@ import importlib
 import sys
 import types
 
+from core.defaults import LOG_LEVEL_OPTIONS, PERSISTENT_CACHE_OPTIONS, RUNTIME_CACHE_OPTIONS
+
 
 def _load_nodes_module(monkeypatch):
     fake_folder_paths = types.SimpleNamespace(
@@ -37,6 +39,9 @@ def test_session_chat_input_types_default_values(monkeypatch):
     assert optional["runtime_cache"][1]["default"] == "LlamaTrieCache"
     assert optional["log_level"][1]["default"] == "timing"
     assert optional["stream_to_console"][1]["default"] is False
+    assert optional["persistent_cache"][0] == list(PERSISTENT_CACHE_OPTIONS)
+    assert optional["runtime_cache"][0] == list(RUNTIME_CACHE_OPTIONS)
+    assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
 
 
 def test_dialogue_cycle_input_types_default_values(monkeypatch):
@@ -54,3 +59,6 @@ def test_dialogue_cycle_input_types_default_values(monkeypatch):
     assert optional["runtime_cache"][1]["default"] == "LlamaTrieCache"
     assert optional["log_level"][1]["default"] == "timing"
     assert optional["stream_to_console"][1]["default"] is False
+    assert optional["persistent_cache"][0] == list(PERSISTENT_CACHE_OPTIONS)
+    assert optional["runtime_cache"][0] == list(RUNTIME_CACHE_OPTIONS)
+    assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
