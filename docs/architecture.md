@@ -39,9 +39,18 @@ llm_session_nodes.py
 | generation_runner |      |    ExecutionService        |
 | turn_types        |      | turn_execution_service     |
 | runtime_container |      |  - TurnExecutionService    |
-|                   |      |  - TurnExecutionService    |
 |                   |      |  - SessionChatNode         |
 |                   |      |    ExecutionService        |
+|                   |      | generation_execution_      |
+|                   |      | service                    |
+|                   |      |  - GenerationExecution     |
+|                   |      |    Service                 |
+|                   |      | kv_state_service           |
+|                   |      |  - KvStateService          |
+|                   |      | history_persistence_       |
+|                   |      | service                    |
+|                   |      |  - HistoryPersistence      |
+|                   |      |    Service                 |
 +-------------------+      +----------------------------+
   |
   | side effects via wrapper calls
@@ -69,5 +78,8 @@ External:
   - Default runtime container is lazily initialized via resolver helpers.
   - Chat handler classes are tracked in an internal registry map (not `globals()` mutation).
 - `services/chat_turn_service.py`: dialogue-cycle orchestration and node-execution orchestration (`DialogueCycleNodeExecutionService`).
-- `services/turn_execution_service.py`: shared single-turn execution and node-execution orchestration (`SessionChatNodeExecutionService`).
+- `services/turn_execution_service.py`: thin orchestration for shared single-turn execution and node-entry invocation (`SessionChatNodeExecutionService`).
+- `services/generation_execution_service.py`: adaptive generation orchestration and assistant output normalization.
+- `services/kv_state_service.py`: KV cache restore/save orchestration and mismatch recovery handling.
+- `services/history_persistence_service.py`: turn append, optional summarization, and history JSON persistence.
 - `infra/history_store.py`: history/transcript path and file I/O helpers.
