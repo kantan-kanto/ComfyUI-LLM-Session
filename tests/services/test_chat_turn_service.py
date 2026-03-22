@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
+from services.chat_turn_service import (
+    ChatTurnService,
+    DialogueCycleDependencies,
+    DialogueCycleNodeExecutionDependencies,
+    DialogueCycleNodeExecutionRequest,
+    DialogueCycleNodeExecutionService,
+    DialogueCycleRequest,
+)
 
 
 class DummyManager:
@@ -188,3 +195,180 @@ def test_run_dialogue_cycle_with_dependencies_uses_request_and_deps() -> None:
     assert "B: sid_B:sid_A:hello" in transcript
     assert unload_calls.count("A") == 2
     assert unload_calls.count("B") == 2
+
+
+
+def test_dialogue_cycle_node_execution_service_builds_and_runs() -> None:
+    service = DialogueCycleNodeExecutionService()
+    calls: dict[str, object] = {}
+
+    request = DialogueCycleNodeExecutionRequest(
+        initial_user_text="hello",
+        session_id="sid",
+        cycles=1,
+        modelA="ma",
+        mmprojA="(Auto detect)",
+        modelB="mb",
+        mmprojB="(Auto detect)",
+        system_prompt="sys",
+        system_prompt_A="",
+        system_prompt_B="",
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        n_gpu_layers=0,
+        n_ctx=1024,
+        max_turns=12,
+        summarize_old_history=True,
+        summary_chunk_turns=3,
+        max_tokens_summary=128,
+        summary_max_chars=1500,
+        dynamic_max_tokens=True,
+        min_generation_tokens=96,
+        safety_margin_tokens=64,
+        persistent_cache="off",
+        runtime_cache="off",
+        repeat_penalty=1.12,
+        repeat_last_n=256,
+        rewrite_continue=True,
+        log_level="timing",
+        suppress_backend_logs=True,
+        history_dir="",
+        reset_session=False,
+        stream_to_console=False,
+        chat_handler_overrides=None,
+        text_chat_builder_overrides=None,
+    )
+
+    def _build_common_turn_kwargs(**kwargs):
+        calls["common"] = kwargs
+        return {"k": "v"}
+
+    def _build_dialogue_cycle_request(**kwargs):
+        calls["request_kwargs"] = kwargs
+        return DialogueCycleRequest(
+            initial_user_text="hello",
+            session_id="sid",
+            cycles=1,
+            system_prompt="sys",
+            system_prompt_A="",
+            system_prompt_B="",
+            runtime_cache="off",
+            stream_to_console=False,
+            reset_session=False,
+            history_dir="",
+            turn_kwargs_A={"model": "ma"},
+            turn_kwargs_B={"model": "mb"},
+        )
+
+    def _build_dialogue_cycle_dependencies():
+        calls["deps_built"] = True
+        return DialogueCycleDependencies(
+            now_iso=lambda: "now",
+            transcript_path=lambda _sid, _hist: "t.txt",
+            append_transcript_lines=lambda _p, _l: None,
+            clear_kv_state_for_session=lambda _sid: None,
+            model_manager_factory=lambda: object(),
+            unload_model=lambda _m: None,
+            chat_one_turn=lambda **_kwargs: "ok",
+        )
+
+    def _run_dialogue_cycle_with_dependencies(*, request, dependencies):
+        calls["runner"] = (request, dependencies)
+        return "transcript"
+
+    deps = DialogueCycleNodeExecutionDependencies(
+        build_common_turn_kwargs=_build_common_turn_kwargs,
+        build_dialogue_cycle_request=_build_dialogue_cycle_request,
+        build_dialogue_cycle_dependencies=_build_dialogue_cycle_dependencies,
+        run_dialogue_cycle_with_dependencies=_run_dialogue_cycle_with_dependencies,
+    )
+
+    transcript = service.run(request=request, dependencies=deps)
+
+    assert transcript == "transcript"
+    assert "common" in calls
+    assert "request_kwargs" in calls
+    assert calls.get("deps_built") is True
+    assert "runner" in calls
+
+
+def test_dialogue_cycle_node_execution_service_passes_model_and_mmproj() -> None:
+    service = DialogueCycleNodeExecutionService()
+    observed: dict[str, object] = {}
+
+    request = DialogueCycleNodeExecutionRequest(
+        initial_user_text="hello",
+        session_id="sid",
+        cycles=1,
+        modelA="ma",
+        mmprojA="a.mmproj",
+        modelB="mb",
+        mmprojB="b.mmproj",
+        system_prompt="sys",
+        system_prompt_A="",
+        system_prompt_B="",
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        n_gpu_layers=0,
+        n_ctx=1024,
+        max_turns=12,
+        summarize_old_history=True,
+        summary_chunk_turns=3,
+        max_tokens_summary=128,
+        summary_max_chars=1500,
+        dynamic_max_tokens=True,
+        min_generation_tokens=96,
+        safety_margin_tokens=64,
+        persistent_cache="off",
+        runtime_cache="off",
+        repeat_penalty=1.12,
+        repeat_last_n=256,
+        rewrite_continue=True,
+        log_level="timing",
+        suppress_backend_logs=True,
+        history_dir="",
+        reset_session=False,
+        stream_to_console=False,
+        chat_handler_overrides=None,
+        text_chat_builder_overrides=None,
+    )
+
+    deps = DialogueCycleNodeExecutionDependencies(
+        build_common_turn_kwargs=lambda **_kwargs: {},
+        build_dialogue_cycle_request=lambda **kwargs: (
+            observed.update(kwargs)
+            or DialogueCycleRequest(
+                initial_user_text="hello",
+                session_id="sid",
+                cycles=1,
+                system_prompt="sys",
+                system_prompt_A="",
+                system_prompt_B="",
+                runtime_cache="off",
+                stream_to_console=False,
+                reset_session=False,
+                history_dir="",
+                turn_kwargs_A={},
+                turn_kwargs_B={},
+            )
+        ),
+        build_dialogue_cycle_dependencies=lambda: DialogueCycleDependencies(
+            now_iso=lambda: "now",
+            transcript_path=lambda _sid, _hist: "t.txt",
+            append_transcript_lines=lambda _p, _l: None,
+            clear_kv_state_for_session=lambda _sid: None,
+            model_manager_factory=lambda: object(),
+            unload_model=lambda _m: None,
+            chat_one_turn=lambda **_kwargs: "ok",
+        ),
+        run_dialogue_cycle_with_dependencies=lambda **_kwargs: "ok",
+    )
+
+    service.run(request=request, dependencies=deps)
+
+    assert observed["model_a"] == "ma"
+    assert observed["mmproj_a"] == "a.mmproj"
+    assert observed["model_b"] == "mb"
+    assert observed["mmproj_b"] == "b.mmproj"

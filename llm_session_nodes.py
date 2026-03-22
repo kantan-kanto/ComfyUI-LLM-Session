@@ -27,14 +27,14 @@ try:
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from .infra import history_store
-    from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
+    from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from infra import history_store
-    from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
+    from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
     from services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 
 
@@ -2572,6 +2572,16 @@ def _build_dialogue_cycle_dependencies() -> DialogueCycleDependencies:
     )
 
 
+def _build_dialogue_cycle_node_execution_dependencies() -> DialogueCycleNodeExecutionDependencies:
+    service = ChatTurnService()
+    return DialogueCycleNodeExecutionDependencies(
+        build_common_turn_kwargs=_build_dialogue_cycle_common_turn_kwargs,
+        build_dialogue_cycle_request=_build_dialogue_cycle_request,
+        build_dialogue_cycle_dependencies=_build_dialogue_cycle_dependencies,
+        run_dialogue_cycle_with_dependencies=service.run_dialogue_cycle_with_dependencies,
+    )
+
+
 def _build_dialogue_cycle_request(
     *,
     initial_user_text: str,
@@ -3225,8 +3235,17 @@ def _run_dialogue_cycle_from_inputs(
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
 ) -> str:
-    service = ChatTurnService()
-    common_turn_kwargs = _build_dialogue_cycle_common_turn_kwargs(
+    request = DialogueCycleNodeExecutionRequest(
+        initial_user_text=initial_user_text,
+        session_id=session_id,
+        cycles=cycles,
+        modelA=modelA,
+        mmprojA=mmprojA,
+        modelB=modelB,
+        mmprojB=mmprojB,
+        system_prompt=system_prompt,
+        system_prompt_A=system_prompt_A,
+        system_prompt_B=system_prompt_B,
         max_tokens=max_tokens,
         temperature=temperature,
         top_p=top_p,
@@ -3241,34 +3260,21 @@ def _run_dialogue_cycle_from_inputs(
         min_generation_tokens=min_generation_tokens,
         safety_margin_tokens=safety_margin_tokens,
         persistent_cache=persistent_cache,
+        runtime_cache=runtime_cache,
         repeat_penalty=repeat_penalty,
         repeat_last_n=repeat_last_n,
         rewrite_continue=rewrite_continue,
-        runtime_cache=runtime_cache,
         log_level=log_level,
         suppress_backend_logs=suppress_backend_logs,
-        chat_handler_overrides=chat_handler_overrides,
-        text_chat_builder_overrides=text_chat_builder_overrides,
-    )
-    request = _build_dialogue_cycle_request(
-        initial_user_text=initial_user_text,
-        session_id=session_id,
-        cycles=cycles,
-        system_prompt=system_prompt,
-        system_prompt_A=system_prompt_A,
-        system_prompt_B=system_prompt_B,
-        runtime_cache=runtime_cache,
         stream_to_console=stream_to_console,
         reset_session=reset_session,
         history_dir=history_dir,
-        common_turn_kwargs=common_turn_kwargs,
-        model_a=modelA,
-        mmproj_a=mmprojA,
-        model_b=modelB,
-        mmproj_b=mmprojB,
+        chat_handler_overrides=chat_handler_overrides,
+        text_chat_builder_overrides=text_chat_builder_overrides,
     )
-    dependencies = _build_dialogue_cycle_dependencies()
-    return service.run_dialogue_cycle_with_dependencies(
+    dependencies = _build_dialogue_cycle_node_execution_dependencies()
+    service = DialogueCycleNodeExecutionService()
+    return service.run(
         request=request,
         dependencies=dependencies,
     )
@@ -3542,3 +3548,4 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+

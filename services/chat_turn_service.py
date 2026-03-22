@@ -32,6 +32,108 @@ class DialogueCycleDependencies:
     chat_one_turn: Callable[..., str]
 
 
+@dataclass(frozen=True)
+class DialogueCycleNodeExecutionRequest:
+    initial_user_text: str
+    session_id: str
+    cycles: int
+    modelA: str
+    mmprojA: str
+    modelB: str
+    mmprojB: str
+    system_prompt: str
+    system_prompt_A: str
+    system_prompt_B: str
+    max_tokens: int
+    temperature: float
+    top_p: float
+    n_gpu_layers: int
+    n_ctx: int
+    max_turns: int
+    summarize_old_history: bool
+    summary_chunk_turns: int
+    max_tokens_summary: int
+    summary_max_chars: int
+    dynamic_max_tokens: bool
+    min_generation_tokens: int
+    safety_margin_tokens: int
+    persistent_cache: str
+    runtime_cache: str
+    repeat_penalty: float
+    repeat_last_n: int
+    rewrite_continue: bool
+    log_level: str
+    suppress_backend_logs: bool
+    history_dir: str
+    reset_session: bool
+    stream_to_console: bool
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]]
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class DialogueCycleNodeExecutionDependencies:
+    build_common_turn_kwargs: Callable[..., Dict[str, Any]]
+    build_dialogue_cycle_request: Callable[..., DialogueCycleRequest]
+    build_dialogue_cycle_dependencies: Callable[[], DialogueCycleDependencies]
+    run_dialogue_cycle_with_dependencies: Callable[..., str]
+
+
+class DialogueCycleNodeExecutionService:
+    def run(
+        self,
+        *,
+        request: DialogueCycleNodeExecutionRequest,
+        dependencies: DialogueCycleNodeExecutionDependencies,
+    ) -> str:
+        common_turn_kwargs = dependencies.build_common_turn_kwargs(
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            n_gpu_layers=request.n_gpu_layers,
+            n_ctx=request.n_ctx,
+            max_turns=request.max_turns,
+            summarize_old_history=request.summarize_old_history,
+            summary_chunk_turns=request.summary_chunk_turns,
+            max_tokens_summary=request.max_tokens_summary,
+            summary_max_chars=request.summary_max_chars,
+            dynamic_max_tokens=request.dynamic_max_tokens,
+            min_generation_tokens=request.min_generation_tokens,
+            safety_margin_tokens=request.safety_margin_tokens,
+            persistent_cache=request.persistent_cache,
+            repeat_penalty=request.repeat_penalty,
+            repeat_last_n=request.repeat_last_n,
+            rewrite_continue=request.rewrite_continue,
+            runtime_cache=request.runtime_cache,
+            log_level=request.log_level,
+            suppress_backend_logs=request.suppress_backend_logs,
+            chat_handler_overrides=request.chat_handler_overrides,
+            text_chat_builder_overrides=request.text_chat_builder_overrides,
+        )
+        dialogue_request = dependencies.build_dialogue_cycle_request(
+            initial_user_text=request.initial_user_text,
+            session_id=request.session_id,
+            cycles=request.cycles,
+            system_prompt=request.system_prompt,
+            system_prompt_A=request.system_prompt_A,
+            system_prompt_B=request.system_prompt_B,
+            runtime_cache=request.runtime_cache,
+            stream_to_console=request.stream_to_console,
+            reset_session=request.reset_session,
+            history_dir=request.history_dir,
+            common_turn_kwargs=common_turn_kwargs,
+            model_a=request.modelA,
+            mmproj_a=request.mmprojA,
+            model_b=request.modelB,
+            mmproj_b=request.mmprojB,
+        )
+        dialogue_dependencies = dependencies.build_dialogue_cycle_dependencies()
+        return dependencies.run_dialogue_cycle_with_dependencies(
+            request=dialogue_request,
+            dependencies=dialogue_dependencies,
+        )
+
+
 class ChatTurnService:
     def run_dialogue_cycle_with_dependencies(
         self,
