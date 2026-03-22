@@ -71,6 +71,8 @@ except Exception:
 
 _DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
 _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = dict(SIMPLE_DEFAULTS)
+_FULL_UI_SESSION_CHAT_DEFAULTS = FULL_UI_DEFAULTS["session_chat"]
+_FULL_UI_DIALOGUE_CYCLE_DEFAULTS = FULL_UI_DEFAULTS["dialogue_cycle"]
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 
@@ -1844,8 +1846,8 @@ class GGUFModelManager:
         mmproj_path: str,
         n_ctx: int,
         n_gpu_layers: int = 0,
-        persistent_cache: str = "off",
-        runtime_cache: str = "LlamaTrieCache",
+        persistent_cache: str = _FULL_UI_SESSION_CHAT_DEFAULTS["persistent_cache"],
+        runtime_cache: str = _FULL_UI_SESSION_CHAT_DEFAULTS["runtime_cache"],
     ) -> None:
         """
         Configure cache backends.
@@ -2280,7 +2282,7 @@ def _input_types_dialogue_cycle_simple() -> dict:
 
 def _input_types_session_chat() -> dict:
     available_models, mmproj_options = _get_available_models_and_mmprojs()
-    session_chat_defaults = FULL_UI_DEFAULTS["session_chat"]
+    session_chat_defaults = _FULL_UI_SESSION_CHAT_DEFAULTS
     return {
         "required": {
             "user_text": ("STRING", {
@@ -2433,7 +2435,7 @@ def _input_types_session_chat() -> dict:
 
 def _input_types_dialogue_cycle() -> dict:
     available_models, mmproj_options = _get_available_models_and_mmprojs()
-    dialogue_cycle_defaults = FULL_UI_DEFAULTS["dialogue_cycle"]
+    dialogue_cycle_defaults = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS
     return {
         "required": {
             "initial_user_text": ("STRING", {"multiline": True, "default": "", "tooltip": "Initial user message (sent to Model A only)"}),
@@ -3105,24 +3107,24 @@ class LLMSessionChatNode:
              n_gpu_layers: int,
              n_ctx: int,
              image=None,
-             max_turns: int = 12,
-             summarize_old_history: bool = True,
-             summary_chunk_turns: int = 3,
-             max_tokens_summary: int = 128,
-             summary_max_chars: int = 1500,
-             dynamic_max_tokens: bool = True,
-             min_generation_tokens: int = 96,
-             safety_margin_tokens: int = 64,
-             persistent_cache: str = "off",
-             repeat_penalty: float = 1.12,
-             repeat_last_n: int = 256,
-             rewrite_continue: bool = True,
-             runtime_cache: str = "LlamaTrieCache",
-             log_level: str = "timing",
-             suppress_backend_logs: bool = True,
+             max_turns: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_turns"],
+             summarize_old_history: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["summarize_old_history"],
+             summary_chunk_turns: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_chunk_turns"],
+             max_tokens_summary: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_tokens_summary"],
+             summary_max_chars: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"],
+             dynamic_max_tokens: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["dynamic_max_tokens"],
+             min_generation_tokens: int = _FULL_UI_SESSION_CHAT_DEFAULTS["min_generation_tokens"],
+             safety_margin_tokens: int = _FULL_UI_SESSION_CHAT_DEFAULTS["safety_margin_tokens"],
+             persistent_cache: str = _FULL_UI_SESSION_CHAT_DEFAULTS["persistent_cache"],
+             repeat_penalty: float = _FULL_UI_SESSION_CHAT_DEFAULTS["repeat_penalty"],
+             repeat_last_n: int = _FULL_UI_SESSION_CHAT_DEFAULTS["repeat_last_n"],
+             rewrite_continue: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["rewrite_continue"],
+             runtime_cache: str = _FULL_UI_SESSION_CHAT_DEFAULTS["runtime_cache"],
+             log_level: str = _FULL_UI_SESSION_CHAT_DEFAULTS["log_level"],
+             suppress_backend_logs: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["suppress_backend_logs"],
              history_dir: str = "",
-             reset_session: bool = False,
-             stream_to_console: bool = False,
+             reset_session: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["reset_session"],
+             stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
         return _run_session_chat_from_inputs(
@@ -3176,24 +3178,24 @@ def _chat_one_turn(
     top_p: float,
     n_gpu_layers: int,
     n_ctx: int,
-    max_turns: int = 12,
-    summarize_old_history: bool = True,
-    summary_chunk_turns: int = 3,
-    max_tokens_summary: int = 128,
-    summary_max_chars: int = 1500,
-    dynamic_max_tokens: bool = True,
-    min_generation_tokens: int = 96,
-    safety_margin_tokens: int = 64,
-    persistent_cache: str = "off",
-    repeat_penalty: float = 1.12,
-    repeat_last_n: int = 256,
-    rewrite_continue: bool = True,
-    runtime_cache: str = "LlamaTrieCache",
-    log_level: str = "timing",
-    suppress_backend_logs: bool = True,
+    max_turns: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["max_turns"],
+    summarize_old_history: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summarize_old_history"],
+    summary_chunk_turns: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summary_chunk_turns"],
+    max_tokens_summary: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["max_tokens_summary"],
+    summary_max_chars: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summary_max_chars"],
+    dynamic_max_tokens: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["dynamic_max_tokens"],
+    min_generation_tokens: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["min_generation_tokens"],
+    safety_margin_tokens: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["safety_margin_tokens"],
+    persistent_cache: str = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["persistent_cache"],
+    repeat_penalty: float = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["repeat_penalty"],
+    repeat_last_n: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["repeat_last_n"],
+    rewrite_continue: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["rewrite_continue"],
+    runtime_cache: str = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["runtime_cache"],
+    log_level: str = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["log_level"],
+    suppress_backend_logs: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["suppress_backend_logs"],
     history_dir: str = "",
-    reset_session: bool = False,
-    stream_to_console: bool = False,
+    reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
+    stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
     model_manager: Optional[GGUFModelManager] = None,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -3445,24 +3447,24 @@ class LLMDialogueCycleNode:
         top_p: float,
         n_gpu_layers: int,
         n_ctx: int,
-        max_turns: int = 12,
-        summarize_old_history: bool = True,
-        summary_chunk_turns: int = 3,
-        max_tokens_summary: int = 128,
-        summary_max_chars: int = 1500,
-        dynamic_max_tokens: bool = True,
-        min_generation_tokens: int = 96,
-        safety_margin_tokens: int = 64,
-        persistent_cache: str = "off",
-        runtime_cache: str = "LlamaTrieCache",
-        repeat_penalty: float = 1.12,
-        repeat_last_n: int = 256,
-        rewrite_continue: bool = True,
-        log_level: str = "timing",
-        suppress_backend_logs: bool = True,
+        max_turns: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["max_turns"],
+        summarize_old_history: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summarize_old_history"],
+        summary_chunk_turns: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summary_chunk_turns"],
+        max_tokens_summary: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["max_tokens_summary"],
+        summary_max_chars: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summary_max_chars"],
+        dynamic_max_tokens: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["dynamic_max_tokens"],
+        min_generation_tokens: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["min_generation_tokens"],
+        safety_margin_tokens: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["safety_margin_tokens"],
+        persistent_cache: str = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["persistent_cache"],
+        runtime_cache: str = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["runtime_cache"],
+        repeat_penalty: float = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["repeat_penalty"],
+        repeat_last_n: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["repeat_last_n"],
+        rewrite_continue: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["rewrite_continue"],
+        log_level: str = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["log_level"],
+        suppress_backend_logs: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["suppress_backend_logs"],
         history_dir: str = "",
-        reset_session: bool = False,
-        stream_to_console: bool = False,
+        reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
+        stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
