@@ -1,10 +1,8 @@
-# Service that orchestrates A<->B dialogue cycles and transcript updates.
+# Service for dialogue-cycle runtime orchestration and node-execution orchestration.
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
-
-
 @dataclass(frozen=True)
 class DialogueCycleRequest:
     initial_user_text: str
@@ -263,3 +261,4 @@ class ChatTurnService:
                 pass
 
         return "\n".join(transcript_lines)
+

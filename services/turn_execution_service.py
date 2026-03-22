@@ -1,4 +1,4 @@
-# Service for shared single-turn execution flow (history, generation, KV state, and persistence).
+# Service for shared single-turn runtime execution and node-execution orchestration.
 from __future__ import annotations
 
 import os
@@ -868,4 +868,3 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
-
