@@ -72,7 +72,7 @@ except Exception:
 # - History I/O and session storage
 # - Message building + generation wrappers
 # - Summarization helpers
-# - Cache + model manager
+# - Runtime container + cache + model manager
 # - UI definition helpers
 # - ComfyUI node implementations
 # - Simple wrappers
@@ -3729,3 +3729,4 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+

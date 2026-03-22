@@ -112,7 +112,7 @@
 | # | Lines | Code Content | Category | Priority | Details | Recommended Action |
 |---|-------|--------------|----------|----------|---------|-------------------|
 | 41 | 2079-2080 | `_cache_debug_label()` failure | A-2 | P3 | Debug info retrieval failure | Keep as-is |
-| 42 | 2086-2087 | `_MEM_KV_STATE.pop()` failure | A-2 | P2 | State clear failure | Add debug log |
+| 42 | 2099-2101 | `container.mem_kv_state.pop()` failure | A-2 | P2 | Runtime-container state clear failure | Add debug log |
 | 43 | 2094-2095 | `type(state).__name__` failure | A-2 | P3 | Type name retrieval failure | Keep as-is |
 | 44 | 2100-2101 | `len(state)` failure | A-2 | P3 | Size retrieval failure | Keep as-is |
 | 45 | 2105-2106 | `nbytes` retrieval failure | A-2 | P3 | Size attribute retrieval failure | Keep as-is |
@@ -320,3 +320,4 @@ Added `TestErrorHandlingP0P1` class in `tests/services/test_turn_execution_servi
 6. ✅ Document P3 acceptable silent errors - Completed
 7. ✅ Add tests for P0/P1 improvements - Completed
 8. Consider P2 improvements (24 occurrences) as time permits
+
