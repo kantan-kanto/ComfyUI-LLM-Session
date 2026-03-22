@@ -109,7 +109,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load Simple defaults from JSON, falling back to built-in safe defaults."""
     cfg_path = _normalize_config_path(config_path) or _simple_config_path()
     defaults = dict(_SIMPLE_DEFAULTS_BUILTIN)
-    log_level_hint = defaults.get("log_level", "timing")
+    log_level_hint = defaults.get("log_level", _SIMPLE_DEFAULTS_BUILTIN["log_level"])
 
     if not cfg_path:
         _simple_config_log("No config path provided; using built-in defaults.", log_level_hint)
@@ -181,41 +181,41 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
         return d
 
     # Numeric clamps (match UI ranges loosely)
-    defaults["max_tokens"] = max(1, _as_int(defaults.get("max_tokens"),  512))
-    defaults["n_ctx"] = max(512, _as_int(defaults.get("n_ctx"), 4096))
-    defaults["n_gpu_layers"] = _as_int(defaults.get("n_gpu_layers"), 0)
-    defaults["max_turns"] = max(0, _as_int(defaults.get("max_turns"), 6))
-    defaults["summary_chunk_turns"] = max(1, _as_int(defaults.get("summary_chunk_turns"), 6))
-    defaults["max_tokens_summary"] = max(16, _as_int(defaults.get("max_tokens_summary"), 128))
-    defaults["summary_max_chars"] = max(200, _as_int(defaults.get("summary_max_chars"), 1500))
-    defaults["min_generation_tokens"] = max(1, _as_int(defaults.get("min_generation_tokens"), 96))
-    defaults["safety_margin_tokens"] = max(0, _as_int(defaults.get("safety_margin_tokens"), 64))
-    defaults["repeat_last_n"] = max(0, _as_int(defaults.get("repeat_last_n"), 256))
+    defaults["max_tokens"] = max(1, _as_int(defaults.get("max_tokens"), _SIMPLE_DEFAULTS_BUILTIN["max_tokens"]))
+    defaults["n_ctx"] = max(512, _as_int(defaults.get("n_ctx"), _SIMPLE_DEFAULTS_BUILTIN["n_ctx"]))
+    defaults["n_gpu_layers"] = _as_int(defaults.get("n_gpu_layers"), _SIMPLE_DEFAULTS_BUILTIN["n_gpu_layers"])
+    defaults["max_turns"] = max(0, _as_int(defaults.get("max_turns"), _SIMPLE_DEFAULTS_BUILTIN["max_turns"]))
+    defaults["summary_chunk_turns"] = max(1, _as_int(defaults.get("summary_chunk_turns"), _SIMPLE_DEFAULTS_BUILTIN["summary_chunk_turns"]))
+    defaults["max_tokens_summary"] = max(16, _as_int(defaults.get("max_tokens_summary"), _SIMPLE_DEFAULTS_BUILTIN["max_tokens_summary"]))
+    defaults["summary_max_chars"] = max(200, _as_int(defaults.get("summary_max_chars"), _SIMPLE_DEFAULTS_BUILTIN["summary_max_chars"]))
+    defaults["min_generation_tokens"] = max(1, _as_int(defaults.get("min_generation_tokens"), _SIMPLE_DEFAULTS_BUILTIN["min_generation_tokens"]))
+    defaults["safety_margin_tokens"] = max(0, _as_int(defaults.get("safety_margin_tokens"), _SIMPLE_DEFAULTS_BUILTIN["safety_margin_tokens"]))
+    defaults["repeat_last_n"] = max(0, _as_int(defaults.get("repeat_last_n"), _SIMPLE_DEFAULTS_BUILTIN["repeat_last_n"]))
 
-    defaults["temperature"] = min(2.0, max(0.0, _as_float(defaults.get("temperature"), 0.7)))
-    defaults["top_p"] = min(1.0, max(0.05, _as_float(defaults.get("top_p"), 0.9)))
-    defaults["repeat_penalty"] = min(2.0, max(1.0, _as_float(defaults.get("repeat_penalty"), 1.12)))
+    defaults["temperature"] = min(2.0, max(0.0, _as_float(defaults.get("temperature"), _SIMPLE_DEFAULTS_BUILTIN["temperature"])))
+    defaults["top_p"] = min(1.0, max(0.05, _as_float(defaults.get("top_p"), _SIMPLE_DEFAULTS_BUILTIN["top_p"])))
+    defaults["repeat_penalty"] = min(2.0, max(1.0, _as_float(defaults.get("repeat_penalty"), _SIMPLE_DEFAULTS_BUILTIN["repeat_penalty"])))
 
     # Enums / strings
-    defaults["persistent_cache"] = str(defaults.get("persistent_cache", "off"))
+    defaults["persistent_cache"] = str(defaults.get("persistent_cache", _SIMPLE_DEFAULTS_BUILTIN["persistent_cache"]))
     if defaults["persistent_cache"] not in ("LlamaDiskCache", "off"):
         defaults["persistent_cache"] = _SIMPLE_DEFAULTS_BUILTIN["persistent_cache"]
 
-    defaults["runtime_cache"] = str(defaults.get("runtime_cache", "LlamaTrieCache"))
+    defaults["runtime_cache"] = str(defaults.get("runtime_cache", _SIMPLE_DEFAULTS_BUILTIN["runtime_cache"]))
     if defaults["runtime_cache"] not in ("KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"):
         defaults["runtime_cache"] = _SIMPLE_DEFAULTS_BUILTIN["runtime_cache"]
 
-    defaults["log_level"] = str(defaults.get("log_level", "timing")).lower()
+    defaults["log_level"] = str(defaults.get("log_level", _SIMPLE_DEFAULTS_BUILTIN["log_level"])).lower()
     if defaults["log_level"] not in ("minimal", "timing", "debug"):
         defaults["log_level"] = _SIMPLE_DEFAULTS_BUILTIN["log_level"]
 
     # Booleans
-    defaults["summarize_old_history"] = _as_bool(defaults.get("summarize_old_history"), True)
-    defaults["dynamic_max_tokens"] = _as_bool(defaults.get("dynamic_max_tokens"), True)
-    defaults["suppress_backend_logs"] = _as_bool(defaults.get("suppress_backend_logs"), True)
-    defaults["rewrite_continue"] = _as_bool(defaults.get("rewrite_continue"), True)
-    defaults["reset_session"] = _as_bool(defaults.get("reset_session"), False)
-    defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), False)
+    defaults["summarize_old_history"] = _as_bool(defaults.get("summarize_old_history"), _SIMPLE_DEFAULTS_BUILTIN["summarize_old_history"])
+    defaults["dynamic_max_tokens"] = _as_bool(defaults.get("dynamic_max_tokens"), _SIMPLE_DEFAULTS_BUILTIN["dynamic_max_tokens"])
+    defaults["suppress_backend_logs"] = _as_bool(defaults.get("suppress_backend_logs"), _SIMPLE_DEFAULTS_BUILTIN["suppress_backend_logs"])
+    defaults["rewrite_continue"] = _as_bool(defaults.get("rewrite_continue"), _SIMPLE_DEFAULTS_BUILTIN["rewrite_continue"])
+    defaults["reset_session"] = _as_bool(defaults.get("reset_session"), _SIMPLE_DEFAULTS_BUILTIN["reset_session"])
+    defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), _SIMPLE_DEFAULTS_BUILTIN["stream_to_console"])
 
     for chat_format, overrides in list(chat_handler_overrides.items()):
         if chat_format == "qwen3.5" and "enable_thinking" in overrides:
