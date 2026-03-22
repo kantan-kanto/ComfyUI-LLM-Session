@@ -60,3 +60,26 @@ def test_cleanup_unloads_runtime_container_model_manager(monkeypatch):
 
     assert manager.unloaded is True
     assert container.model_manager is None
+
+def test_resolve_runtime_container_lazy_initializes_default(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyManager:
+        pass
+
+    monkeypatch.setattr(module, "GGUFModelManager", DummyManager)
+    monkeypatch.setattr(module, "_runtime_container", None)
+
+    container = module._resolve_runtime_container()
+
+    assert isinstance(container.model_manager, DummyManager)
+    assert module._runtime_container is container
+
+
+def test_cleanup_skips_when_default_runtime_container_not_initialized(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    monkeypatch.setattr(module, "_runtime_container", None)
+
+    module.cleanup()
+
+    assert module._runtime_container is None

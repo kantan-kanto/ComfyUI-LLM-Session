@@ -2074,16 +2074,21 @@ class GGUFModelManager:
         import gc as _gc
         _gc.collect()
 
-_runtime_container = RuntimeContainer(
-    model_manager=GGUFModelManager(),
-)
+_runtime_container: Optional[RuntimeContainer] = None
+
+
+def _create_default_runtime_container() -> RuntimeContainer:
+    return RuntimeContainer(model_manager=GGUFModelManager())
 
 
 def _resolve_runtime_container(
     runtime_container: Optional[RuntimeContainer] = None,
 ) -> RuntimeContainer:
+    global _runtime_container
     if runtime_container is not None:
         return runtime_container
+    if _runtime_container is None:
+        _runtime_container = _create_default_runtime_container()
     return _runtime_container
 
 
@@ -3740,7 +3745,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 def cleanup():
     """Cleanup on module unload"""
-    container = _resolve_runtime_container()
+    container = _runtime_container
+    if container is None:
+        return
     mgr = container.model_manager
     if mgr is not None:
         mgr.unload_model()
