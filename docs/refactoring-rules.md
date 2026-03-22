@@ -128,7 +128,7 @@ Note:
 
 ### Test Coverage
 
-- Total tests: 67 (all passing)
+- Total tests: 73 (all passing)
 - P0/P1 error handling tests: 8 (in `TestErrorHandlingP0P1`)
 - No regressions from error handling improvements
 
@@ -141,4 +141,5 @@ Note:
 - `tests/services/test_turn_execution_service.py` - P0/P1 tests
 - `docs/error-handling-audit.md` - Status update
 - `docs/acceptable-silent-errors.md` (new) - P3 documentation
+
 

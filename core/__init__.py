@@ -1,4 +1,4 @@
-# core/: reusable logic layer (prompt rewrite, KV helpers, retry flow, shared types, logging).
+# core/: reusable logic layer (prompt rewrite, KV helpers, retry flow, shared types, logging, defaults).
 
 from .logging_utils import (
     LOG_LEVEL_DEBUG,
@@ -29,3 +29,4 @@ __all__ = [
     "set_global_log_level",
     "set_module_log_level",
 ]
+
