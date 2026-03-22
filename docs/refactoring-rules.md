@@ -116,3 +116,29 @@ Note:
 - These tests are intended to preserve current behavior during refactoring.
 - KNOWN_ISSUES remain tracked separately and are not changed by P0 test commits.
 
+## Error Handling Improvement Project (2026-03-22)
+
+### Completed Phases
+
+- **Phase 2**: Created `core/logging_utils.py` with logging utilities
+- **Phase 3**: Improved 4 P0 error handling items with logging
+- **Phase 4**: Improved 8 P1 error handling items with logging
+- **Phase 5**: Documented 16 P3 acceptable silent errors
+- **Phase 6**: Added 8 tests for P0/P1 error handling improvements
+
+### Test Coverage
+
+- Total tests: 67 (all passing)
+- P0/P1 error handling tests: 8 (in `TestErrorHandlingP0P1`)
+- No regressions from error handling improvements
+
+### Files Modified
+
+- `core/logging_utils.py` (new) - Logging utilities
+- `services/turn_execution_service.py` - P0/P1 logging additions
+- `core/kv_state.py` - P1 logging addition
+- `llm_session_nodes.py` - P1 logging additions
+- `tests/services/test_turn_execution_service.py` - P0/P1 tests
+- `docs/error-handling-audit.md` - Status update
+- `docs/acceptable-silent-errors.md` (new) - P3 documentation
+

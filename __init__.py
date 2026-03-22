@@ -20,7 +20,9 @@ except Exception:
             NODE_DISPLAY_NAME_MAPPINGS as sNODE_DISPLAY_NAME_MAPPINGS,
         )
     except Exception as e:
-        print(f"[LLM Session] Warning: node mappings unavailable during init: {e}")
+        import traceback
+        print(f"[LLM Session] Error: node mappings unavailable during init: {e}")
+        print(f"[LLM Session] Traceback: {traceback.format_exc()}")
         sNODE_CLASS_MAPPINGS = {}
         sNODE_DISPLAY_NAME_MAPPINGS = {}
 

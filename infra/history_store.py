@@ -5,6 +5,8 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional
 
+from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -58,8 +60,10 @@ def atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
     if os.path.exists(path):
         try:
             os.replace(path, bak)
-        except Exception:
-            pass
+        except Exception as e:
+            # P0: Log backup creation failure - this can cause data corruption
+            log_error_safely("HistoryStore", e, f"Failed to create backup file: {bak}", LOG_LEVEL_MINIMAL)
+            # Continue anyway - the tmp file will replace the original, but backup won't be available
     os.replace(tmp, path)
 
 

@@ -29,6 +29,7 @@ try:
     from .infra import history_store
     from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
+    from .core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
@@ -36,7 +37,7 @@ except Exception:
     from infra import history_store
     from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
     from services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
-
+    from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 
 # ============================================================================
 # Module Layout (for future file split)
@@ -1929,7 +1930,9 @@ class GGUFModelManager:
                     try:
                         persistent_obj = llama_cpp.LlamaCache(cache_dir)
                         persistent_desc = f"LlamaCache:{cache_dir}"
-                    except Exception:
+                    except Exception as e:
+                        # P1: Log persistent cache creation failure
+                        log_error_safely("GGUFModelManager", e, "Failed to create LlamaCache", LOG_LEVEL_MINIMAL)
                         persistent_obj = None
                 if persistent_obj is None:
                     print("[GGUFModelManager] Persistent cache requested but disk cache class is unavailable")
@@ -2021,8 +2024,9 @@ class GGUFModelManager:
                 try:
                     shutil.rmtree(disk_dir, ignore_errors=True)
                     os.makedirs(disk_dir, exist_ok=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # P1: Log disk cache removal failure
+                    log_error_safely("GGUFModelManager", e, f"Failed to remove disk cache: {disk_dir}", LOG_LEVEL_MINIMAL)
 
         self._current_cache_info = None
 

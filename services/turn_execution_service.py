@@ -7,6 +7,11 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
+try:
+    from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+except Exception:
+    from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+
 class TurnExecutionDependencies(TypedDict):
     llama_cpp_available: bool
     llama_cpp_import_error: Any
@@ -358,8 +363,9 @@ class TurnExecutionService:
             try:
                 if getattr(mgr, "model", None) is not None:
                     mgr.invalidate_cache(mgr.model, remove_disk_data=False)
-            except Exception:
-                pass
+            except Exception as e:
+                # P0: Log cache invalidation failure during reset to detect state inconsistency
+                log_error_safely("TurnExecutionService", e, "Failed to invalidate cache during session reset", LOG_LEVEL_MINIMAL)
         return clear_kv_state_for_session
 
     def _rewrite_user_text(
@@ -395,7 +401,9 @@ class TurnExecutionService:
         try:
             mgr.cache_dir_override = session_cache_root(request.session_id, request.history_dir or None)
             os.makedirs(mgr.cache_dir_override, exist_ok=True)
-        except Exception:
+        except Exception as e:
+            # P0: Log cache directory creation failure and continue without cache
+            log_error_safely("TurnExecutionService", e, "Failed to create cache directory, continuing without cache", LOG_LEVEL_MINIMAL)
             mgr.cache_dir_override = None
 
         try:
@@ -514,8 +522,9 @@ class TurnExecutionService:
                     kv_state_debug_info=kv_state_debug_info,
                     include_error_in_invalidate_message=bool(request.include_error_in_invalidate_message),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                # P1: Log KV state restore failure for debugging
+                log_error_safely("TurnExecutionService", e, "Failed to restore KV state", LOG_LEVEL_MINIMAL)
 
         return is_state_data_mismatch_error, kv_state_debug_info, get_context_turns
 
@@ -619,14 +628,16 @@ class TurnExecutionService:
                     mmproj_path=mmproj_path,
                     text_chat_builder_overrides=request.text_chat_builder_overrides,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                # P1: Log summarization failure for debugging
+                log_error_safely("TurnExecutionService", e, "Failed to summarize history", LOG_LEVEL_MINIMAL)
 
         atomic_write_json = self._dep(deps, "atomic_write_json")
         try:
             atomic_write_json(hist_path, history)
-        except Exception:
-            pass
+        except Exception as e:
+            # P0: Log history file save failure - this is critical as it can cause data loss
+            log_error_safely("TurnExecutionService", e, f"Failed to save history file: {hist_path}", LOG_LEVEL_MINIMAL)
 
         return history
 
@@ -669,8 +680,9 @@ class TurnExecutionService:
                 log_saved_when_not_minimal=bool(request.kv_log_saved_when_not_minimal),
                 log_unsupported_when_not_minimal=bool(request.kv_log_unsupported_when_not_minimal),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            # P1: Log KV state save failure for debugging
+            log_error_safely("TurnExecutionService", e, "Failed to save KV state", LOG_LEVEL_MINIMAL)
 
     def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
         deps = request.dependencies
@@ -741,8 +753,9 @@ class TurnExecutionService:
                 )
             try:
                 mgr.invalidate_cache(llm, remove_disk_data=True)
-            except Exception:
-                pass
+            except Exception as e:
+                # P1: Log cache invalidation failure on cache mismatch
+                log_error_safely("TurnExecutionService", e, "Failed to invalidate cache on mismatch", LOG_LEVEL_MINIMAL)
             if request.log_level != "minimal":
                 print(f"{request.log_prefix} Detected incompatible cache state; cache invalidated and retrying once.")
 
@@ -761,8 +774,9 @@ class TurnExecutionService:
                         mmproj_path=mmproj_path,
                         text_chat_builder_overrides=request.text_chat_builder_overrides,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    # P1: Log summary compaction failure for debugging
+                    log_error_safely("TurnExecutionService", e, "Failed to compact summary", LOG_LEVEL_MINIMAL)
 
         def _rebuild_messages_for_turns_limit(new_turns_limit: Optional[int]):
             rebuilt_messages = build_chat_messages(
@@ -868,3 +882,4 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
+

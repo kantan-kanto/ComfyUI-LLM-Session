@@ -6,6 +6,8 @@ import json
 import os
 from typing import Any, Callable, Dict, Optional
 
+from .logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+
 
 def build_kv_state_signature(
     *,
@@ -97,8 +99,9 @@ def try_restore_kv_state(
             if is_state_data_mismatch_error(e):
                 try:
                     invalidate_cache(llm, True)
-                except Exception:
-                    pass
+                except Exception as invalidate_err:
+                    # P1: Log cache invalidation failure on state mismatch
+                    log_error_safely("KVState", invalidate_err, "Failed to invalidate cache on state mismatch", LOG_LEVEL_MINIMAL)
             if log_level != "minimal":
                 if include_error_in_invalidate_message:
                     print(f"{log_prefix} KV state: INVALIDATED (load failed: {e})")
