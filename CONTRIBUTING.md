@@ -2,6 +2,17 @@
 
 Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
 
+## Developer Docs
+
+Before proposing larger refactors or behavior changes, please review these documents:
+
+- [Architecture Overview](docs/architecture.md)
+  - Module layering and dependency direction.
+- [Refactoring Rules](docs/refactoring-rules.md)
+  - Behavior-preserving refactor rules, split criteria, and stop criteria.
+- [Known Issues](docs/known-issues.md)
+  - Tracked behavior issues that should be handled separately from refactor-only commits.
+
 ## How to Contribute
 
 ### Reporting Bugs
