@@ -99,3 +99,10 @@ SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = {
     "suppress_logs": False,
     "min_summary_max_chars": 200,
 }
+
+SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = {
+    "config_path": "",
+    "stream_to_console": True,
+    "force_text_only": False,
+    "reset_session": False,
+}

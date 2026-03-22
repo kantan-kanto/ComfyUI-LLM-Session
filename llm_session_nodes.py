@@ -30,6 +30,7 @@ try:
         PERSISTENT_CACHE_OPTIONS,
         RUNTIME_CACHE_OPTIONS,
         SIMPLE_DEFAULTS,
+        SIMPLE_WRAPPER_DEFAULTS,
         SUMMARY_HELPER_DEFAULTS,
     )
     from .core.continue_rewrite import rewrite_continue_prompt
@@ -47,6 +48,7 @@ except Exception:
         PERSISTENT_CACHE_OPTIONS,
         RUNTIME_CACHE_OPTIONS,
         SIMPLE_DEFAULTS,
+        SIMPLE_WRAPPER_DEFAULTS,
         SUMMARY_HELPER_DEFAULTS,
     )
     from core.continue_rewrite import rewrite_continue_prompt
@@ -90,6 +92,7 @@ _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = dict(SIMPLE_DEFAULTS)
 _FULL_UI_SESSION_CHAT_DEFAULTS = FULL_UI_DEFAULTS["session_chat"]
 _FULL_UI_DIALOGUE_CYCLE_DEFAULTS = FULL_UI_DEFAULTS["dialogue_cycle"]
 _SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = dict(SUMMARY_HELPER_DEFAULTS)
+_SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 
@@ -929,7 +932,7 @@ def load_history(
     history_dir: Optional[str],
     system_prompt: str,
     model_sig: Optional[Dict[str, Any]] = None,
-    reset_session: bool = False,
+    reset_session: bool = _SIMPLE_WRAPPER_DEFAULTS["reset_session"],
 ) -> tuple[Dict[str, Any], str]:
     return history_store.load_history(
         session_id=session_id,
@@ -3558,8 +3561,8 @@ class LLMSessionChatSimpleNode:
         mmproj: str,
         history_dir: str,
         image=None,
-        config_path: str = "",
-        stream_to_console: bool = True,
+        config_path: str = _SIMPLE_WRAPPER_DEFAULTS["config_path"],
+        stream_to_console: bool = _SIMPLE_WRAPPER_DEFAULTS["stream_to_console"],
     ) -> tuple:
         defaults, chat_handler_overrides, text_chat_builder_overrides = _load_simple_defaults_bundle(
             config_path=config_path
@@ -3618,9 +3621,9 @@ class LLMDialogueCycleSimpleNode:
         modelA: str,
         modelB: str,
         history_dir: str,
-        config_path: str = "",
-        force_text_only: bool = False,
-        reset_session: bool = False,
+        config_path: str = _SIMPLE_WRAPPER_DEFAULTS["config_path"],
+        force_text_only: bool = _SIMPLE_WRAPPER_DEFAULTS["force_text_only"],
+        reset_session: bool = _SIMPLE_WRAPPER_DEFAULTS["reset_session"],
     ) -> tuple:
         # Resolve models list placeholder
         if _is_no_models_placeholder(modelA) or _is_no_models_placeholder(modelB):
