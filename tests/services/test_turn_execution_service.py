@@ -446,3 +446,61 @@ def test_session_chat_node_execution_service_failure_with_error_uses_error_retur
     assert result == ("",)
     assert error_calls
     assert "boom" in str(error_calls[0][1])
+
+
+def test_session_chat_node_execution_service_keeps_existing_model_manager() -> None:
+    service = SessionChatNodeExecutionService()
+    calls: dict[str, object] = {"factory_calls": 0, "executed": None}
+
+    request = SessionChatNodeExecutionRequest(
+        model="model.gguf",
+        turn_kwargs={"user_text": "hello", "model_manager": "existing"},
+    )
+
+    def _factory():
+        calls["factory_calls"] = int(calls["factory_calls"]) + 1
+        return "new"
+
+    deps = SessionChatNodeExecutionDependencies(
+        require_llama_cpp_available=lambda: None,
+        resolve_valid_model_path=lambda _model, _start_time: "/models/model.gguf",
+        get_or_create_model_manager=_factory,
+        execute_session_chat_turn=lambda **kwargs: (
+            calls.update({"executed": kwargs})
+            or TurnExecutionResult(assistant_text="ok", generation_succeeded=True)
+        ),
+        session_chat_error_return=lambda _start, _msg=None: ("",),
+        log_session_chat_total=lambda _start, _status: None,
+    )
+
+    result = service.run(request=request, dependencies=deps)
+
+    assert result == ("ok",)
+    assert calls["factory_calls"] == 0
+    assert calls["executed"]["model_manager"] == "existing"
+
+
+def test_session_chat_node_execution_service_stops_when_model_is_invalid() -> None:
+    service = SessionChatNodeExecutionService()
+    executed = {"called": False}
+
+    request = SessionChatNodeExecutionRequest(
+        model="model.gguf",
+        turn_kwargs={"user_text": "hello"},
+    )
+    deps = SessionChatNodeExecutionDependencies(
+        require_llama_cpp_available=lambda: None,
+        resolve_valid_model_path=lambda _model, _start_time: None,
+        get_or_create_model_manager=lambda: "mgr",
+        execute_session_chat_turn=lambda **_kwargs: (
+            executed.update({"called": True})
+            or TurnExecutionResult(assistant_text="ok", generation_succeeded=True)
+        ),
+        session_chat_error_return=lambda _start, _msg=None: ("",),
+        log_session_chat_total=lambda _start, _status: None,
+    )
+
+    result = service.run(request=request, dependencies=deps)
+
+    assert result == ("",)
+    assert executed["called"] is False
