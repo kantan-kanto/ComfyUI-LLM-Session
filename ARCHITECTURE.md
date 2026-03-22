@@ -5,7 +5,7 @@ This document describes the module layering and dependency direction for the ref
 ## Layer Roles
 - `llm_session_nodes.py`: ComfyUI node entry points and UI/input wiring.
 - `core/`: Reusable pure-ish logic (prompt rewrite, KV signature/load/save flow, generation retry loop, shared result types).
-- `services/`: Orchestration logic that coordinates multi-step application flows.
+- `services/`: Orchestration logic that coordinates multi-step application flows (including node-execution request/dependency orchestration services).
 - `infra/`: Side-effect helpers for filesystem/path persistence.
 - `tests/`: Refactoring safety-net tests that lock current behavior for core and service orchestration paths.
 
@@ -33,9 +33,13 @@ llm_session_nodes.py
 |      core/        |      |         services/          |
 |-------------------|      |----------------------------|
 | continue_rewrite  |<-----| chat_turn_service          |
-| kv_state          |<-----| turn_execution_service     |
-| generation_runner |      +----------------------------+
-| turn_types        |
+| kv_state          |<-----|  - ChatTurnService         |
+| generation_runner |      |  - DialogueCycleNode       |
+| turn_types        |      |    ExecutionService        |
+|                   |      | turn_execution_service     |
+|                   |      |  - TurnExecutionService    |
+|                   |      |  - SessionChatNode         |
+|                   |      |    ExecutionService        |
 +-------------------+
   |
   | side effects via wrapper calls
@@ -57,6 +61,6 @@ External:
 - `core/continue_rewrite.py`: language-aware rewrite of `continue` prompts.
 - `core/kv_state.py`: KV state signature/build/restore/save helpers.
 - `core/generation_runner.py`: shared generation retry and fallback flow.
-- `services/chat_turn_service.py`: dialogue-cycle orchestration service.
-- `services/turn_execution_service.py`: shared single-turn execution service for chat/cycle paths.
+- `services/chat_turn_service.py`: dialogue-cycle orchestration and node-execution orchestration (`DialogueCycleNodeExecutionService`).
+- `services/turn_execution_service.py`: shared single-turn execution and node-execution orchestration (`SessionChatNodeExecutionService`).
 - `infra/history_store.py`: history/transcript path and file I/O helpers.
