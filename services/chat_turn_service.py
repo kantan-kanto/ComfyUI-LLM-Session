@@ -197,7 +197,7 @@ class ChatTurnService:
         transcript_lines: List[str] = []
         managerA = model_manager_factory()
         managerB = model_manager_factory()
-        kv_memory_enabled = (runtime_cache or "off") == "KV_cache"
+        keep_loaded_mode = (runtime_cache or "off") in {"KV_cache", "LlamaTrieCache"}
 
         try:
             first = initial_user_text or ""
@@ -222,7 +222,7 @@ class ChatTurnService:
                 append_transcript_lines(tpath, [lineA])
                 transcript_lines.append(lineA)
                 msg = lastA or ""
-                if not kv_memory_enabled:
+                if not keep_loaded_mode:
                     try:
                         unload_model(managerA)
                     except Exception:
@@ -245,20 +245,26 @@ class ChatTurnService:
                 append_transcript_lines(tpath, [lineB])
                 transcript_lines.append(lineB)
                 msg = lastB or ""
-                if not kv_memory_enabled:
+                if not keep_loaded_mode:
                     try:
                         unload_model(managerB)
                     except Exception:
                         pass
         finally:
-            try:
-                unload_model(managerA)
-            except Exception:
-                pass
-            try:
-                unload_model(managerB)
-            except Exception:
-                pass
+            if not keep_loaded_mode:
+                try:
+                    unload_model(managerA)
+                except Exception:
+                    pass
+                try:
+                    unload_model(managerB)
+                except Exception:
+                    pass
 
         return "\n".join(transcript_lines)
+
+
+
+
+
 
