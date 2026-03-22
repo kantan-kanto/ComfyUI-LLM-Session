@@ -2056,6 +2056,12 @@ class GGUFModelManager:
             print(f"[GGUFModelManager] Unloading model: {self.current_model_path}")
         try:
             if self.model is not None:
+                # Detach any runtime/persistent cache (RAM/Trie/Disk) from llama-cpp.
+                try:
+                    self.invalidate_cache(self.model, remove_disk_data=False)
+                except Exception:
+                    pass
+            if self.model is not None:
                 del self.model
         finally:
             self.model = None
@@ -2069,10 +2075,25 @@ class GGUFModelManager:
         self.current_model_path = None
         self.current_mmproj_path = None
         self._signature = None
+        try:
+            global _runtime_container
+            container = _runtime_container
+            if container is not None:
+                container.mem_kv_state.clear()
+        except Exception:
+            pass
 
         # Encourage timely cleanup (important for llama-cpp backends and mmproj state)
         import gc as _gc
         _gc.collect()
+        try:
+            import torch as _torch
+            if _torch.cuda.is_available():
+                _torch.cuda.empty_cache()
+            if hasattr(_torch, "xpu") and _torch.xpu.is_available():
+                _torch.xpu.empty_cache()
+        except Exception:
+            pass
 
 _runtime_container: Optional[RuntimeContainer] = None
 
