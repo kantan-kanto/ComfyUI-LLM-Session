@@ -5,3 +5,6 @@
 # - turn_execution_service.py:
 #   - TurnExecutionService for shared single-turn runtime execution.
 #   - SessionChatNodeExecutionService for node-input request/dependency orchestration.
+# - generation_execution_service.py:
+#   - GenerationExecutionService for adaptive generation orchestration and output normalization.
+
