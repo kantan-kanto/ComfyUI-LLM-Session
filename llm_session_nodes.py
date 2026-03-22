@@ -3120,6 +3120,93 @@ def _chat_one_turn(
     return result.assistant_text
 
 
+def _run_dialogue_cycle_from_inputs(
+    *,
+    initial_user_text: str,
+    session_id: str,
+    cycles: int,
+    modelA: str,
+    mmprojA: str,
+    modelB: str,
+    mmprojB: str,
+    system_prompt: str,
+    system_prompt_A: str,
+    system_prompt_B: str,
+    max_tokens: int,
+    temperature: float,
+    top_p: float,
+    n_gpu_layers: int,
+    n_ctx: int,
+    max_turns: int,
+    summarize_old_history: bool,
+    summary_chunk_turns: int,
+    max_tokens_summary: int,
+    summary_max_chars: int,
+    dynamic_max_tokens: bool,
+    min_generation_tokens: int,
+    safety_margin_tokens: int,
+    persistent_cache: str,
+    runtime_cache: str,
+    repeat_penalty: float,
+    repeat_last_n: int,
+    rewrite_continue: bool,
+    log_level: str,
+    suppress_backend_logs: bool,
+    history_dir: str,
+    reset_session: bool,
+    stream_to_console: bool,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+) -> str:
+    service = ChatTurnService()
+    common_turn_kwargs = _build_dialogue_cycle_common_turn_kwargs(
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        n_gpu_layers=n_gpu_layers,
+        n_ctx=n_ctx,
+        max_turns=max_turns,
+        summarize_old_history=summarize_old_history,
+        summary_chunk_turns=summary_chunk_turns,
+        max_tokens_summary=max_tokens_summary,
+        summary_max_chars=summary_max_chars,
+        dynamic_max_tokens=dynamic_max_tokens,
+        min_generation_tokens=min_generation_tokens,
+        safety_margin_tokens=safety_margin_tokens,
+        persistent_cache=persistent_cache,
+        repeat_penalty=repeat_penalty,
+        repeat_last_n=repeat_last_n,
+        rewrite_continue=rewrite_continue,
+        runtime_cache=runtime_cache,
+        log_level=log_level,
+        suppress_backend_logs=suppress_backend_logs,
+        chat_handler_overrides=chat_handler_overrides,
+        text_chat_builder_overrides=text_chat_builder_overrides,
+    )
+    request = _build_dialogue_cycle_request(
+        initial_user_text=initial_user_text,
+        session_id=session_id,
+        cycles=cycles,
+        system_prompt=system_prompt,
+        system_prompt_A=system_prompt_A,
+        system_prompt_B=system_prompt_B,
+        runtime_cache=runtime_cache,
+        stream_to_console=stream_to_console,
+        reset_session=reset_session,
+        history_dir=history_dir,
+        common_turn_kwargs=common_turn_kwargs,
+        model_a=modelA,
+        mmproj_a=mmprojA,
+        model_b=modelB,
+        mmproj_b=mmprojB,
+    )
+    dependencies = _build_dialogue_cycle_dependencies()
+    return service.run_dialogue_cycle_with_dependencies(
+        request=request,
+        dependencies=dependencies,
+    )
+
+
 # =============================================================================
 # LLM Dialogue Cycle
 # =============================================================================
@@ -3180,8 +3267,17 @@ class LLMDialogueCycleNode:
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
-        service = ChatTurnService()
-        common_turn_kwargs = _build_dialogue_cycle_common_turn_kwargs(
+        transcript_text = _run_dialogue_cycle_from_inputs(
+            initial_user_text=initial_user_text,
+            session_id=session_id,
+            cycles=cycles,
+            modelA=modelA,
+            mmprojA=mmprojA,
+            modelB=modelB,
+            mmprojB=mmprojB,
+            system_prompt=system_prompt,
+            system_prompt_A=system_prompt_A,
+            system_prompt_B=system_prompt_B,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -3196,37 +3292,17 @@ class LLMDialogueCycleNode:
             min_generation_tokens=min_generation_tokens,
             safety_margin_tokens=safety_margin_tokens,
             persistent_cache=persistent_cache,
+            runtime_cache=runtime_cache,
             repeat_penalty=repeat_penalty,
             repeat_last_n=repeat_last_n,
             rewrite_continue=rewrite_continue,
-            runtime_cache=runtime_cache,
             log_level=log_level,
             suppress_backend_logs=suppress_backend_logs,
+            history_dir=history_dir,
+            reset_session=reset_session,
+            stream_to_console=stream_to_console,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
-        )
-
-        request = _build_dialogue_cycle_request(
-            initial_user_text=initial_user_text,
-            session_id=session_id,
-            cycles=cycles,
-            system_prompt=system_prompt,
-            system_prompt_A=system_prompt_A,
-            system_prompt_B=system_prompt_B,
-            runtime_cache=runtime_cache,
-            stream_to_console=stream_to_console,
-            reset_session=reset_session,
-            history_dir=history_dir,
-            common_turn_kwargs=common_turn_kwargs,
-            model_a=modelA,
-            mmproj_a=mmprojA,
-            model_b=modelB,
-            mmproj_b=mmprojB,
-        )
-        dependencies = _build_dialogue_cycle_dependencies()
-        transcript_text = service.run_dialogue_cycle_with_dependencies(
-            request=request,
-            dependencies=dependencies,
         )
         return (transcript_text,)
 
