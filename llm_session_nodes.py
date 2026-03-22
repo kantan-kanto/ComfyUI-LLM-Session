@@ -3747,6 +3747,41 @@ class LLMDialogueCycleSimpleNode:
         )
 
 
+class UnloadLLMModelNode:
+    """Output node that unloads the current LLM model to free VRAM."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "unload_now": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Toggle true and queue this node to unload the current LLM model.",
+                    },
+                ),
+            },
+            "optional": {
+                "trigger": ("*",),
+            },
+        }
+
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("trigger",)
+    FUNCTION = "unload_model"
+    CATEGORY = "LLM/Session"
+    OUTPUT_NODE = True
+
+    def unload_model(self, unload_now: bool, trigger: Any = None):
+        if bool(unload_now):
+            container = _resolve_runtime_container()
+            manager = container.model_manager
+            if manager is not None:
+                manager.unload_model()
+        return (trigger,)
+
+
 # ============================================================================
 # ComfyUI Node Registration
 # ============================================================================
@@ -3756,6 +3791,7 @@ NODE_CLASS_MAPPINGS = {
     "LLMDialogueCycleSimpleNode": LLMDialogueCycleSimpleNode,
     "LLMSessionChatNode": LLMSessionChatNode,
     "LLMDialogueCycleNode": LLMDialogueCycleNode,
+    "UnloadLLMModelNode": UnloadLLMModelNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -3763,6 +3799,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LLMDialogueCycleSimpleNode": "LLM Dialogue Cycle (Simple)",
     "LLMSessionChatNode": "LLM Session Chat",
     "LLMDialogueCycleNode": "LLM Dialogue Cycle",
+    "UnloadLLMModelNode": "Unload LLM Model",
 }
 
 
