@@ -90,3 +90,9 @@ FULL_UI_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "stream_to_console": False,
     },
 }
+
+SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = {
+    "temperature": 0.2,
+    "suppress_logs": False,
+    "min_summary_max_chars": 200,
+}

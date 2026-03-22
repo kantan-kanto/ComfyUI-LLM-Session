@@ -23,7 +23,7 @@ import folder_paths
 import hashlib
 import traceback
 try:
-    from .core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS
+    from .core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS, SUMMARY_HELPER_DEFAULTS
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -32,7 +32,7 @@ try:
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
     from .core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 except Exception:
-    from core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS
+    from core.defaults import DEFAULT_SYSTEM_PROMPT, FULL_UI_DEFAULTS, SIMPLE_DEFAULTS, SUMMARY_HELPER_DEFAULTS
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -73,6 +73,7 @@ _DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
 _SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = dict(SIMPLE_DEFAULTS)
 _FULL_UI_SESSION_CHAT_DEFAULTS = FULL_UI_DEFAULTS["session_chat"]
 _FULL_UI_DIALOGUE_CYCLE_DEFAULTS = FULL_UI_DEFAULTS["dialogue_cycle"]
+_SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = dict(SUMMARY_HELPER_DEFAULTS)
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 
@@ -200,15 +201,15 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # Enums / strings
     defaults["persistent_cache"] = str(defaults.get("persistent_cache", _SIMPLE_DEFAULTS_BUILTIN["persistent_cache"]))
-    if defaults["persistent_cache"] not in ("LlamaDiskCache", "off"):
+    if defaults["persistent_cache"] not in _PERSISTENT_CACHE_OPTIONS:
         defaults["persistent_cache"] = _SIMPLE_DEFAULTS_BUILTIN["persistent_cache"]
 
     defaults["runtime_cache"] = str(defaults.get("runtime_cache", _SIMPLE_DEFAULTS_BUILTIN["runtime_cache"]))
-    if defaults["runtime_cache"] not in ("KV_cache", "LlamaRAMCache", "LlamaTrieCache", "off"):
+    if defaults["runtime_cache"] not in _RUNTIME_CACHE_OPTIONS:
         defaults["runtime_cache"] = _SIMPLE_DEFAULTS_BUILTIN["runtime_cache"]
 
     defaults["log_level"] = str(defaults.get("log_level", _SIMPLE_DEFAULTS_BUILTIN["log_level"])).lower()
-    if defaults["log_level"] not in ("minimal", "timing", "debug"):
+    if defaults["log_level"] not in _LOG_LEVEL_OPTIONS:
         defaults["log_level"] = _SIMPLE_DEFAULTS_BUILTIN["log_level"]
 
     # Booleans
@@ -1353,7 +1354,7 @@ def _make_summary_prompt(existing_summary: str, turns_chunk: list) -> list:
     ]
 
 def _summarize_with_model(model: "Llama", existing_summary: str, turns_chunk: list,
-                         temperature: float, max_tokens: int, suppress_logs: bool = False,
+                         temperature: float, max_tokens: int, suppress_logs: bool = _SUMMARY_HELPER_DEFAULTS["suppress_logs"],
                          model_path: Optional[str] = None,
                          mmproj_path: Optional[str] = None,
                          text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> str:
@@ -1379,9 +1380,9 @@ def _summarize_with_model(model: "Llama", existing_summary: str, turns_chunk: li
 def maybe_compact_summary(model: "Llama",
                           history: Dict[str, Any],
                           summary_max_chars: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"],
-                          temperature: float = 0.2,
+                          temperature: float = _SUMMARY_HELPER_DEFAULTS["temperature"],
                           max_tokens_summary: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_tokens_summary"],
-                          suppress_logs: bool = False,
+                          suppress_logs: bool = _SUMMARY_HELPER_DEFAULTS["suppress_logs"],
                           model_path: Optional[str] = None,
                           mmproj_path: Optional[str] = None,
                           text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -1391,7 +1392,7 @@ def maybe_compact_summary(model: "Llama",
     """
     sm = history.get("summary") or {}
     text = (sm.get("text") or "")
-    limit = max(200, _coerce_int(summary_max_chars, _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"]))
+    limit = max(_SUMMARY_HELPER_DEFAULTS["min_summary_max_chars"], _coerce_int(summary_max_chars, _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"]))
     if len(text) <= limit:
         return history
 
@@ -1442,10 +1443,10 @@ def maybe_summarize_history(model: "Llama",
                            max_turns: int,
                            summarize_old_history: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["summarize_old_history"],
                            summary_chunk_turns: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_chunk_turns"],
-                           temperature: float = 0.2,
+                           temperature: float = _SUMMARY_HELPER_DEFAULTS["temperature"],
                            max_tokens_summary: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_tokens_summary"],
                            summary_max_chars: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"],
-                           suppress_logs: bool = False,
+                           suppress_logs: bool = _SUMMARY_HELPER_DEFAULTS["suppress_logs"],
                            model_path: Optional[str] = None,
                            mmproj_path: Optional[str] = None,
                            text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -1858,8 +1859,8 @@ class GGUFModelManager:
         - KV_cache is handled separately by save_state/load_state logic.
         - cache object attached to llm is composed from runtime/persistent backends.
         """
-        persistent_cache = str(persistent_cache or "off")
-        runtime_cache = str(runtime_cache or "off")
+        persistent_cache = str(persistent_cache or _PERSISTENT_CACHE_OPTIONS[1])
+        runtime_cache = str(runtime_cache or _PERSISTENT_CACHE_OPTIONS[1])
         try:
             # llama-cpp-python provides cache helpers in many versions (names vary).
             import llama_cpp
