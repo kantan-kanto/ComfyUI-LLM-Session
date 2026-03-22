@@ -2057,12 +2057,8 @@ class GGUFModelManager:
 
 # Global model manager
 _model_manager = GGUFModelManager()
-
-# In-memory KV/state cache (session_id -> {signature:str, state:any})
-_MEM_KV_STATE = {}
 _runtime_container = RuntimeContainer(
     model_manager=_model_manager,
-    mem_kv_state=_MEM_KV_STATE,
 )
 
 
