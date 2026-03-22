@@ -83,3 +83,53 @@ def test_cleanup_skips_when_default_runtime_container_not_initialized(monkeypatc
     module.cleanup()
 
     assert module._runtime_container is None
+
+def test_unload_node_uses_runtime_container_manager(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyManager:
+        def __init__(self) -> None:
+            self.unload_calls = 0
+
+        def unload_model(self):
+            self.unload_calls += 1
+
+    manager = DummyManager()
+    container = module.RuntimeContainer(model_manager=manager, mem_kv_state={})
+    monkeypatch.setattr(module, "_runtime_container", container)
+    node = module.UnloadLLMModelNode()
+
+    out = node.unload_model(unload_now=True, trigger="tick")
+
+    assert out == ("tick",)
+    assert manager.unload_calls == 1
+
+
+def test_unload_model_clears_runtime_container_mem_kv_state(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    manager = module.GGUFModelManager()
+    manager.model = object()
+    manager.chat_handler = object()
+    manager.current_model_path = "model.gguf"
+    manager.current_mmproj_path = "mmproj.gguf"
+    manager._signature = ("sig",)
+
+    calls: list[tuple[object, bool]] = []
+
+    def _invalidate_cache(llm, remove_disk_data=False):
+        calls.append((llm, bool(remove_disk_data)))
+
+    monkeypatch.setattr(manager, "invalidate_cache", _invalidate_cache)
+    container = module.RuntimeContainer(model_manager=manager, mem_kv_state={"sid": {"state": 1}})
+    monkeypatch.setattr(module, "_runtime_container", container)
+
+    manager.unload_model()
+
+    assert len(calls) == 1
+    assert calls[0][1] is False
+    assert manager.model is None
+    assert manager.chat_handler is None
+    assert manager.current_model_path is None
+    assert manager.current_mmproj_path is None
+    assert manager._signature is None
+    assert container.mem_kv_state == {}

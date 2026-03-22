@@ -56,6 +56,10 @@ Model-to-model dialogue execution without graph cycles.
 ### LLM Dialogue Cycle (Simple)
 Minimal version focused on **role-based dialogue observation**.
 
+### Unload LLM Model
+A utility output node that manually unloads the current LLM from VRAM.
+Set `unload_now=true` and queue the node to release model memory.
+After running, set it back to false to avoid repeated unloads.
 ---
 
 ## Key Design Concepts
@@ -312,4 +316,5 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 - Improved Qwen3.5 generation paths and override handling
 - Improved backward compatibility for repetition-control parameters
 - Improved conversation summarization quality and history tracking
+
 
