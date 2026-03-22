@@ -43,3 +43,24 @@
 - Planned handling: Address after refactoring completion as a separate bug-fix task.
 - Notes: This issue is tracked separately from behavior-preserving refactor commits.
 
+## Potential Refactoring Candidates (Not Confirmed Bugs)
+- Status: Tracking
+- First recorded: 2026-03-22
+- Scope: Internal structure / maintainability
+- Notes: The following items are architectural cleanup candidates, not confirmed defects. They should be handled as behavior-preserving refactors with focused tests.
+
+### Session Chat / Dialogue Cycle request-building overlap
+- Location: `llm_session_nodes.py` (`_build_session_chat_node_execution_request`, `_build_dialogue_cycle_node_execution_request`)
+- Observation: Similar input-to-request mapping logic exists in parallel paths.
+- Caution: The two paths still have intentional differences; over-aggressive unification can accidentally change node behavior.
+
+### Session Chat / Dialogue Cycle dependency-wiring overlap
+- Location: `llm_session_nodes.py` (`_build_turn_execution_dependencies`, `_build_dialogue_cycle_dependencies`)
+- Observation: Dependency assembly patterns are structurally similar.
+- Caution: Role-specific and orchestration-specific dependencies must remain explicit to keep layering clear.
+
+### Simple wrapper parameter mapping overlap
+- Location: `llm_session_nodes.py` (simple wrapper kwargs builders and simple node entry points)
+- Observation: Multiple simple-wrapper paths perform similar default/override mapping.
+- Caution: Public UI compatibility (input keys, defaults, sentinel labels) is compatibility-critical and must be preserved.
+
