@@ -11,7 +11,7 @@ try:
         log_error_safely,
         get_module_logger,
         LOG_LEVEL_MINIMAL,
-        LOG_LEVEL_DEBUG,
+        LOG_LEVEL_TIMING,
     )
     from .generation_execution_service import GenerationExecutionService
     from .kv_state_service import KvStateService
@@ -21,7 +21,7 @@ except Exception:
         log_error_safely,
         get_module_logger,
         LOG_LEVEL_MINIMAL,
-        LOG_LEVEL_DEBUG,
+        LOG_LEVEL_TIMING,
     )
     from services.generation_execution_service import GenerationExecutionService
     from services.kv_state_service import KvStateService
@@ -637,7 +637,7 @@ class TurnExecutionService:
             module_logger(
                 f"{request.log_prefix} {stage}: turns_limit={turns_limit}, "
                 f"messages={message_count}, message_chars={msg_chars}, prompt_chars={prompt_chars}",
-                LOG_LEVEL_DEBUG,
+                LOG_LEVEL_TIMING,
             )
 
         _log_prompt_metrics("Prompt metrics (initial)", request.max_turns, messages, text_chat_request)
@@ -752,6 +752,7 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
+
 
 
 
