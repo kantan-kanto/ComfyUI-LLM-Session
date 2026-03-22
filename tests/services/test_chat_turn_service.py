@@ -135,9 +135,9 @@ def test_run_dialogue_cycle_kv_cache_skips_in_loop_unload() -> None:
         turn_kwargs_B={"model": "mb", "mmproj": "(Auto detect)"},
     )
 
-    # KV cache keeps managers loaded in-loop; only final cleanup unloads once each.
-    assert unload_calls.count("A") == 1
-    assert unload_calls.count("B") == 1
+    # KV cache keeps managers loaded across the cycle and skips final unload.
+    assert unload_calls.count("A") == 0
+    assert unload_calls.count("B") == 0
 
 
 def test_run_dialogue_cycle_with_dependencies_uses_request_and_deps() -> None:
@@ -372,3 +372,38 @@ def test_dialogue_cycle_node_execution_service_passes_model_and_mmproj() -> None
     assert observed["mmproj_a"] == "a.mmproj"
     assert observed["model_b"] == "mb"
     assert observed["mmproj_b"] == "b.mmproj"
+
+
+def test_run_dialogue_cycle_llama_trie_cache_skips_all_unload() -> None:
+    service = ChatTurnService()
+    unload_calls: list[str] = []
+
+    managers = [DummyManager("A"), DummyManager("B")]
+
+    def _factory():
+        return managers.pop(0)
+
+    service.run_dialogue_cycle(
+        initial_user_text="hello",
+        session_id="sid",
+        cycles=1,
+        system_prompt="sys",
+        system_prompt_A="",
+        system_prompt_B="",
+        runtime_cache="LlamaTrieCache",
+        stream_to_console=False,
+        reset_session=False,
+        history_dir="",
+        now_iso=lambda: "2026-03-21T12:00:00+09:00",
+        transcript_path=lambda _sid, _history_dir: "transcript.txt",
+        append_transcript_lines=lambda _path, _lines: None,
+        clear_kv_state_for_session=lambda _sid: None,
+        model_manager_factory=_factory,
+        unload_model=lambda manager: unload_calls.append(manager.name),
+        chat_one_turn=lambda **_kwargs: "ok",
+        turn_kwargs_A={"model": "ma", "mmproj": "(Auto detect)"},
+        turn_kwargs_B={"model": "mb", "mmproj": "(Auto detect)"},
+    )
+
+    assert unload_calls.count("A") == 0
+    assert unload_calls.count("B") == 0
