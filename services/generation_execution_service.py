@@ -1,6 +1,8 @@
 # Service for generation execution orchestration and output normalization.
 from __future__ import annotations
 
+import os
+import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
@@ -56,6 +58,29 @@ class GenerationExecutionService:
 
         return _attempt_logger
 
+    @staticmethod
+    def _format_current_exception_summary() -> str:
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        err_name = exc_type.__name__ if exc_type is not None else "Exception"
+        err_msg = str(exc_value) if exc_value is not None else ""
+        if exc_tb is None:
+            return f"{err_name}: {err_msg}".strip()
+
+        frames = traceback.extract_tb(exc_tb)
+        if not frames:
+            return f"{err_name}: {err_msg}".strip()
+
+        last = frames[-1]
+        file_name = os.path.basename(last.filename)
+        return f"{err_name} at {file_name}:{last.lineno} in {last.name}: {err_msg}".strip()
+
+    def _build_retry_error_logger(self, request: Any) -> Callable[[], None]:
+        def _retry_error_logger() -> None:
+            summary = self._format_current_exception_summary()
+            print(f"{request.log_prefix} Generation exception summary: {summary}")
+
+        return _retry_error_logger
+
     def execute(
         self,
         *,
@@ -94,8 +119,8 @@ class GenerationExecutionService:
             on_compact_summary=on_compact_summary,
             rebuild_messages_for_turns_limit=rebuild_messages_for_turns_limit,
             attempt_logger=attempt_logger,
-            debug_traceback=(request.log_level == "debug"),
-            traceback_print_exc=traceback.print_exc,
+            debug_traceback=(request.log_level in {"debug", "timing"}),
+            traceback_print_exc=self._build_retry_error_logger(request),
             suppress_backend_logs_ctx_factory=lambda: make_suppress_backend_logs(
                 bool(request.suppress_backend_logs) and (request.log_level != "debug")
             ),

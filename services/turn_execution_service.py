@@ -629,7 +629,7 @@ class TurnExecutionService:
             return 0
 
         def _log_prompt_metrics(stage: str, turns_limit: Optional[int], msgs: Any, req_obj: Any) -> None:
-            if request.log_level != "debug":
+            if request.log_level not in {"debug", "timing"}:
                 return
             message_count = len(msgs) if isinstance(msgs, list) else 0
             msg_chars = _message_chars(msgs)
@@ -752,7 +752,3 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
-
-
-
-
