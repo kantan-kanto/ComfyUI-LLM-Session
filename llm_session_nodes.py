@@ -1879,23 +1879,26 @@ class GGUFModelManager:
         - cache object attached to llm is composed from runtime/persistent backends.
         """
         persistent_cache = str(persistent_cache or _PERSISTENT_CACHE_OPTIONS[1])
-        runtime_cache = str(runtime_cache or _PERSISTENT_CACHE_OPTIONS[1])
+        runtime_cache = str(runtime_cache or _RUNTIME_CACHE_OPTIONS[3])
         try:
             # llama-cpp-python provides cache helpers in many versions (names vary).
             import llama_cpp
         except Exception as e:
-            if persistent_cache != "off" or runtime_cache not in ("off", "KV_cache"):
+            if persistent_cache != _PERSISTENT_CACHE_OPTIONS[1] or runtime_cache not in (
+                _RUNTIME_CACHE_OPTIONS[3],
+                _RUNTIME_CACHE_OPTIONS[0],
+            ):
                 print(f"[GGUFModelManager] Cache requested but llama_cpp import failed: {e}")
             return
 
         # Determine desired cache object
         cache_obj: Any = None
-        cache_desc = "off"
+        cache_desc = _PERSISTENT_CACHE_OPTIONS[1]
         disk_dir: Optional[str] = None
         try:
             runtime_obj = None
-            runtime_desc = "off"
-            if runtime_cache == "LlamaRAMCache":
+            runtime_desc = _RUNTIME_CACHE_OPTIONS[3]
+            if runtime_cache == _RUNTIME_CACHE_OPTIONS[1]:
                 if hasattr(llama_cpp, "LlamaRAMCache"):
                     runtime_obj = llama_cpp.LlamaRAMCache()
                     runtime_desc = "LlamaRAMCache"
@@ -1904,7 +1907,7 @@ class GGUFModelManager:
                     runtime_desc = "RAMCache"
                 else:
                     print("[GGUFModelManager] Runtime cache requested but RAM cache class is unavailable")
-            elif runtime_cache == "LlamaTrieCache":
+            elif runtime_cache == _RUNTIME_CACHE_OPTIONS[2]:
                 if hasattr(llama_cpp, "LlamaTrieCache"):
                     runtime_obj = llama_cpp.LlamaTrieCache()
                     runtime_desc = "LlamaTrieCache"
@@ -1912,8 +1915,8 @@ class GGUFModelManager:
                     print("[GGUFModelManager] Runtime cache requested but LlamaTrieCache is unavailable")
 
             persistent_obj = None
-            persistent_desc = "off"
-            if persistent_cache == "LlamaDiskCache":
+            persistent_desc = _PERSISTENT_CACHE_OPTIONS[1]
+            if persistent_cache == _PERSISTENT_CACHE_OPTIONS[0]:
                 cache_dir = self._default_cache_dir(model_path, mmproj_path, n_ctx, n_gpu_layers=n_gpu_layers)
                 disk_dir = cache_dir
                 if hasattr(llama_cpp, "LlamaDiskCache"):
