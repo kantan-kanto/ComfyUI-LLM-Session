@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from core.turn_types import GenerationRunResult
-from services.turn_execution_service import TurnExecutionRequest, TurnExecutionService
+from services.turn_execution_service import (
+    SessionChatNodeExecutionDependencies,
+    SessionChatNodeExecutionRequest,
+    SessionChatNodeExecutionService,
+    TurnExecutionRequest,
+    TurnExecutionResult,
+    TurnExecutionService,
+)
 
 
 class DummyManager:
@@ -379,3 +386,63 @@ def test_execute_dialogue_cycle_turn_sets_profile_flags() -> None:
     assert captured["include_error_in_invalidate_message"] is True
     assert captured["enable_attempt_logging"] is False
     assert captured["log_prefix"] == "[LLM Dialogue Cycle]"
+
+
+
+def test_session_chat_node_execution_service_success_path() -> None:
+    service = SessionChatNodeExecutionService()
+    calls: dict[str, object] = {"logged": None, "executed": None}
+
+    request = SessionChatNodeExecutionRequest(
+        model="model.gguf",
+        turn_kwargs={"user_text": "hello"},
+    )
+    deps = SessionChatNodeExecutionDependencies(
+        require_llama_cpp_available=lambda: None,
+        resolve_valid_model_path=lambda _model, _start_time: "/models/model.gguf",
+        get_or_create_model_manager=lambda: "mgr",
+        execute_session_chat_turn=lambda **kwargs: (
+            calls.update({"executed": kwargs})
+            or TurnExecutionResult(assistant_text="ok", generation_succeeded=True)
+        ),
+        session_chat_error_return=lambda _start, _msg=None: ("",),
+        log_session_chat_total=lambda _start, status: calls.update({"logged": status}),
+    )
+
+    result = service.run(request=request, dependencies=deps)
+
+    assert result == ("ok",)
+    assert isinstance(calls["executed"], dict)
+    assert calls["executed"]["model_manager"] == "mgr"
+    assert calls["logged"] == "Finished"
+
+
+def test_session_chat_node_execution_service_failure_with_error_uses_error_return() -> None:
+    service = SessionChatNodeExecutionService()
+    error_calls: list[tuple[float, object]] = []
+
+    request = SessionChatNodeExecutionRequest(
+        model="model.gguf",
+        turn_kwargs={"user_text": "hello"},
+    )
+    deps = SessionChatNodeExecutionDependencies(
+        require_llama_cpp_available=lambda: None,
+        resolve_valid_model_path=lambda _model, _start_time: "/models/model.gguf",
+        get_or_create_model_manager=lambda: "mgr",
+        execute_session_chat_turn=lambda **_kwargs: TurnExecutionResult(
+            assistant_text="",
+            generation_succeeded=False,
+            error=RuntimeError("boom"),
+        ),
+        session_chat_error_return=lambda start, message=None: (
+            error_calls.append((start, message)),
+            ("",),
+        )[1],
+        log_session_chat_total=lambda _start, _status: None,
+    )
+
+    result = service.run(request=request, dependencies=deps)
+
+    assert result == ("",)
+    assert error_calls
+    assert "boom" in str(error_calls[0][1])

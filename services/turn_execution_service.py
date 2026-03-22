@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypedDict
@@ -188,6 +189,50 @@ class TurnExecutionResult:
     generation_succeeded: bool = False
     error: Optional[Exception] = None
 
+
+@dataclass(frozen=True)
+class SessionChatNodeExecutionRequest:
+    model: str
+    turn_kwargs: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SessionChatNodeExecutionDependencies:
+    require_llama_cpp_available: Callable[[], None]
+    resolve_valid_model_path: Callable[[str, float], Optional[str]]
+    get_or_create_model_manager: Callable[[], Any]
+    execute_session_chat_turn: Callable[..., TurnExecutionResult]
+    session_chat_error_return: Callable[[float, Optional[str]], tuple]
+    log_session_chat_total: Callable[[float, str], None]
+
+
+class SessionChatNodeExecutionService:
+    def run(
+        self,
+        *,
+        request: SessionChatNodeExecutionRequest,
+        dependencies: SessionChatNodeExecutionDependencies,
+    ) -> tuple:
+        start_time = time.perf_counter()
+        dependencies.require_llama_cpp_available()
+        if dependencies.resolve_valid_model_path(request.model, start_time) is None:
+            return ("",)
+
+        turn_kwargs = dict(request.turn_kwargs)
+        if turn_kwargs.get("model_manager") is None:
+            turn_kwargs["model_manager"] = dependencies.get_or_create_model_manager()
+        result = dependencies.execute_session_chat_turn(**turn_kwargs)
+
+        if not result.generation_succeeded:
+            if result.error is not None:
+                return dependencies.session_chat_error_return(
+                    start_time,
+                    f"[LLM Session Chat] Error during generation: {result.error}",
+                )
+            return dependencies.session_chat_error_return(start_time, None)
+
+        dependencies.log_session_chat_total(start_time, "Finished")
+        return (result.assistant_text,)
 
 class TurnExecutionService:
     def _dep(self, deps: TurnExecutionDependencies, key: str) -> Any:
@@ -823,3 +868,4 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
+

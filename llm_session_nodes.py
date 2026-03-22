@@ -28,14 +28,14 @@ try:
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from .infra import history_store
     from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
-    from .services.turn_execution_service import TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
+    from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
     from infra import history_store
     from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleRequest
-    from services.turn_execution_service import TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
+    from services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
 
 
 # ============================================================================
@@ -2763,6 +2763,17 @@ def _resolve_valid_session_chat_model_path(model: str, start_time: float) -> Opt
     return model_path
 
 
+def _build_session_chat_node_execution_dependencies() -> SessionChatNodeExecutionDependencies:
+    return SessionChatNodeExecutionDependencies(
+        require_llama_cpp_available=_require_llama_cpp_available,
+        resolve_valid_model_path=_resolve_valid_session_chat_model_path,
+        get_or_create_model_manager=_get_or_create_model_manager,
+        execute_session_chat_turn=_execute_session_chat_turn,
+        session_chat_error_return=_session_chat_error_return,
+        log_session_chat_total=_log_session_chat_total,
+    )
+
+
 def _require_llama_cpp_available() -> None:
     if not LLAMA_CPP_AVAILABLE:
         msg = "llama_cpp is not available"
@@ -2960,14 +2971,9 @@ def _run_session_chat_from_inputs(
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
 ) -> tuple:
-    start_time = time.perf_counter()
-    _require_llama_cpp_available()
-    if _resolve_valid_session_chat_model_path(model, start_time) is None:
-        return ("",)
-
-    mgr = _get_or_create_model_manager()
-    result = _execute_session_chat_turn(
-        **_build_session_chat_turn_kwargs(
+    request = SessionChatNodeExecutionRequest(
+        model=model,
+        turn_kwargs=_build_session_chat_turn_kwargs(
             user_text=user_text,
             session_id=session_id,
             model=model,
@@ -2997,22 +3003,14 @@ def _run_session_chat_from_inputs(
             history_dir=history_dir,
             reset_session=reset_session,
             stream_to_console=stream_to_console,
-            model_manager=mgr,
+            model_manager=None,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
-        )
+        ),
     )
-
-    if not result.generation_succeeded:
-        if result.error is not None:
-            return _session_chat_error_return(
-                start_time,
-                f"[LLM Session Chat] Error during generation: {result.error}",
-            )
-        return _session_chat_error_return(start_time)
-
-    _log_session_chat_total(start_time, "Finished")
-    return (result.assistant_text,)
+    dependencies = _build_session_chat_node_execution_dependencies()
+    service = SessionChatNodeExecutionService()
+    return service.run(request=request, dependencies=dependencies)
 
 
 class LLMSessionChatNode:
@@ -3544,5 +3542,3 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-
-
