@@ -10,10 +10,12 @@ try:
     from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
     from .generation_execution_service import GenerationExecutionService
     from .kv_state_service import KvStateService
+    from .history_persistence_service import HistoryPersistenceService
 except Exception:
     from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
     from services.generation_execution_service import GenerationExecutionService
     from services.kv_state_service import KvStateService
+    from services.history_persistence_service import HistoryPersistenceService
 
 class TurnExecutionDependencies(TypedDict):
     llama_cpp_available: bool
@@ -247,9 +249,11 @@ class TurnExecutionService:
         self,
         generation_execution_service: Optional[GenerationExecutionService] = None,
         kv_state_service: Optional[KvStateService] = None,
+        history_persistence_service: Optional[HistoryPersistenceService] = None,
     ) -> None:
         self._generation_execution_service = generation_execution_service or GenerationExecutionService()
         self._kv_state_service = kv_state_service or KvStateService()
+        self._history_persistence_service = history_persistence_service or HistoryPersistenceService()
 
     def _dep(self, deps: TurnExecutionDependencies, key: str) -> Any:
         if key not in deps:
@@ -511,80 +515,17 @@ class TurnExecutionService:
         model_path: str,
         mmproj_path: Optional[str],
     ) -> Dict[str, Any]:
-        next_turn_id = self._dep(deps, "next_turn_id")
-        now_iso = self._dep(deps, "now_iso")
-
-        turn_params: Dict[str, Any] = {
-            "max_tokens_req": int(request.max_tokens),
-            "temperature": float(request.temperature),
-            "top_p": float(request.top_p),
-            "repeat_penalty": float(request.repeat_penalty) if request.repeat_penalty is not None else None,
-            "repeat_last_n": int(request.repeat_last_n) if request.repeat_last_n is not None else None,
-            "dynamic_max_tokens": bool(request.dynamic_max_tokens),
-            "max_tokens_used": int(generation_result.gen_tokens),
-            "turns_limit_used": int(generation_result.turns_limit) if generation_result.turns_limit is not None else None,
-        }
-        if request.include_image_and_stream_in_turn_params:
-            turn_params["image_used"] = request.image is not None
-            turn_params["streamed"] = bool(request.stream_to_console)
-
-        history.setdefault("turns", []).append(
-            {
-                "id": next_turn_id(history),
-                "t": now_iso(),
-                "user": {
-                    "text": request.user_text or "",
-                    "image_note": "",
-                },
-                "assistant": {
-                    "text": assistant_text or "",
-                },
-                "params": turn_params,
-            }
+        return self._history_persistence_service.persist_history_and_summary(
+            request=request,
+            deps=deps,
+            history=history,
+            assistant_text=assistant_text,
+            generation_result=generation_result,
+            llm=llm,
+            hist_path=hist_path,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
         )
-
-        history.setdefault("meta", {})["updated_at"] = now_iso()
-        history.setdefault("meta", {})["last_params"] = {
-            "persistent_cache": (request.persistent_cache or "off"),
-            "runtime_cache": (request.runtime_cache or "off"),
-            "max_turns": int(request.max_turns) if request.max_turns is not None else None,
-            "summarize_old_history": bool(request.summarize_old_history),
-            "summary_chunk_turns": int(request.summary_chunk_turns),
-            "max_tokens_summary": int(request.max_tokens_summary),
-            "summary_max_chars": int(request.summary_max_chars),
-            "saved_at": now_iso(),
-        }
-        history["system_prompt"] = request.system_prompt or history.get("system_prompt", "")
-
-        maybe_summarize_history = self._dep(deps, "maybe_summarize_history")
-        if request.summarize_old_history and request.max_turns is not None:
-            try:
-                history = maybe_summarize_history(
-                    model=llm,
-                    history=history,
-                    max_turns=int(request.max_turns),
-                    summarize_old_history=bool(request.summarize_old_history),
-                    summary_chunk_turns=int(request.summary_chunk_turns),
-                    temperature=0.2,
-                    max_tokens_summary=int(request.max_tokens_summary),
-                    summary_max_chars=int(request.summary_max_chars),
-                    suppress_logs=(request.log_level != "debug"),
-                    model_path=model_path,
-                    mmproj_path=mmproj_path,
-                    text_chat_builder_overrides=request.text_chat_builder_overrides,
-                )
-            except Exception as e:
-                # P1: Log summarization failure for debugging
-                log_error_safely("TurnExecutionService", e, "Failed to summarize history", LOG_LEVEL_MINIMAL)
-
-        atomic_write_json = self._dep(deps, "atomic_write_json")
-        try:
-            atomic_write_json(hist_path, history)
-        except Exception as e:
-            # P0: Log history file save failure - this is critical as it can cause data loss
-            log_error_safely("TurnExecutionService", e, f"Failed to save history file: {hist_path}", LOG_LEVEL_MINIMAL)
-
-        return history
 
     def _maybe_save_kv_state(
         self,
@@ -764,4 +705,6 @@ class TurnExecutionService:
             generation_succeeded=True,
             error=None,
         )
+
+
 

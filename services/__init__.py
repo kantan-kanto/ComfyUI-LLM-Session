@@ -9,5 +9,8 @@
 #   - GenerationExecutionService for adaptive generation orchestration and output normalization.
 # - kv_state_service.py:
 #   - KvStateService for KV cache restore/save and mismatch recovery.
+# - history_persistence_service.py:
+#   - HistoryPersistenceService for turn append, summarization, and history write.
+
 
 
