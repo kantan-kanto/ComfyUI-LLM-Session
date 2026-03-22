@@ -23,6 +23,7 @@ import folder_paths
 import hashlib
 import traceback
 try:
+    from .core.defaults import DEFAULT_SYSTEM_PROMPT, SIMPLE_DEFAULTS
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -31,6 +32,7 @@ try:
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
     from .core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 except Exception:
+    from core.defaults import DEFAULT_SYSTEM_PROMPT, SIMPLE_DEFAULTS
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
@@ -67,36 +69,8 @@ except Exception:
 #
 # This keeps the Simple node easy to use while still allowing customization.
 
-_DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
-
-_SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = {
-    "schema_version": 1,
-    "system_prompt": _DEFAULT_SYSTEM_PROMPT,
-    "max_tokens": 512,
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "n_gpu_layers": 0,
-    "n_ctx": 4096,
-    "max_turns": 6,
-    "summarize_old_history": True,
-    "summary_chunk_turns": 6,
-    "max_tokens_summary": 128,
-    "summary_max_chars": 1500,
-    "dynamic_max_tokens": True,
-    "min_generation_tokens": 96,
-    "safety_margin_tokens": 64,
-    "persistent_cache": "off",
-    "runtime_cache": "LlamaTrieCache",
-    "log_level": "timing",
-    "suppress_backend_logs": True,
-    "repeat_penalty": 1.12,
-    "repeat_last_n": 256,
-    "rewrite_continue": True,
-    "reset_session": False,
-    "stream_to_console": False,
-    "system_prompt_A": "",
-    "system_prompt_B": "",
-}
+_DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
+_SIMPLE_DEFAULTS_BUILTIN: Dict[str, Any] = dict(SIMPLE_DEFAULTS)
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 
@@ -3698,4 +3672,3 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-
