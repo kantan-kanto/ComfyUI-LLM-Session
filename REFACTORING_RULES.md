@@ -35,6 +35,60 @@ changes consistent and maintainable over time.
 5. Avoid duplicated core logic. Continue rewrite, generation retry flow, and KV state load/save logic must be implemented once and reused.
 6. Preserve compatibility-critical surface by default: node class names, input keys, enum/choice labels, and sentinel strings must stay stable unless a spec-change step is explicitly separated.
 
+## Physical Split Criteria (How to decide move vs keep)
+This section defines how to decide whether helper functions should remain in the current file
+or be moved to another module. Responsibility separation is a design concept; file split is
+an implementation step that must be gated by safety and testability.
+
+### 1) Preconditions to move code to another file
+Move a function/group only when all of the following are true:
+1. Boundary stability:
+   - Inputs/outputs are explicit and small enough to reason about.
+   - The function does not rely on broad hidden context from module globals.
+2. Dependency direction safety:
+   - The destination layer preserves allowed dependency direction.
+   - The moved code does not require lower layers to import node/UI layer details.
+3. Compatibility safety:
+   - The move does not require changing compatibility-critical surface by default
+     (node class names, input keys, enum labels, sentinel strings).
+4. Test lockability:
+   - Behavior can be locked via existing tests or a small additive test in the same step.
+   - If behavior cannot be locked, defer move unless there is a critical maintenance reason.
+
+### 2) Reasons to keep code in-place (defer physical split)
+Keep code in the current file when one or more apply:
+1. Hidden dependency concentration:
+   - Strong reliance on module globals, side effects, or execution environment details.
+2. High breakage blast radius:
+   - Split would likely affect many call paths in one step.
+3. Low observability:
+   - Failures would be hard to localize after split because test signal is weak.
+4. Poor ROI at current stage:
+   - Additional split produces little readability/maintainability gain versus risk.
+
+### 3) Prioritization order for physical split
+When multiple candidates exist, split in this order:
+1. Execution orchestration paths with clear request/dependency boundaries.
+2. Reused business logic helpers with stable contracts.
+3. UI/input builder helpers.
+4. Utility groups with many implicit assumptions (last; only after guardrails improve).
+
+### 4) Stop criteria for a refactoring milestone
+A milestone can be considered "done enough" (local optimum) when:
+1. Major runtime paths are routed through explicit service/request/dependency boundaries.
+2. Regression tests cover the moved orchestration boundaries.
+3. Remaining split candidates are mostly high-risk/low-ROI under behavior-preserving constraints.
+4. Next highest-value work shifts to bug fixing or behavior decision tasks (tracked separately).
+
+### 5) Decision recording expectations
+When proposing additional physical split, contributors should explicitly state:
+1. Why the candidate satisfies preconditions in section 1.
+2. Which risks in section 2 are present and how they are mitigated.
+3. What tests lock current behavior before/after move.
+4. Why this split has better ROI than the next unresolved issue.
+
+If these points are unclear, prefer defer + documentation over forced split.
+
 ## Notes
 - If a potential bug is found but fixing it would change behavior, record it and handle it later.
 
