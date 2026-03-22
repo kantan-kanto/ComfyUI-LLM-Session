@@ -1378,9 +1378,9 @@ def _summarize_with_model(model: "Llama", existing_summary: str, turns_chunk: li
 
 def maybe_compact_summary(model: "Llama",
                           history: Dict[str, Any],
-                          summary_max_chars: int = 1500,
+                          summary_max_chars: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"],
                           temperature: float = 0.2,
-                          max_tokens_summary: int = 128,
+                          max_tokens_summary: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_tokens_summary"],
                           suppress_logs: bool = False,
                           model_path: Optional[str] = None,
                           mmproj_path: Optional[str] = None,
@@ -1391,7 +1391,7 @@ def maybe_compact_summary(model: "Llama",
     """
     sm = history.get("summary") or {}
     text = (sm.get("text") or "")
-    limit = max(200, _coerce_int(summary_max_chars, 1500))
+    limit = max(200, _coerce_int(summary_max_chars, _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"]))
     if len(text) <= limit:
         return history
 
@@ -1440,11 +1440,11 @@ def maybe_compact_summary(model: "Llama",
 def maybe_summarize_history(model: "Llama",
                            history: Dict[str, Any],
                            max_turns: int,
-                           summarize_old_history: bool = True,
-                           summary_chunk_turns: int = 3,
+                           summarize_old_history: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["summarize_old_history"],
+                           summary_chunk_turns: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_chunk_turns"],
                            temperature: float = 0.2,
-                           max_tokens_summary: int = 128,
-                           summary_max_chars: int = 1500,
+                           max_tokens_summary: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_tokens_summary"],
+                           summary_max_chars: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_max_chars"],
                            suppress_logs: bool = False,
                            model_path: Optional[str] = None,
                            mmproj_path: Optional[str] = None,
@@ -1459,14 +1459,14 @@ def maybe_summarize_history(model: "Llama",
         return history
 
     pending = _get_context_turns(history, max_turns=None)
-    mt = max(0, _coerce_int(max_turns, 12))
+    mt = max(0, _coerce_int(max_turns, _FULL_UI_SESSION_CHAT_DEFAULTS["max_turns"]))
     if mt == 0:
         return history
 
     if len(pending) <= mt:
         return history
 
-    chunk = max(1, _coerce_int(summary_chunk_turns, 3))
+    chunk = max(1, _coerce_int(summary_chunk_turns, _FULL_UI_SESSION_CHAT_DEFAULTS["summary_chunk_turns"]))
     overflow_n = len(pending) - mt
     if overflow_n < chunk:
         # Not enough overflow to justify a summary generation (saves time)
