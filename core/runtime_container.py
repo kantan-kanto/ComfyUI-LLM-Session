@@ -10,3 +10,4 @@ from typing import Any, Dict, Optional
 class RuntimeContainer:
     model_manager: Optional[Any] = None
     mem_kv_state: Dict[str, Any] = field(default_factory=dict)
+    dialogue_model_managers: Dict[str, Any] = field(default_factory=dict)

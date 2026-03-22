@@ -25,7 +25,7 @@ class DialogueCycleDependencies:
     transcript_path: Callable[[str, Optional[str]], str]
     append_transcript_lines: Callable[[str, List[str]], None]
     clear_kv_state_for_session: Callable[[str], None]
-    model_manager_factory: Callable[[], Any]
+    get_or_create_model_manager: Callable[[str], Any]
     unload_model: Callable[[Any], None]
     chat_one_turn: Callable[..., str]
 
@@ -154,7 +154,7 @@ class ChatTurnService:
             transcript_path=dependencies.transcript_path,
             append_transcript_lines=dependencies.append_transcript_lines,
             clear_kv_state_for_session=dependencies.clear_kv_state_for_session,
-            model_manager_factory=dependencies.model_manager_factory,
+            get_or_create_model_manager=dependencies.get_or_create_model_manager,
             unload_model=dependencies.unload_model,
             chat_one_turn=dependencies.chat_one_turn,
             turn_kwargs_A=request.turn_kwargs_A,
@@ -178,7 +178,7 @@ class ChatTurnService:
         transcript_path: Callable[[str, Optional[str]], str],
         append_transcript_lines: Callable[[str, List[str]], None],
         clear_kv_state_for_session: Callable[[str], None],
-        model_manager_factory: Callable[[], Any],
+        get_or_create_model_manager: Callable[[str], Any],
         unload_model: Callable[[Any], None],
         chat_one_turn: Callable[..., str],
         turn_kwargs_A: Dict[str, Any],
@@ -195,8 +195,8 @@ class ChatTurnService:
             clear_kv_state_for_session(sidB)
 
         transcript_lines: List[str] = []
-        managerA = model_manager_factory()
-        managerB = model_manager_factory()
+        managerA = get_or_create_model_manager("A")
+        managerB = get_or_create_model_manager("B")
         keep_loaded_mode = (runtime_cache or "off") in {"KV_cache", "LlamaTrieCache"}
 
         try:
@@ -262,6 +262,8 @@ class ChatTurnService:
                     pass
 
         return "\n".join(transcript_lines)
+
+
 
 
 

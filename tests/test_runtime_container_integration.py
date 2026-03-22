@@ -133,3 +133,74 @@ def test_unload_model_clears_runtime_container_mem_kv_state(monkeypatch):
     assert manager.current_mmproj_path is None
     assert manager._signature is None
     assert container.mem_kv_state == {}
+
+def test_dialogue_cycle_model_manager_reuse_in_runtime_container(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    container = module.RuntimeContainer(model_manager=None, mem_kv_state={})
+
+    manager_a_1 = module._get_or_create_dialogue_cycle_model_manager("A", runtime_container=container)
+    manager_a_2 = module._get_or_create_dialogue_cycle_model_manager("A", runtime_container=container)
+    manager_b_1 = module._get_or_create_dialogue_cycle_model_manager("B", runtime_container=container)
+
+    assert manager_a_1 is manager_a_2
+    assert manager_a_1 is not manager_b_1
+    assert set(container.dialogue_model_managers.keys()) == {"A", "B"}
+
+
+def test_unload_node_unloads_dialogue_cycle_managers(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyManager:
+        def __init__(self) -> None:
+            self.unload_calls = 0
+
+        def unload_model(self):
+            self.unload_calls += 1
+
+    shared = DummyManager()
+    manager_a = DummyManager()
+    manager_b = DummyManager()
+    container = module.RuntimeContainer(
+        model_manager=shared,
+        mem_kv_state={},
+        dialogue_model_managers={"A": manager_a, "B": manager_b},
+    )
+    monkeypatch.setattr(module, "_runtime_container", container)
+
+    node = module.UnloadLLMModelNode()
+    out = node.unload_model(unload_now=True, trigger="tick")
+
+    assert out == ("tick",)
+    assert shared.unload_calls == 1
+    assert manager_a.unload_calls == 1
+    assert manager_b.unload_calls == 1
+    assert container.model_manager is None
+    assert container.dialogue_model_managers == {}
+
+def test_cleanup_unloads_dialogue_cycle_managers(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyManager:
+        def __init__(self) -> None:
+            self.unloaded = False
+
+        def unload_model(self):
+            self.unloaded = True
+
+    shared = DummyManager()
+    manager_a = DummyManager()
+    manager_b = DummyManager()
+    container = module.RuntimeContainer(
+        model_manager=shared,
+        mem_kv_state={},
+        dialogue_model_managers={"A": manager_a, "B": manager_b},
+    )
+    monkeypatch.setattr(module, "_runtime_container", container)
+
+    module.cleanup()
+
+    assert shared.unloaded is True
+    assert manager_a.unloaded is True
+    assert manager_b.unloaded is True
+    assert container.model_manager is None
+    assert container.dialogue_model_managers == {}

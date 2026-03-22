@@ -48,7 +48,7 @@ def test_run_dialogue_cycle_writes_transcript_and_unloads_non_kv_cache() -> None
         transcript_path=lambda _sid, _history_dir: "transcript.txt",
         append_transcript_lines=_append,
         clear_kv_state_for_session=lambda _sid: None,
-        model_manager_factory=_factory,
+        get_or_create_model_manager=lambda role: _factory(),
         unload_model=lambda manager: unload_calls.append(manager.name),
         chat_one_turn=_chat_one_turn,
         turn_kwargs_A={"model": "ma", "mmproj": "(Auto detect)"},
@@ -94,7 +94,7 @@ def test_run_dialogue_cycle_reset_session_applies_only_first_round() -> None:
         transcript_path=lambda _sid, _history_dir: "transcript.txt",
         append_transcript_lines=lambda _path, _lines: None,
         clear_kv_state_for_session=lambda _sid: None,
-        model_manager_factory=_factory,
+        get_or_create_model_manager=lambda role: _factory(),
         unload_model=lambda _manager: None,
         chat_one_turn=_chat_one_turn,
         turn_kwargs_A={"model": "ma", "mmproj": "(Auto detect)"},
@@ -128,7 +128,7 @@ def test_run_dialogue_cycle_kv_cache_skips_in_loop_unload() -> None:
         transcript_path=lambda _sid, _history_dir: "transcript.txt",
         append_transcript_lines=lambda _path, _lines: None,
         clear_kv_state_for_session=lambda _sid: None,
-        model_manager_factory=_factory,
+        get_or_create_model_manager=lambda role: _factory(),
         unload_model=lambda manager: unload_calls.append(manager.name),
         chat_one_turn=lambda **_kwargs: "ok",
         turn_kwargs_A={"model": "ma", "mmproj": "(Auto detect)"},
@@ -177,7 +177,7 @@ def test_run_dialogue_cycle_with_dependencies_uses_request_and_deps() -> None:
         transcript_path=lambda _sid, _history_dir: "transcript.txt",
         append_transcript_lines=_append,
         clear_kv_state_for_session=lambda _sid: None,
-        model_manager_factory=_factory,
+        get_or_create_model_manager=lambda role: _factory(),
         unload_model=lambda manager: unload_calls.append(manager.name),
         chat_one_turn=_chat_one_turn,
     )
@@ -268,7 +268,7 @@ def test_dialogue_cycle_node_execution_service_builds_and_runs() -> None:
             transcript_path=lambda _sid, _hist: "t.txt",
             append_transcript_lines=lambda _p, _l: None,
             clear_kv_state_for_session=lambda _sid: None,
-            model_manager_factory=lambda: object(),
+            get_or_create_model_manager=lambda _role: object(),
             unload_model=lambda _m: None,
             chat_one_turn=lambda **_kwargs: "ok",
         )
@@ -359,7 +359,7 @@ def test_dialogue_cycle_node_execution_service_passes_model_and_mmproj() -> None
             transcript_path=lambda _sid, _hist: "t.txt",
             append_transcript_lines=lambda _p, _l: None,
             clear_kv_state_for_session=lambda _sid: None,
-            model_manager_factory=lambda: object(),
+            get_or_create_model_manager=lambda _role: object(),
             unload_model=lambda _m: None,
             chat_one_turn=lambda **_kwargs: "ok",
         ),
@@ -398,7 +398,7 @@ def test_run_dialogue_cycle_llama_trie_cache_skips_all_unload() -> None:
         transcript_path=lambda _sid, _history_dir: "transcript.txt",
         append_transcript_lines=lambda _path, _lines: None,
         clear_kv_state_for_session=lambda _sid: None,
-        model_manager_factory=_factory,
+        get_or_create_model_manager=lambda role: _factory(),
         unload_model=lambda manager: unload_calls.append(manager.name),
         chat_one_turn=lambda **_kwargs: "ok",
         turn_kwargs_A={"model": "ma", "mmproj": "(Auto detect)"},
@@ -407,3 +407,4 @@ def test_run_dialogue_cycle_llama_trie_cache_skips_all_unload() -> None:
 
     assert unload_calls.count("A") == 0
     assert unload_calls.count("B") == 0
+

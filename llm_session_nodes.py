@@ -2113,6 +2113,53 @@ def _resolve_runtime_container(
     return _runtime_container
 
 
+def _get_or_create_dialogue_cycle_model_manager(
+    role: str,
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> "GGUFModelManager":
+    container = _resolve_runtime_container(runtime_container)
+    key = (role or "A").strip().upper() or "A"
+    manager = container.dialogue_model_managers.get(key)
+    if manager is None:
+        manager = GGUFModelManager()
+        container.dialogue_model_managers[key] = manager
+    return manager
+
+
+def _unload_dialogue_cycle_model_managers(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> None:
+    container = _resolve_runtime_container(runtime_container)
+    managers = container.dialogue_model_managers
+    seen: set[int] = set()
+    for manager in list(managers.values()):
+        if manager is None:
+            continue
+        manager_id = id(manager)
+        if manager_id in seen:
+            continue
+        seen.add(manager_id)
+        try:
+            manager.unload_model()
+        except Exception:
+            pass
+    managers.clear()
+
+
+def _unload_runtime_container_managers(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> None:
+    container = _resolve_runtime_container(runtime_container)
+    manager = container.model_manager
+    if manager is not None:
+        try:
+            manager.unload_model()
+        except Exception:
+            pass
+    container.model_manager = None
+    _unload_dialogue_cycle_model_managers(runtime_container=container)
+
+
 def _is_state_data_mismatch_error(err: Exception) -> bool:
     s = str(err or "")
     if "Failed to set llama state data" in s:
@@ -2625,24 +2672,36 @@ def _build_turn_execution_dependencies(
 # LLM Dialogue Cycle Wiring
 # =============================================================================
 
-def _build_dialogue_cycle_dependencies() -> DialogueCycleDependencies:
+def _build_dialogue_cycle_dependencies(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> DialogueCycleDependencies:
+    container = _resolve_runtime_container(runtime_container)
     return DialogueCycleDependencies(
         now_iso=_now_iso_jst,
         transcript_path=_transcript_path,
         append_transcript_lines=_append_transcript_lines,
-        clear_kv_state_for_session=_clear_kv_state_for_session,
-        model_manager_factory=GGUFModelManager,
+        clear_kv_state_for_session=lambda session_id: _clear_kv_state_for_session(
+            session_id, runtime_container=container
+        ),
+        get_or_create_model_manager=lambda role: _get_or_create_dialogue_cycle_model_manager(
+            role, runtime_container=container
+        ),
         unload_model=lambda manager: manager.unload_model(),
         chat_one_turn=_chat_one_turn,
     )
 
 
-def _build_dialogue_cycle_node_execution_dependencies() -> DialogueCycleNodeExecutionDependencies:
+def _build_dialogue_cycle_node_execution_dependencies(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> DialogueCycleNodeExecutionDependencies:
     service = ChatTurnService()
+    container = _resolve_runtime_container(runtime_container)
     return DialogueCycleNodeExecutionDependencies(
         build_common_turn_kwargs=_build_dialogue_cycle_common_turn_kwargs,
         build_dialogue_cycle_request=_build_dialogue_cycle_request,
-        build_dialogue_cycle_dependencies=_build_dialogue_cycle_dependencies,
+        build_dialogue_cycle_dependencies=lambda: _build_dialogue_cycle_dependencies(
+            runtime_container=container
+        ),
         run_dialogue_cycle_with_dependencies=service.run_dialogue_cycle_with_dependencies,
     )
 
@@ -3425,7 +3484,9 @@ def _run_dialogue_cycle_from_inputs(
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
     )
-    dependencies = _build_dialogue_cycle_node_execution_dependencies()
+    dependencies = _build_dialogue_cycle_node_execution_dependencies(
+        runtime_container=_resolve_runtime_container()
+    )
     service = DialogueCycleNodeExecutionService()
     return service.run(
         request=request,
@@ -3775,10 +3836,7 @@ class UnloadLLMModelNode:
 
     def unload_model(self, unload_now: bool, trigger: Any = None):
         if bool(unload_now):
-            container = _resolve_runtime_container()
-            manager = container.model_manager
-            if manager is not None:
-                manager.unload_model()
+            _unload_runtime_container_managers(runtime_container=_resolve_runtime_container())
         return (trigger,)
 
 
@@ -3812,10 +3870,9 @@ def cleanup():
     container = _runtime_container
     if container is None:
         return
-    mgr = container.model_manager
-    if mgr is not None:
-        mgr.unload_model()
-    container.model_manager = None
+    _unload_runtime_container_managers(runtime_container=container)
 
 import atexit
 atexit.register(cleanup)
+
+
