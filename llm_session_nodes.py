@@ -576,19 +576,19 @@ def _load_available_chat_handlers(
     handler_map: dict[str, str],
     handler_kwargs_map: dict[str, dict[str, Any]],
     handler_module: Any,
-) -> tuple[dict[str, str], dict[str, Callable[[str], Any]]]:
+) -> tuple[dict[str, str], dict[str, Callable[[str], Any]], dict[str, Any]]:
     handler_to_formats = _group_formats_by_handler(handler_map)
 
     available_handler_map: dict[str, str] = {}
     available_factory_map: dict[str, Callable[[str], Any]] = {}
+    available_class_registry: dict[str, Any] = {}
 
     for handler_name, chat_formats in handler_to_formats.items():
         try:
             handler_cls = getattr(handler_module, handler_name)
-            globals()[handler_name] = handler_cls
         except AttributeError:
-            globals()[handler_name] = None
             continue
+        available_class_registry[handler_name] = handler_cls
 
         for chat_format in chat_formats:
             available_handler_map[chat_format] = handler_name
@@ -598,12 +598,11 @@ def _load_available_chat_handlers(
                 extra_kwargs,
             )
 
-    return available_handler_map, available_factory_map
+    return available_handler_map, available_factory_map, available_class_registry
 
 
-def _reset_chat_handlers(handler_map: dict[str, str]) -> None:
-    for handler_name in set(handler_map.values()):
-        globals()[handler_name] = None
+def _empty_chat_handler_registry() -> dict[str, Any]:
+    return {}
 
 
 # ============================================================================
@@ -616,7 +615,7 @@ try:
     llama_chat_format = import_module("llama_cpp.llama_chat_format")
     print("[DEBUG] llama_chat_format module:", getattr(llama_chat_format, "__file__", "(unknown)"))
 
-    chat_handler_map, chat_handler_factory_map = _load_available_chat_handlers(
+    chat_handler_map, chat_handler_factory_map, chat_handler_class_registry = _load_available_chat_handlers(
         handler_map=chat_handler_map,
         handler_kwargs_map=CHAT_HANDLER_KWARGS_MAP,
         handler_module=llama_chat_format,
@@ -629,9 +628,9 @@ except Exception as e:
     LLAMA_CPP_AVAILABLE = False
     _LLAMA_CPP_IMPORT_ERROR = repr(e)
 
-    _reset_chat_handlers(chat_handler_map)
     chat_handler_map = {}
     chat_handler_factory_map = {}
+    chat_handler_class_registry = _empty_chat_handler_registry()
 
     print(f"[LLM Session] Warning: llama-cpp-python not available: {_LLAMA_CPP_IMPORT_ERROR}")
 
@@ -1758,7 +1757,7 @@ class GGUFModelManager:
                     print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
                     try:
                         handler_name = chat_handler_map.get(model_family)
-                        handler_cls = globals().get(handler_name) if handler_name else None
+                        handler_cls = chat_handler_class_registry.get(handler_name) if handler_name else None
                         if handler_cls is None:
                             raise RuntimeError(f"Chat handler class unavailable for {model_family}")
                         active_chat_handler_kwargs = _get_chat_handler_kwargs(
