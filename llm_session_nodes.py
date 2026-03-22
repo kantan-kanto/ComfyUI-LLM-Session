@@ -36,6 +36,7 @@ try:
     from .core.continue_rewrite import rewrite_continue_prompt
     from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
+    from .core.runtime_container import RuntimeContainer
     from .infra import history_store
     from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
     from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
@@ -54,6 +55,7 @@ except Exception:
     from core.continue_rewrite import rewrite_continue_prompt
     from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
     from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
+    from core.runtime_container import RuntimeContainer
     from infra import history_store
     from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
     from services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
@@ -2058,6 +2060,18 @@ _model_manager = GGUFModelManager()
 
 # In-memory KV/state cache (session_id -> {signature:str, state:any})
 _MEM_KV_STATE = {}
+_runtime_container = RuntimeContainer(
+    model_manager=_model_manager,
+    mem_kv_state=_MEM_KV_STATE,
+)
+
+
+def _resolve_runtime_container(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> RuntimeContainer:
+    if runtime_container is not None:
+        return runtime_container
+    return _runtime_container
 
 
 def _is_state_data_mismatch_error(err: Exception) -> bool:
@@ -2083,9 +2097,13 @@ def _cache_debug_label(manager: Optional["GGUFModelManager"]) -> str:
         return "unknown"
 
 
-def _clear_kv_state_for_session(session_id: str) -> None:
+def _clear_kv_state_for_session(
+    session_id: str,
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> None:
     try:
-        _MEM_KV_STATE.pop(session_id, None)
+        container = _resolve_runtime_container(runtime_container)
+        container.mem_kv_state.pop(session_id, None)
     except Exception:
         pass
 
@@ -2521,7 +2539,10 @@ def _input_types_dialogue_cycle() -> dict:
 # =============================================================================
 
 
-def _build_turn_execution_dependencies() -> TurnExecutionDependencies:
+def _build_turn_execution_dependencies(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> TurnExecutionDependencies:
+    container = _resolve_runtime_container(runtime_container)
     return {
         "llama_cpp_available": LLAMA_CPP_AVAILABLE,
         "llama_cpp_import_error": _LLAMA_CPP_IMPORT_ERROR,
@@ -2530,7 +2551,9 @@ def _build_turn_execution_dependencies() -> TurnExecutionDependencies:
         "resolve_model_and_mmproj": _resolve_model_and_mmproj,
         "mmproj_not_required": _MMPROJ_NOT_REQUIRED,
         "load_history": load_history,
-        "clear_kv_state_for_session": _clear_kv_state_for_session,
+        "clear_kv_state_for_session": lambda session_id: _clear_kv_state_for_session(
+            session_id, runtime_container=container
+        ),
         "rewrite_continue_prompt": rewrite_continue_prompt,
         "detect_history_language": _detect_history_language,
         "session_cache_root": _session_cache_root,
@@ -2543,7 +2566,7 @@ def _build_turn_execution_dependencies() -> TurnExecutionDependencies:
         "current_llama_state_size": _current_llama_state_size,
         "kv_state_debug_info": _kv_state_debug_info,
         "get_context_turns": _get_context_turns,
-        "mem_kv_state": _MEM_KV_STATE,
+        "mem_kv_state": container.mem_kv_state,
         "maybe_compact_summary": maybe_compact_summary,
         "cache_debug_label": _cache_debug_label,
         "run_generation_with_adaptive_retry": run_generation_with_adaptive_retry,
@@ -2778,11 +2801,14 @@ def _resolve_valid_session_chat_model_path(model: str, start_time: float) -> Opt
     return model_path
 
 
-def _build_session_chat_node_execution_dependencies() -> SessionChatNodeExecutionDependencies:
+def _build_session_chat_node_execution_dependencies(
+    runtime_container: Optional[RuntimeContainer] = None,
+) -> SessionChatNodeExecutionDependencies:
+    container = _resolve_runtime_container(runtime_container)
     return SessionChatNodeExecutionDependencies(
         require_llama_cpp_available=_require_llama_cpp_available,
         resolve_valid_model_path=_resolve_valid_session_chat_model_path,
-        get_or_create_model_manager=_get_or_create_model_manager,
+        get_or_create_model_manager=lambda: _get_or_create_model_manager(runtime_container=container),
         execute_session_chat_turn=_execute_session_chat_turn,
         session_chat_error_return=_session_chat_error_return,
         log_session_chat_total=_log_session_chat_total,
@@ -2872,14 +2898,23 @@ def _require_llama_cpp_available() -> None:
 
 def _get_or_create_model_manager(
     model_manager: Optional["GGUFModelManager"] = None,
+    runtime_container: Optional[RuntimeContainer] = None,
 ) -> "GGUFModelManager":
     if model_manager is not None:
         return model_manager
 
+    container = _resolve_runtime_container(runtime_container)
+    existing = container.model_manager
+    if existing is not None:
+        return existing
+
     global _model_manager
     if _model_manager is None:
         _model_manager = GGUFModelManager()
+    container.model_manager = _model_manager
     return _model_manager
+
+
 def _execute_session_chat_turn(
     *,
     user_text: str,
@@ -2912,8 +2947,9 @@ def _execute_session_chat_turn(
     reset_session: bool,
     stream_to_console: bool,
     model_manager: Optional[Any],
-    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
-    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+    runtime_container: Optional[RuntimeContainer] = None,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> TurnExecutionResult:
     service = TurnExecutionService()
     return service.execute_session_chat_turn(
@@ -2949,7 +2985,7 @@ def _execute_session_chat_turn(
         model_manager=model_manager,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
-        dependencies=_build_turn_execution_dependencies(),
+        dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
     )
 
 
@@ -2984,8 +3020,9 @@ def _execute_dialogue_cycle_turn(
     reset_session: bool,
     stream_to_console: bool,
     model_manager: Optional[Any],
-    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
-    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+    runtime_container: Optional[RuntimeContainer] = None,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> TurnExecutionResult:
     service = TurnExecutionService()
     return service.execute_dialogue_cycle_turn(
@@ -3021,7 +3058,7 @@ def _execute_dialogue_cycle_turn(
         model_manager=model_manager,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
-        dependencies=_build_turn_execution_dependencies(),
+        dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
     )
 
 
