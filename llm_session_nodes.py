@@ -22,44 +22,64 @@ import shutil
 import folder_paths
 import hashlib
 import traceback
-try:
-    from .core.defaults import (
-        DEFAULT_SYSTEM_PROMPT,
-        FULL_UI_DEFAULTS,
-        LOG_LEVEL_OPTIONS,
-        PERSISTENT_CACHE_OPTIONS,
-        RUNTIME_CACHE_OPTIONS,
-        SIMPLE_DEFAULTS,
-        SIMPLE_WRAPPER_DEFAULTS,
-        SUMMARY_HELPER_DEFAULTS,
-    )
-    from .core.continue_rewrite import rewrite_continue_prompt
-    from .core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
-    from .core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
-    from .core.runtime_container import RuntimeContainer
-    from .infra import history_store
-    from .services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
-    from .services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
-    from .core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
-except Exception:
-    from core.defaults import (
-        DEFAULT_SYSTEM_PROMPT,
-        FULL_UI_DEFAULTS,
-        LOG_LEVEL_OPTIONS,
-        PERSISTENT_CACHE_OPTIONS,
-        RUNTIME_CACHE_OPTIONS,
-        SIMPLE_DEFAULTS,
-        SIMPLE_WRAPPER_DEFAULTS,
-        SUMMARY_HELPER_DEFAULTS,
-    )
-    from core.continue_rewrite import rewrite_continue_prompt
-    from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
-    from core.kv_state import build_kv_state_signature, try_restore_kv_state, try_save_kv_state
-    from core.runtime_container import RuntimeContainer
-    from infra import history_store
-    from services.chat_turn_service import ChatTurnService, DialogueCycleDependencies, DialogueCycleNodeExecutionDependencies, DialogueCycleNodeExecutionRequest, DialogueCycleNodeExecutionService, DialogueCycleRequest
-    from services.turn_execution_service import SessionChatNodeExecutionDependencies, SessionChatNodeExecutionRequest, SessionChatNodeExecutionService, TurnExecutionDependencies, TurnExecutionResult, TurnExecutionService
-    from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+from importlib import import_module
+
+
+def _import_layer_module(module_name: str):
+    if __package__:
+        try:
+            return import_module(f".{module_name}", package=__package__)
+        except ImportError:
+            pass
+    return import_module(module_name)
+
+
+_core_defaults = _import_layer_module("core.defaults")
+DEFAULT_SYSTEM_PROMPT = _core_defaults.DEFAULT_SYSTEM_PROMPT
+FULL_UI_DEFAULTS = _core_defaults.FULL_UI_DEFAULTS
+LOG_LEVEL_OPTIONS = _core_defaults.LOG_LEVEL_OPTIONS
+PERSISTENT_CACHE_OPTIONS = _core_defaults.PERSISTENT_CACHE_OPTIONS
+RUNTIME_CACHE_OPTIONS = _core_defaults.RUNTIME_CACHE_OPTIONS
+SIMPLE_DEFAULTS = _core_defaults.SIMPLE_DEFAULTS
+SIMPLE_WRAPPER_DEFAULTS = _core_defaults.SIMPLE_WRAPPER_DEFAULTS
+SUMMARY_HELPER_DEFAULTS = _core_defaults.SUMMARY_HELPER_DEFAULTS
+
+_core_continue_rewrite = _import_layer_module("core.continue_rewrite")
+rewrite_continue_prompt = _core_continue_rewrite.rewrite_continue_prompt
+
+_core_generation_runner = _import_layer_module("core.generation_runner")
+run_generation_with_adaptive_retry = _core_generation_runner.run_generation_with_adaptive_retry
+run_with_typeerror_fallback = _core_generation_runner.run_with_typeerror_fallback
+
+_core_kv_state = _import_layer_module("core.kv_state")
+build_kv_state_signature = _core_kv_state.build_kv_state_signature
+try_restore_kv_state = _core_kv_state.try_restore_kv_state
+try_save_kv_state = _core_kv_state.try_save_kv_state
+
+_core_runtime_container = _import_layer_module("core.runtime_container")
+RuntimeContainer = _core_runtime_container.RuntimeContainer
+
+history_store = _import_layer_module("infra.history_store")
+
+_services_chat_turn = _import_layer_module("services.chat_turn_service")
+ChatTurnService = _services_chat_turn.ChatTurnService
+DialogueCycleDependencies = _services_chat_turn.DialogueCycleDependencies
+DialogueCycleNodeExecutionDependencies = _services_chat_turn.DialogueCycleNodeExecutionDependencies
+DialogueCycleNodeExecutionRequest = _services_chat_turn.DialogueCycleNodeExecutionRequest
+DialogueCycleNodeExecutionService = _services_chat_turn.DialogueCycleNodeExecutionService
+DialogueCycleRequest = _services_chat_turn.DialogueCycleRequest
+
+_services_turn_execution = _import_layer_module("services.turn_execution_service")
+SessionChatNodeExecutionDependencies = _services_turn_execution.SessionChatNodeExecutionDependencies
+SessionChatNodeExecutionRequest = _services_turn_execution.SessionChatNodeExecutionRequest
+SessionChatNodeExecutionService = _services_turn_execution.SessionChatNodeExecutionService
+TurnExecutionDependencies = _services_turn_execution.TurnExecutionDependencies
+TurnExecutionResult = _services_turn_execution.TurnExecutionResult
+TurnExecutionService = _services_turn_execution.TurnExecutionService
+
+_core_logging_utils = _import_layer_module("core.logging_utils")
+log_error_safely = _core_logging_utils.log_error_safely
+LOG_LEVEL_MINIMAL = _core_logging_utils.LOG_LEVEL_MINIMAL
 
 # ============================================================================
 # Module Layout (for future file split)
@@ -370,7 +390,6 @@ def _build_session_chat_simple_chat_kwargs(
 
 
 # llama-cpp-python imports
-from importlib import import_module
 from collections import defaultdict
 from typing import Any, Callable
 
