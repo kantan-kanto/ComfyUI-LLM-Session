@@ -23,7 +23,13 @@ class GenerationExecutionService:
     @staticmethod
     def _is_ctx_error(err: Exception) -> bool:
         s = str(err)
-        return ("exceeds n_ctx" in s) or ("Prompt exceeds n_ctx" in s) or ("n_ctx" in s and "exceed" in s)
+        s_lower = s.lower()
+        return (
+            ("exceeds n_ctx" in s)
+            or ("Prompt exceeds n_ctx" in s)
+            or ("n_ctx" in s and "exceed" in s_lower)
+            or ("context window" in s_lower and "exceed" in s_lower)
+        )
 
     def _build_attempt_logger(self, request: Any) -> Optional[Callable[..., None]]:
         if not request.enable_attempt_logging:
