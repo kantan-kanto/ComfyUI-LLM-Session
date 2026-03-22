@@ -970,6 +970,7 @@ def _coerce_int(v, default: int) -> int:
     except Exception:
         return default
 
+
 # ============================================================================
 # Message Building + Generation Wrappers
 # ============================================================================
@@ -2550,11 +2551,9 @@ def _input_types_dialogue_cycle() -> dict:
 # ComfyUI Node Implementations
 # ============================================================================
 
-
 # =============================================================================
-# LLM Session Chat
+# LLM Session Chat Wiring
 # =============================================================================
-
 
 def _build_turn_execution_dependencies(
     runtime_container: Optional[RuntimeContainer] = None,
@@ -2601,9 +2600,9 @@ def _build_turn_execution_dependencies(
     }
 
 
-
-
-
+# =============================================================================
+# LLM Dialogue Cycle Wiring
+# =============================================================================
 
 def _build_dialogue_cycle_dependencies() -> DialogueCycleDependencies:
     return DialogueCycleDependencies(
@@ -2711,6 +2710,10 @@ def _build_dialogue_cycle_common_turn_kwargs(
         "text_chat_builder_overrides": text_chat_builder_overrides,
     }
 
+
+# =============================================================================
+# LLM Session Chat Runtime Helpers
+# =============================================================================
 
 def _build_session_chat_turn_kwargs(
     *,
@@ -3148,6 +3151,10 @@ def _run_session_chat_from_inputs(
     return service.run(request=request, dependencies=dependencies)
 
 
+# =============================================================================
+# LLM Session Chat
+# =============================================================================
+
 class LLMSessionChatNode:
     """
     LLM Session Chat - Local GGUF vision language models with file-based chat history.
@@ -3237,7 +3244,7 @@ class LLMSessionChatNode:
 
 
 # =============================================================================
-# LLM Dialogue Cycle Helpers
+# LLM Dialogue Cycle Runtime Helpers
 # =============================================================================
 
 def _chat_one_turn(
@@ -3754,4 +3761,3 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-
