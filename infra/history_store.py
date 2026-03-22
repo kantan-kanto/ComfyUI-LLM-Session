@@ -5,7 +5,10 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional
 
-from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+try:
+    from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+except Exception:
+    from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 
 
 def ensure_dir(path: str) -> None:
@@ -214,3 +217,4 @@ def load_history(
     hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
     atomic_write_json(path, hist)
     return hist, path
+
