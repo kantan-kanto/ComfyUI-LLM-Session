@@ -3726,9 +3726,14 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
 def cleanup():
     """Cleanup on module unload"""
+    container = _resolve_runtime_container()
+    mgr = container.model_manager
+    if mgr is not None:
+        mgr.unload_model()
+    container.model_manager = None
+
     global _model_manager
-    if _model_manager is not None:
-        _model_manager.unload_model()
+    _model_manager = None
 
 import atexit
 atexit.register(cleanup)
