@@ -1,17 +1,16 @@
 # Known Issues
 
 ## dynamic_max_tokens does not retry on some n_ctx overflow errors
-- Status: Open
+- Status: Resolved (2026-03-22)
 - First recorded: 2026-03-21
 - Scope: `LLM Session Chat` / `LLM Dialogue Cycle`
-- Symptom: Generation fails immediately on the first attempt even when `dynamic_max_tokens=true`.
+- Symptom: Generation failed immediately on the first attempt even when `dynamic_max_tokens=true`.
 - Repro (example): `n_ctx=512`, long user input, `max_tokens=400`, `dynamic_max_tokens=true`.
 - Observed error: `Requested tokens (...) exceed context window of 512`
-- Current behavior: no adaptive retry (no second attempt with reduced `max_tokens`).
+- Root cause: Context-overflow detection only matched `n_ctx`-style wording and did not classify `context window` overflow messages as retryable context errors.
+- Resolution: Expanded `GenerationExecutionService._is_ctx_error()` matching to include `context window` + `exceed` wording, so adaptive retry now triggers for this error family.
 - Regression status: Unknown (baseline before refactor was not confirmed).
-- Planned handling: Address after P1 refactoring completion as a separate bug-fix task.
-- Notes: This is tracked separately from refactoring acceptance criteria.
-
+- Notes: This issue was tracked separately from refactoring acceptance criteria.
 ## KV_cache load fails after llama-cpp-python update
 - Status: Open
 - First recorded: 2026-03-21
