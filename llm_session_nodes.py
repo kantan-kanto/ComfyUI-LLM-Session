@@ -2925,6 +2925,96 @@ def _execute_dialogue_cycle_turn(
         dependencies=_build_turn_execution_dependencies(),
     )
 
+
+def _run_session_chat_from_inputs(
+    *,
+    user_text: str,
+    session_id: str,
+    model: str,
+    mmproj: str,
+    system_prompt: str,
+    max_tokens: int,
+    temperature: float,
+    top_p: float,
+    n_gpu_layers: int,
+    n_ctx: int,
+    image: Any,
+    max_turns: int,
+    summarize_old_history: bool,
+    summary_chunk_turns: int,
+    max_tokens_summary: int,
+    summary_max_chars: int,
+    dynamic_max_tokens: bool,
+    min_generation_tokens: int,
+    safety_margin_tokens: int,
+    persistent_cache: str,
+    repeat_penalty: float,
+    repeat_last_n: int,
+    rewrite_continue: bool,
+    runtime_cache: str,
+    log_level: str,
+    suppress_backend_logs: bool,
+    history_dir: str,
+    reset_session: bool,
+    stream_to_console: bool,
+    chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
+    text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+) -> tuple:
+    start_time = time.perf_counter()
+    _require_llama_cpp_available()
+    if _resolve_valid_session_chat_model_path(model, start_time) is None:
+        return ("",)
+
+    mgr = _get_or_create_model_manager()
+    result = _execute_session_chat_turn(
+        **_build_session_chat_turn_kwargs(
+            user_text=user_text,
+            session_id=session_id,
+            model=model,
+            mmproj=mmproj,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            image=image,
+            max_turns=max_turns,
+            summarize_old_history=summarize_old_history,
+            summary_chunk_turns=summary_chunk_turns,
+            max_tokens_summary=max_tokens_summary,
+            summary_max_chars=summary_max_chars,
+            dynamic_max_tokens=dynamic_max_tokens,
+            min_generation_tokens=min_generation_tokens,
+            safety_margin_tokens=safety_margin_tokens,
+            persistent_cache=persistent_cache,
+            repeat_penalty=repeat_penalty,
+            repeat_last_n=repeat_last_n,
+            rewrite_continue=rewrite_continue,
+            runtime_cache=runtime_cache,
+            log_level=log_level,
+            suppress_backend_logs=suppress_backend_logs,
+            history_dir=history_dir,
+            reset_session=reset_session,
+            stream_to_console=stream_to_console,
+            model_manager=mgr,
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
+        )
+    )
+
+    if not result.generation_succeeded:
+        if result.error is not None:
+            return _session_chat_error_return(
+                start_time,
+                f"[LLM Session Chat] Error during generation: {result.error}",
+            )
+        return _session_chat_error_return(start_time)
+
+    _log_session_chat_total(start_time, "Finished")
+    return (result.assistant_text,)
+
+
 class LLMSessionChatNode:
     """
     LLM Session Chat - Local GGUF vision language models with file-based chat history.
@@ -2978,60 +3068,39 @@ class LLMSessionChatNode:
              stream_to_console: bool = False,
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
-        _t_total = time.perf_counter()
-
-        _require_llama_cpp_available()
-        if _resolve_valid_session_chat_model_path(model, _t_total) is None:
-            return ("",)
-
-        mgr = _get_or_create_model_manager()
-        result = _execute_session_chat_turn(
-            **_build_session_chat_turn_kwargs(
-                user_text=user_text,
-                session_id=session_id,
-                model=model,
-                mmproj=mmproj,
-                system_prompt=system_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                n_gpu_layers=n_gpu_layers,
-                n_ctx=n_ctx,
-                image=image,
-                max_turns=max_turns,
-                summarize_old_history=summarize_old_history,
-                summary_chunk_turns=summary_chunk_turns,
-                max_tokens_summary=max_tokens_summary,
-                summary_max_chars=summary_max_chars,
-                dynamic_max_tokens=dynamic_max_tokens,
-                min_generation_tokens=min_generation_tokens,
-                safety_margin_tokens=safety_margin_tokens,
-                persistent_cache=persistent_cache,
-                repeat_penalty=repeat_penalty,
-                repeat_last_n=repeat_last_n,
-                rewrite_continue=rewrite_continue,
-                runtime_cache=runtime_cache,
-                log_level=log_level,
-                suppress_backend_logs=suppress_backend_logs,
-                history_dir=history_dir,
-                reset_session=reset_session,
-                stream_to_console=stream_to_console,
-                model_manager=mgr,
-                chat_handler_overrides=chat_handler_overrides,
-                text_chat_builder_overrides=text_chat_builder_overrides,
-            )
+        return _run_session_chat_from_inputs(
+            user_text=user_text,
+            session_id=session_id,
+            model=model,
+            mmproj=mmproj,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            image=image,
+            max_turns=max_turns,
+            summarize_old_history=summarize_old_history,
+            summary_chunk_turns=summary_chunk_turns,
+            max_tokens_summary=max_tokens_summary,
+            summary_max_chars=summary_max_chars,
+            dynamic_max_tokens=dynamic_max_tokens,
+            min_generation_tokens=min_generation_tokens,
+            safety_margin_tokens=safety_margin_tokens,
+            persistent_cache=persistent_cache,
+            repeat_penalty=repeat_penalty,
+            repeat_last_n=repeat_last_n,
+            rewrite_continue=rewrite_continue,
+            runtime_cache=runtime_cache,
+            log_level=log_level,
+            suppress_backend_logs=suppress_backend_logs,
+            history_dir=history_dir,
+            reset_session=reset_session,
+            stream_to_console=stream_to_console,
+            chat_handler_overrides=chat_handler_overrides,
+            text_chat_builder_overrides=text_chat_builder_overrides,
         )
-
-        if not result.generation_succeeded:
-            if result.error is not None:
-                return _session_chat_error_return(
-                    _t_total,
-                    f"[LLM Session Chat] Error during generation: {result.error}",
-                )
-            return _session_chat_error_return(_t_total)
-
-        _log_session_chat_total(_t_total, "Finished")
-        return (result.assistant_text,)
 
 
 # =============================================================================
