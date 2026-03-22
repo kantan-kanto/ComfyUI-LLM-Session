@@ -22,15 +22,12 @@
 - Regression status: Known pre-existing issue before P0 refactoring; no additional worsening observed in current refactoring.
 - Planned handling: Track as a separate bug-fix task after refactoring milestones.
 ## LLM Dialogue Cycle unloads model at end of execution
-- Status: Open
+- Status: Resolved (2026-03-22)
 - First recorded: 2026-03-21
 - Scope: `LLM Dialogue Cycle`
-- Symptom: Model is unloaded when cycle execution finishes.
-- Observed log: `[GGUFModelManager] Unloading model: C:\ComfyUI\models\LLM\Qwen3VL-8B-Instruct-Q8_0.gguf`
-- Current behavior: model unload is always performed at the end of `chat_cycle` flow.
-- Regression status: Unknown (whether this is intended policy or incidental behavior has not been finalized).
-- Planned handling: Re-evaluate as a post-refactor behavior decision task (separate from behavior-preserving refactor commits).
-
+- Previous behavior: model unload was always performed at the end of `chat_cycle` flow.
+- Resolution: `runtime_cache` modes `KV_cache` and `LlamaTrieCache` now keep managers loaded across and after cycle execution.
+- Notes: Other runtime cache modes continue deterministic unload behavior for memory cleanup.
 ## History .bak recovery does not restore session in some local cases
 - Status: Open
 - First recorded: 2026-03-22
@@ -45,3 +42,4 @@
 - Regression status: Unknown (pre-refactor behavior was not conclusively verified).
 - Planned handling: Address after refactoring completion as a separate bug-fix task.
 - Notes: This issue is tracked separately from behavior-preserving refactor commits.
+

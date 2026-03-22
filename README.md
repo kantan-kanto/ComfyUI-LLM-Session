@@ -142,6 +142,9 @@ When using Vision-capable models, please follow these rules:
 - `persistent_cache = LlamaDiskCache` stores disk cache data under `history_dir/cache/<session_id>/`.
 - Disk cache is isolated per session id, then split by model settings inside that session cache root.
 - `reset_session` does not delete disk cache. To start with a different cache namespace, use a different `session_id`.
+- `LLM Dialogue Cycle` keeps model managers loaded during and after execution when `runtime_cache` is `KV_cache` or `LlamaTrieCache`.
+- For other runtime cache modes, `LLM Dialogue Cycle` unloads managers between turns and at execution end.
+- To release VRAM explicitly after a keep-loaded run, execute `Unload LLM Model` manually.
 
 See [PARAMETERS.md](PARAMETERS.md) for the full list of settings and advanced usage.
 
@@ -316,5 +319,6 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 - Improved Qwen3.5 generation paths and override handling
 - Improved backward compatibility for repetition-control parameters
 - Improved conversation summarization quality and history tracking
+
 
 
