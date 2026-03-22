@@ -55,10 +55,8 @@ def test_cleanup_unloads_runtime_container_model_manager(monkeypatch):
     manager = DummyManager()
     container = module.RuntimeContainer(model_manager=manager, mem_kv_state={})
     monkeypatch.setattr(module, "_runtime_container", container)
-    monkeypatch.setattr(module, "_model_manager", manager)
 
     module.cleanup()
 
     assert manager.unloaded is True
     assert container.model_manager is None
-    assert module._model_manager is None

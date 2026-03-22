@@ -2055,10 +2055,8 @@ class GGUFModelManager:
         import gc as _gc
         _gc.collect()
 
-# Global model manager
-_model_manager = GGUFModelManager()
 _runtime_container = RuntimeContainer(
-    model_manager=_model_manager,
+    model_manager=GGUFModelManager(),
 )
 
 
@@ -2904,11 +2902,8 @@ def _get_or_create_model_manager(
     if existing is not None:
         return existing
 
-    global _model_manager
-    if _model_manager is None:
-        _model_manager = GGUFModelManager()
-    container.model_manager = _model_manager
-    return _model_manager
+    container.model_manager = GGUFModelManager()
+    return container.model_manager
 
 
 def _execute_session_chat_turn(
@@ -3731,9 +3726,6 @@ def cleanup():
     if mgr is not None:
         mgr.unload_model()
     container.model_manager = None
-
-    global _model_manager
-    _model_manager = None
 
 import atexit
 atexit.register(cleanup)
