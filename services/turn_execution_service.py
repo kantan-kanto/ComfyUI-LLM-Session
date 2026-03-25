@@ -371,6 +371,7 @@ class TurnExecutionService:
             history_dir=(request.history_dir or None),
             system_prompt=request.system_prompt,
             model_sig=model_sig,
+            log_level=request.log_level,
             reset_session=bool(request.reset_session),
         )
 

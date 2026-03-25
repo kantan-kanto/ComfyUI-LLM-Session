@@ -6,6 +6,7 @@ from .logging_utils import (
     LOG_LEVEL_TIMING,
     create_fallback_logger,
     get_log_level,
+    get_module_logger,
     handle_exception_safely,
     init_logging_from_config,
     is_log_enabled,

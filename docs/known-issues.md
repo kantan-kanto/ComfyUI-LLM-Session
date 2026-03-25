@@ -28,7 +28,7 @@
 - Resolution: `runtime_cache` modes `KV_cache` and `LlamaTrieCache` now keep managers loaded across and after cycle execution.
 - Notes: Other runtime cache modes continue deterministic unload behavior for memory cleanup.
 ## History .bak recovery does not restore session in some local cases
-- Status: Open
+- Status: Resolved (2026-03-25)
 - First recorded: 2026-03-22
 - Scope: `LLM Session Chat` (history load path)
 - Symptom: Session history is not recovered even when a `.bak` file exists.
@@ -37,9 +37,12 @@
   2. Case A: break JSON structure in the primary file (`*.json`) and keep `*.bak`.
   3. Case B: delete the primary file (`*.json`) while `*.bak` exists.
   4. Run `LLM Session Chat` with the same `session_id`.
-- Current behavior: `.bak` is not used to restore in the tested local environment.
-- Regression status: Unknown (pre-refactor behavior was not conclusively verified).
-- Planned handling: Address after refactoring completion as a separate bug-fix task.
+- Resolution:
+  `load_history` now falls back to `*.bak` when the primary history file is invalid or missing, then restores and re-saves the primary `*.json` file atomically.
+  Added regression tests for both repro cases:
+  - primary JSON is invalid but `.bak` exists
+  - primary JSON is missing and `.bak` exists
+- Regression status: Fixed with focused tests in `tests/infra/test_history_store.py`.
 - Notes: This issue is tracked separately from behavior-preserving refactor commits.
 
 ## Potential Refactoring Candidates (Not Confirmed Bugs)
@@ -62,4 +65,3 @@
 - Location: `llm_session_nodes.py` (simple wrapper kwargs builders and simple node entry points)
 - Observation: Multiple simple-wrapper paths perform similar default/override mapping.
 - Caution: Public UI compatibility (input keys, defaults, sentinel labels) is compatibility-critical and must be preserved.
-

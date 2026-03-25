@@ -952,6 +952,7 @@ def load_history(
     history_dir: Optional[str],
     system_prompt: str,
     model_sig: Optional[Dict[str, Any]] = None,
+    log_level: Optional[str] = None,
     reset_session: bool = _SIMPLE_WRAPPER_DEFAULTS["reset_session"],
 ) -> tuple[Dict[str, Any], str]:
     return history_store.load_history(
@@ -959,6 +960,7 @@ def load_history(
         history_dir=history_dir,
         system_prompt=system_prompt,
         model_sig=model_sig,
+        log_level=log_level,
         reset_session=reset_session,
         default_dir=default_sessions_dir(),
         now_iso=_now_iso_jst,
@@ -3874,5 +3876,4 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-
 

@@ -6,9 +6,23 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 try:
-    from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+    from ..core.logging_utils import (
+        log_error_safely,
+        get_module_logger,
+        set_module_log_level,
+        LOG_LEVEL_MINIMAL,
+        LOG_LEVEL_TIMING,
+        LOG_LEVEL_DEBUG,
+    )
 except Exception:
-    from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+    from core.logging_utils import (
+        log_error_safely,
+        get_module_logger,
+        set_module_log_level,
+        LOG_LEVEL_MINIMAL,
+        LOG_LEVEL_TIMING,
+        LOG_LEVEL_DEBUG,
+    )
 
 
 def ensure_dir(path: str) -> None:
@@ -68,6 +82,18 @@ def atomic_write_json(path: str, obj: Dict[str, Any]) -> None:
             log_error_safely("HistoryStore", e, f"Failed to create backup file: {bak}", LOG_LEVEL_MINIMAL)
             # Continue anyway - the tmp file will replace the original, but backup won't be available
     os.replace(tmp, path)
+
+
+def _atomic_restore_json(path: str) -> Optional[str]:
+    ensure_dir(os.path.dirname(path))
+    bak = path + ".bak"
+    if os.path.exists(bak):
+        try:
+            os.replace(bak, path)
+            return path
+        except Exception as e:            
+            log_error_safely("HistoryStore", e, f"Failed to restore from backup file: {bak}", LOG_LEVEL_MINIMAL)
+    return None
 
 
 def _coerce_int(v: Any, default: int) -> int:
@@ -166,24 +192,14 @@ def get_context_turns(history: Dict[str, Any], max_turns: Optional[int] = None) 
     return pending
 
 
-def load_history(
-    *,
-    session_id: str,
-    history_dir: Optional[str],
+def _try_load_history_file(
+    path: str,
     system_prompt: str,
-    model_sig: Optional[Dict[str, Any]] = None,
-    reset_session: bool = False,
-    default_dir: str,
-    now_iso: Callable[[], str],
-) -> tuple[Dict[str, Any], str]:
-    """Load session history JSON, or create new. Returns (history, path)."""
-    path = history_path(session_id, history_dir, default_dir)
-    if reset_session:
-        hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
-        atomic_write_json(path, hist)
-        return hist, path
-
-    if os.path.exists(path):
+    model_sig: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not os.path.exists(path):
+        return None
+    else:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 hist = json.load(f)
@@ -194,27 +210,57 @@ def load_history(
                 hist["system_prompt"] = system_prompt
             if model_sig:
                 hist.setdefault("meta", {}).setdefault("model_signature", {}).update(model_sig)
-            return hist, path
-        except Exception:
-            bak = path + ".bak"
-            if os.path.exists(bak):
-                try:
-                    with open(bak, "r", encoding="utf-8") as f:
-                        hist = json.load(f)
-                    if isinstance(hist, dict) and hist.get("schema_version") == 1:
-                        hist = normalize_history_schema(hist)
-                        if system_prompt:
-                            hist["system_prompt"] = system_prompt
-                        if model_sig:
-                            hist.setdefault("meta", {}).setdefault("model_signature", {}).update(model_sig)
-                        return hist, path
-                except Exception:
-                    pass
-            hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
-            atomic_write_json(path, hist)
-            return hist, path
+            return hist
+        except Exception as e:
+            return None
+        
 
+def load_history(
+    *,
+    session_id: str,
+    history_dir: Optional[str],
+    system_prompt: str,
+    model_sig: Optional[Dict[str, Any]] = None,
+    log_level: Optional[str] = None,
+    reset_session: bool = False,
+    default_dir: str,
+    now_iso: Callable[[], str],
+) -> tuple[Dict[str, Any], str]:
+    """Load session history JSON, or create new. Returns (history, path)."""
+    if isinstance(log_level, str) and log_level in {LOG_LEVEL_MINIMAL, LOG_LEVEL_TIMING, LOG_LEVEL_DEBUG}:
+        # Keep infra logger filtering aligned with UI-selected verbosity.
+        set_module_log_level("Load History", log_level)
+        set_module_log_level("HistoryStore", log_level)
+
+    log = get_module_logger("Load History")
+    log(f"load_history (reset session: {reset_session})", LOG_LEVEL_DEBUG)
+    path = history_path(session_id, history_dir, default_dir)
+
+    if reset_session:
+        hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
+        atomic_write_json(path, hist)
+        return hist, path
+    
+    hist = _try_load_history_file(path, system_prompt, model_sig)
+    if hist is not None:
+        log(f"Success load history: {path}", LOG_LEVEL_TIMING)
+        return hist, path
+
+    bak = path + ".bak"
+    hist = _try_load_history_file(bak, system_prompt, model_sig)
+    if hist is not None:
+        log(f"Success load backup history: {bak}", LOG_LEVEL_TIMING)
+        try:
+            _atomic_restore_json(path)
+            atomic_write_json(path, hist)
+            log(f"Success restore history file: {path}", LOG_LEVEL_DEBUG)
+        except Exception as e:
+            # P0: Log history file save failure - this is critical as it can cause data loss
+            log_error_safely("HistoryStore", e, f"Failed to restore history file: {path}", LOG_LEVEL_DEBUG)
+        return hist, path
+    else:
+        log(f"Failed to load backup history: {bak}", LOG_LEVEL_TIMING)
+    
     hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
     atomic_write_json(path, hist)
     return hist, path
-
