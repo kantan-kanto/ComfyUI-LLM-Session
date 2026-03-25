@@ -4,6 +4,32 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [1.1.0] - 2026-03-25
+
+- Added explicit unload control
+  - Added a new output node: `Unload LLM Model`
+  - You can now release the currently loaded model manually (for example, after keep-loaded cache runs)
+
+- Adjusted model unload behavior for dialogue cache modes
+  - `LLM Dialogue Cycle` now keeps model managers loaded when `runtime_cache` is `KV_cache` or `LlamaTrieCache`
+  - Non keep-loaded modes continue deterministic unload behavior
+  - `GGUFModelManager.unload_model()` cleanup was strengthened to reduce stale runtime/cache state
+
+- Fixed adaptive retry for context overflow errors
+  - Context-overflow errors phrased as `context window ... exceed ...` are now detected as retryable ctx errors
+  - Dynamic max-token retry can now recover in more overflow wording variants
+
+- Fixed history recovery from backup files
+  - `load_history` now falls back to `*.bak` when the primary history JSON is invalid or missing
+  - When backup load succeeds, the primary `*.json` is restored and re-saved atomically
+  - History loader log verbosity is now aligned with request `log_level`
+
+- Internal quality improvements (no intended breaking changes)
+  - Large internal refactor across `core/`, `infra/`, and `services/` layers
+  - Expanded pytest coverage to lock behavior during refactoring
+
+---
+
 ## [1.0.4] - 2026-03-16
 
 - Revised cache behavior and improved cache safety

@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.0.4
+**Version:** 1.1.0
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -17,15 +17,19 @@ for **observation, experimentation, and analysis**.
 
 ## Upgrade Notes for Existing Users
 
-The following notes are intended for existing users upgrading to `1.0.4`.
+The following notes are intended for existing users upgrading to `1.1.0`.
 
 - Cache-related setting names have changed. The previous `prompt_cache_mode` / `kv_state_mode` options have been reorganized into `persistent_cache` / `runtime_cache`.
 - The cache storage directory name has changed from `prompt_cache/` to `cache/`. Existing cache data is not migrated automatically.
 - `reset_session` now clears history and per-session KV state, while keeping the session's disk cache so the same session can restart efficiently.
 - Older history JSON files are normalized automatically, but the tracking model for summarized ranges has changed. Long-lived sessions may therefore behave somewhat differently from previous versions.
 - When using Vision models, both mmproj auto-detection and handler selection logic have changed. Even combinations that worked before may need to be rechecked depending on backend behavior and filename conventions.
+- `LLM Dialogue Cycle` now keeps model managers loaded when `runtime_cache` is `KV_cache` or `LlamaTrieCache`.
+- Added `Unload LLM Model` output node for explicit manual VRAM release after keep-loaded runs.
+- History loading now restores from `*.bak` when the primary history JSON is invalid or missing.
+- Adaptive retry now recognizes additional context-overflow error wording (`context window ... exceed ...`).
 
-For details, see the `1.0.4` section in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
+For details, see the `1.1.0` section in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ---
 
@@ -60,6 +64,7 @@ Minimal version focused on **role-based dialogue observation**.
 A utility output node that manually unloads the current LLM from VRAM.
 Set `unload_now=true` and queue the node to release model memory.
 After running, set it back to false to avoid repeated unloads.
+
 ---
 
 ## Key Design Concepts
@@ -313,12 +318,9 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.0.4
+### Current Version: 1.1.0
 
-- Revised cache behavior and improved cache safety
-- Improved Qwen3.5 generation paths and override handling
-- Improved backward compatibility for repetition-control parameters
-- Improved conversation summarization quality and history tracking
-
-
-
+- Added `Unload LLM Model` output node for explicit manual unload
+- Adjusted dialogue unload behavior for `KV_cache` / `LlamaTrieCache` keep-loaded modes
+- Fixed adaptive retry detection for additional context-overflow error wording
+- Fixed history `.bak` recovery path for invalid or missing primary JSON files
