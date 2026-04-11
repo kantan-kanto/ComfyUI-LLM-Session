@@ -4,6 +4,27 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [1.1.1] - 2026-04-11
+
+- Added Gemma 4 alias support
+  - Added `gemma4` / `gemma-4` model-family aliases
+  - Added `gemma4` chat-format mapping to `Gemma4ChatHandler` for compatibility with current llama-cpp chat handlers
+  - Updated mmproj auto-detect family matching to include Gemma 4 aliases
+
+- Added minimal LFM2.5-VL handler wiring
+  - Added `lfm2.5-vl` aliases and `LFM25VLChatHandler` mapping
+  - `lfm2-vl` / `lfm2.5-vl` are currently not validated in this repository's test environment
+
+- Improved GGUF/mmproj filename discovery robustness
+  - GGUF extension matching is now case-insensitive (`.gguf` / `.GGUF`)
+  - mmproj prefix matching is now case-insensitive (`mmproj-` / `MMPROJ-`)
+
+- ComfyUI Registry flagged-status mitigation
+  - Added a bundled `LICENSE` file so `pyproject.toml` `license = {file = "LICENSE"}` always resolves during packaging/indexing
+  - Bumped package/module version to `1.1.1`
+
+---
+
 ## [1.1.0] - 2026-03-25
 
 - Added explicit unload control

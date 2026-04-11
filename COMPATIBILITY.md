@@ -19,6 +19,7 @@ This document summarizes empirical compatibility results obtained during develop
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
+- Gemma 4 (31B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
@@ -34,7 +35,7 @@ This document summarizes empirical compatibility results obtained during develop
 - Qwen3-VL (4B / 8B)
 - Qwen3.5 (9B / 27B / 35B-A3B)*
 
-**Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash`, `Nemotron-Nano` and `Qwen3.5` fail to load.
+**Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 
 ---
 
@@ -51,6 +52,8 @@ Mixtral failures occur at model load time and are likely backend-related.
 
 - Some vision-capable models may ignore image inputs without errors
 - Vision compatibility depends on mmproj selection and chat template support
+- `lfm2-vl` / `lfm2.5-vl` handler wiring is present, but end-to-end validation has not been completed in this test environment yet
+- GGUF discovery and mmproj prefix classification are case-insensitive (`.gguf`/`.GGUF`, `mmproj-`/`MMPROJ-`)
 
 ---
 
@@ -71,13 +74,12 @@ The following notes are compatibility-related cautions for existing users upgrad
 
 **Important:** Model compatibility varies by llama-cpp-python version. Based on my testing environment:
 
-| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> (Vision) | Qwen3-VL <br> Gemma 3 <br> GLM-4.6V <br> (Vision) | Qwen3.5 <br> (Vision) |
-|---------|-------------------|-------------------|-------------------|-------------------|
-| 0.3.16 (official) | ✅* | ✅ | ❌ | ❌ |
-| 0.3.21+ (JamePeng fork) | ✅ | ✅ | ✅ | ❌ |
-| 0.3.33+ (JamePeng fork) | ✅ | ✅ | ✅ | ✅ |
+| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> (Vision) | Qwen3-VL/3.5 <br> Gemma 3/4 <br> GLM-4.6V <br> (Vision) |
+|---------|-------------------|-------------------|-------------------|
+| 0.3.16 (official) | ✅* | ✅ | ❌ |
+| 0.3.35+ (JamePeng fork) | ✅ | ✅ | ✅ |
 
-**Note:** Official llama-cpp-python 0.3.16: `GLM-4.6V Flash`, `Nemotron-Nano` and `Qwen3.5` fail to load.
+**Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 
 **Recommended Installation (JamePeng fork for Qwen3-VL support):**  
 Please follow the build and installation instructions provided in the JamePeng fork repository, as this fork requires a custom build and cannot be reliably installed via a simple `pip install`.

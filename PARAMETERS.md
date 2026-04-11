@@ -43,6 +43,23 @@ Typical values:
 
 ---
 
+### n_gpu_layers
+Number of model layers offloaded to GPU.
+
+Default:
+- `0` (matches `llama-cpp-python` default)
+
+Values:
+- `0`: CPU-only
+- `-1`: all layers are offloaded
+- positive integer: offload up to that many layers
+
+Recommended usage:
+- Increase gradually and find a stable value for your VRAM budget.
+- If model loading fails, reduce `n_gpu_layers`.
+
+---
+
 ### temperature / top_p
 Sampling parameters controlling randomness.
 

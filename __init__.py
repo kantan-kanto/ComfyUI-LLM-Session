@@ -1,4 +1,4 @@
-# ComfyUI-MultiModal-Prompt-Nodes
+# ComfyUI-LLM-Session
 # Copyright (C) 2026 kantan-kanto (https://github.com/kantan-kanto)
 #
 # This program is free software: you can redistribute it and/or modify
@@ -6,7 +6,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 try:
     from .llm_session_nodes import (
@@ -19,12 +19,10 @@ except Exception:
             NODE_CLASS_MAPPINGS as sNODE_CLASS_MAPPINGS,
             NODE_DISPLAY_NAME_MAPPINGS as sNODE_DISPLAY_NAME_MAPPINGS,
         )
-    except Exception as e:
-        import traceback
-        print(f"[LLM Session] Error: node mappings unavailable during init: {e}")
-        print(f"[LLM Session] Traceback: {traceback.format_exc()}")
-        sNODE_CLASS_MAPPINGS = {}
-        sNODE_DISPLAY_NAME_MAPPINGS = {}
+    except Exception as absolute_import_error:
+        raise RuntimeError(
+            "[LLM Session] Failed to import node mappings via both package and absolute imports."
+        ) from absolute_import_error
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}

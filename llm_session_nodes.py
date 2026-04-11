@@ -408,10 +408,12 @@ chat_handler_map = {
     "minicpm-v-4.0": "MiniCPMv26ChatHandler",
     "minicpm-v-4.5": "MiniCPMv45ChatHandler",
     "gemma3": "Gemma3ChatHandler",
+    "gemma4": "Gemma4ChatHandler",
     "glm4.1v": "GLM41VChatHandler",
     "glm4.6v": "GLM46VChatHandler",
     "granite-docling": "GraniteDoclingChatHandler",
     "lfm2-vl": "LFM2VLChatHandler",
+    "lfm2.5-vl": "LFM25VLChatHandler",
     "paddleocr": "PaddleOCRChatHandler",
     "qwen2.5-vl": "Qwen25VLChatHandler",
     "qwen3-vl": "Qwen3VLChatHandler",
@@ -429,10 +431,12 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-4.0": {},
     "minicpm-v-4.5": {},
     "gemma3": {},
+    "gemma4": {},
     "glm4.1v": {},
     "glm4.6v": {},
     "granite-docling": {},
     "lfm2-vl": {},
+    "lfm2.5-vl": {},
     "paddleocr": {},
     "qwen2.5-vl": {"image_min_tokens": 1024},
     "qwen3-vl": {"image_min_tokens": 1024},
@@ -469,6 +473,10 @@ normalized_chat_format_map = {
     "minicpmv45": "minicpm-v-4.5",
     "gemma3": "gemma3",
     "gemma-3": "gemma3",
+    "gemma_3": "gemma3",
+    "gemma4": "gemma4",
+    "gemma-4": "gemma4",
+    "gemma_4": "gemma4",
     "glm4.1v": "glm4.1v",
     "glm4_1v": "glm4.1v",
     "glm41v": "glm4.1v",
@@ -481,6 +489,10 @@ normalized_chat_format_map = {
     "granite-docling": "granite-docling",
     "lfm2-vl": "lfm2-vl",
     "lfm2vl": "lfm2-vl",
+    "lfm2.5-vl": "lfm2.5-vl",
+    "lfm2.5vl": "lfm2.5-vl",
+    "lfm2_5-vl": "lfm2.5-vl",
+    "lfm2_5vl": "lfm2.5-vl",
     "paddleocr": "paddleocr",
     "qwen2.5-vl": "qwen2.5-vl",
     "qwen2_5-vl": "qwen2.5-vl",
@@ -660,11 +672,13 @@ def _list_gguf_recursive(models_dir: str) -> tuple[list[str], list[str]]:
     models: list[str] = []
     mmprojs: list[str] = []
 
-    for p in base.rglob("*.gguf"):
+    for p in base.rglob("*"):
         if not p.is_file():
             continue
+        if p.suffix.lower() != ".gguf":
+            continue
         rel = p.relative_to(base).as_posix()  # サブフォルダを含む相対パス
-        if p.name.startswith("mmproj"):
+        if p.name.lower().startswith("mmproj"):
             mmprojs.append(rel)
         else:
             models.append(rel)
@@ -1302,6 +1316,18 @@ def _strip_reasoning_output(text: str) -> str:
             cand = (body or "").strip()
             if cand:
                 return cand
+
+    # Gemma-family outputs may sometimes use non-standard channel delimiters like:
+    #   <|channel>thought ... <channel|>final answer...
+    # In that case, treat the last channel delimiter as the handoff point to final output.
+    channel_delims = list(
+        re.finditer(r"(?is)(<\|channel\|>|<\|channel>|<channel\|>)", s)
+    )
+    if channel_delims:
+        last = channel_delims[-1]
+        tail = s[last.end():].strip()
+        if tail:
+            return tail
 
     # If a closing think tag exists, keep only the tail after the last one.
     # Some models emit reasoning text without an opening <think> but still output </think>.
@@ -3876,4 +3902,3 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
-

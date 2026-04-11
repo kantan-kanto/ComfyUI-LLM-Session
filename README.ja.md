@@ -3,7 +3,7 @@
 
 ---
 
-**Version:** 1.0.1
+**Version:** 1.1.1
 **License:** GPL-3.0
 
 **ComfyUI 上だけで動作するローカル LLM 実行環境**です。  
@@ -164,4 +164,3 @@ llama-cpp-python への依存関係により、GPL-3.0 が適用されます。
 - 不具合報告・要望：GitHub Issues
 - 詳細仕様：[README.md](README.md) / [PARAMETERS.md](PARAMETERS.md) / [COMPATIBILITY.md](COMPATIBILITY.md)
 - サンプル：examples/ ディレクトリ
-
