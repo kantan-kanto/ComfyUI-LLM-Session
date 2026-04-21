@@ -4,6 +4,28 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [1.1.2] - 2026-04-21
+
+- Added Step3-VL compatibility aliases and handler mapping
+  - Added `step3-vl` / `step3vl` aliases
+  - Added chat-format mapping to `Step3VLChatHandler`
+
+- Added Qwen3.6 compatibility aliases
+  - Added `qwen3.6` / `qwen3_6` / `qwen36` aliases
+  - Mapped Qwen3.6 aliases to existing `qwen3.5` compatibility path
+
+- Adjusted Gemma 4 default thinking behavior
+  - Set `gemma4` handler kwargs to `enable_thinking: false`
+  - Added `gemma4.enable_thinking: false` to `config/simple_defaults.json` for Simple nodes
+
+- Updated compatibility documentation entries
+  - Revised Gemma 4 tested entry to `Gemma 4 (E2B / 31B)*`
+  - Added `Qwen3.6 (35B-A3B)*` to tested models
+
+- Bumped package/module version to `1.1.2`
+
+---
+
 ## [1.1.1] - 2026-04-11
 
 - Added Gemma 4 alias support

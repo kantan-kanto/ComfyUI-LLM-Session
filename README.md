@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.1.1
+**Version:** 1.1.2
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -125,11 +125,11 @@ When using Vision-capable models, please follow these rules:
 - Place the **model** and **mmproj** GGUF files in the **same folder**.
 - The model filename must start with one of the following prefixes and end with `.gguf`:
 
-  `llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35`
+  `llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen3.6, qwen3_6, qwen36, step3-vl, step3vl`
   
 - The mmproj filename must start with `mmproj-` and end with `.gguf`.
 - If exactly one file matching
-  `mmproj-*[llava-1-5|llava15|llava-v1.5|llava-1-6|llava16|llava-v1.6|moondream2|nanollava|llama-3|llama3|minicpm-v-2.6|minicpm-v-2_6|minicpmv26|minicpm-v-4.0|minicpm-v-4_0|minicpmv40|minicpm-v-4.5|minicpm-v-4_5|minicpmv45|gemma3|gemma-3|gemma_3|gemma4|gemma-4|gemma_4|glm4.1v|glm4_1v|glm41v|glm-4.1v|glm4.6v|glm4_6v|glm46v|glm-4.6v|granitedocling|granite-docling|lfm2-vl|lfm2vl|lfm2.5-vl|lfm2.5vl|lfm2_5-vl|lfm2_5vl|paddleocr|qwen2.5-vl|qwen2_5-vl|qwen25vl|qwen3-vl|qwen3vl|qwen3.5|qwen3_5|qwen35]*.gguf`
+  `mmproj-*[llava-1-5|llava15|llava-v1.5|llava-1-6|llava16|llava-v1.6|moondream2|nanollava|llama-3|llama3|minicpm-v-2.6|minicpm-v-2_6|minicpmv26|minicpm-v-4.0|minicpm-v-4_0|minicpmv40|minicpm-v-4.5|minicpm-v-4_5|minicpmv45|gemma3|gemma-3|gemma_3|gemma4|gemma-4|gemma_4|glm4.1v|glm4_1v|glm41v|glm-4.1v|glm4.6v|glm4_6v|glm46v|glm-4.6v|granitedocling|granite-docling|lfm2-vl|lfm2vl|lfm2.5-vl|lfm2.5vl|lfm2_5-vl|lfm2_5vl|paddleocr|qwen2.5-vl|qwen2_5-vl|qwen25vl|qwen3-vl|qwen3vl|qwen3.5|qwen3_5|qwen35|qwen3.6|qwen3_6|qwen36|step3-vl|step3vl]*.gguf`
   exists in the folder, it can be selected automatically via Auto-detect.
 - Filename matching is **case-insensitive**.
 - Both GGUF extension matching (for example `.gguf`, `.GGUF`) and `mmproj` prefix matching (for example `mmproj-`, `MMPROJ-`) are case-insensitive.
@@ -221,7 +221,7 @@ The following GGUF instruction models have been tested.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (31B)*
+- Gemma 4 (E2B / 31B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
@@ -236,13 +236,14 @@ The following GGUF instruction models have been tested.
 - Qwen3-30B-A3B
 - Qwen3-VL (4B / 8B)
 - Qwen3.5 (9B / 27B / 35B-A3B)*
+- Qwen3.6 (35B-A3B)*
 
 **Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 
 ### MoE Models
 
 - MoE models can work depending on backend support
-- Qwen3-30B-A3B, Qwen3.5-35B-A3B confirmed working
+- Qwen3-30B-A3B, Qwen3.5/3.6-35B-A3B confirmed working
 - Mixtral GGUF may fail to load depending on llama.cpp / llama-cpp-python build
 
 ### Vision Models
@@ -250,7 +251,6 @@ The following GGUF instruction models have been tested.
 - Vision support depends on model + mmproj + backend
 - Some vision-capable models may ignore images without errors
 - Text-only operation is always supported
-- `lfm2-vl` / `lfm2.5-vl` handler wiring is included, but these paths are not yet validated in this repository's test environment
 
 ---
 
@@ -321,12 +321,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.1.1
+### Current Version: 1.1.2
 
-- Added Gemma 4 support updates
-- `gemma4` now maps to `Gemma4ChatHandler`
-- Expanded Gemma aliases for detection (`gemma4` / `gemma-4` / `gemma_4`, plus `gemma_3`)
-- Added minimal `lfm2.5-vl` handler wiring (`LFM25VLChatHandler`) and aliases
-- Improved reasoning-strip fallback for outputs that use channel delimiters like `<|channel>...<channel|>...`
-- GGUF discovery is now case-insensitive for extension and mmproj prefix (`.gguf` / `.GGUF`, `mmproj-` / `MMPROJ-`)
-- Added a bundled `LICENSE` file to align packaging metadata with ComfyUI Registry checks
+- Added `step3-vl` alias support and chat-handler mapping (`Step3VLChatHandler`)
+- Added `qwen3.6` aliases (`qwen3.6` / `qwen3_6` / `qwen36`) mapped to the `qwen3.5` compatibility path
+- Set `gemma4` default chat-handler behavior to `enable_thinking: false` for safer default output
+- Added `gemma4.enable_thinking: false` to `config/simple_defaults.json` (Simple nodes)
+- Updated tested-model references to include `Gemma 4 (E2B / 31B)` and `Qwen3.6 (35B-A3B)*`

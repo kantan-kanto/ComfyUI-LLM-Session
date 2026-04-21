@@ -418,6 +418,7 @@ chat_handler_map = {
     "qwen2.5-vl": "Qwen25VLChatHandler",
     "qwen3-vl": "Qwen3VLChatHandler",
     "qwen3.5": "Qwen35ChatHandler",
+    "step3-vl": "Step3VLChatHandler",
 }
 
 # chat_format ごとの追加 kwargs
@@ -431,7 +432,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-4.0": {},
     "minicpm-v-4.5": {},
     "gemma3": {},
-    "gemma4": {},
+    "gemma4": {"enable_thinking": False},
     "glm4.1v": {},
     "glm4.6v": {},
     "granite-docling": {},
@@ -441,6 +442,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "qwen2.5-vl": {"image_min_tokens": 1024},
     "qwen3-vl": {"image_min_tokens": 1024},
     "qwen3.5": {"enable_thinking": False, "image_min_tokens": 1024},
+    "step3-vl": {},
 }
 
 TEXT_CHAT_BUILDER_CONFIG_MAP = {
@@ -502,6 +504,11 @@ normalized_chat_format_map = {
     "qwen3.5": "qwen3.5",
     "qwen3_5": "qwen3.5",
     "qwen35": "qwen3.5",
+    "qwen3.6": "qwen3.5",
+    "qwen3_6": "qwen3.5",
+    "qwen36": "qwen3.5",
+    "step3-vl": "step3-vl",
+    "step3vl": "step3-vl",
 }
 
 _LLAMA_CPP_IMPORT_ERROR = None

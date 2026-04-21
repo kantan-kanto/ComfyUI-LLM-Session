@@ -3,7 +3,7 @@
 
 ---
 
-**Version:** 1.1.1
+**Version:** 1.1.2
 **License:** GPL-3.0
 
 **ComfyUI 上だけで動作するローカル LLM 実行環境**です。  

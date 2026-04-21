@@ -25,5 +25,8 @@
   "stream_to_console": true,
   "qwen3.5": {
     "enable_thinking": false
+  },
+  "gemma4": {
+    "enable_thinking": false
   }
 }
