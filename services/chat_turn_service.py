@@ -46,6 +46,7 @@ class DialogueCycleNodeExecutionRequest:
     temperature: float
     top_p: float
     n_gpu_layers: int
+    tensor_split: Optional[List[float]]
     n_ctx: int
     max_turns: int
     summarize_old_history: bool
@@ -89,6 +90,7 @@ class DialogueCycleNodeExecutionService:
             temperature=request.temperature,
             top_p=request.top_p,
             n_gpu_layers=request.n_gpu_layers,
+            tensor_split=request.tensor_split,
             n_ctx=request.n_ctx,
             max_turns=request.max_turns,
             summarize_old_history=request.summarize_old_history,
@@ -262,7 +264,6 @@ class ChatTurnService:
                     pass
 
         return "\n".join(transcript_lines)
-
 
 
 

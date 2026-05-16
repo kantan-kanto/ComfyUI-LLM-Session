@@ -76,6 +76,7 @@ class TurnExecutionRequest:
     top_p: float
     n_gpu_layers: int
     n_ctx: int
+    tensor_split: Optional[List[float]] = None
     image: Any = None
     max_turns: Optional[int] = 12
     summarize_old_history: bool = True
@@ -127,6 +128,7 @@ class TurnExecutionRequest:
         top_p: float,
         n_gpu_layers: int,
         n_ctx: int,
+        tensor_split: Optional[List[float]] = None,
         image: Any,
         max_turns: Optional[int],
         summarize_old_history: bool,
@@ -169,6 +171,7 @@ class TurnExecutionRequest:
             top_p=float(top_p),
             n_gpu_layers=int(n_gpu_layers),
             n_ctx=int(n_ctx),
+            tensor_split=(list(tensor_split) if tensor_split is not None else None),
             image=image,
             max_turns=(int(max_turns) if max_turns is not None else None),
             summarize_old_history=bool(summarize_old_history),
@@ -346,8 +349,9 @@ class TurnExecutionService:
         mmproj_path: Optional[str],
         n_ctx: int,
         n_gpu_layers: int,
+        tensor_split: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
-        return {
+        model_sig = {
             "model_file": os.path.basename(model_path),
             "mmproj_file": (
                 os.path.basename(mmproj_path)
@@ -357,6 +361,9 @@ class TurnExecutionService:
             "n_ctx": int(n_ctx),
             "n_gpu_layers": int(n_gpu_layers),
         }
+        if tensor_split is not None:
+            model_sig["tensor_split"] = [float(x) for x in tensor_split]
+        return model_sig
 
     def _load_history(
         self,
@@ -433,6 +440,7 @@ class TurnExecutionService:
                 mmproj_path=mmproj_path,
                 n_ctx=int(request.n_ctx),
                 n_gpu_layers=int(request.n_gpu_layers),
+                tensor_split=request.tensor_split,
                 chat_handler_overrides=request.chat_handler_overrides,
                 verbose=False,
             )
@@ -454,6 +462,7 @@ class TurnExecutionService:
                 mmproj_path=mmproj_path,
                 n_ctx=int(request.n_ctx),
                 n_gpu_layers=int(request.n_gpu_layers),
+                tensor_split=request.tensor_split,
                 persistent_cache=request.persistent_cache,
                 runtime_cache=request.runtime_cache,
             )
@@ -580,6 +589,7 @@ class TurnExecutionService:
             mmproj_path=mmproj_path,
             n_ctx=int(request.n_ctx),
             n_gpu_layers=int(request.n_gpu_layers),
+            tensor_split=request.tensor_split,
         )
         history, hist_path = self._load_history(request=request, deps=deps, model_sig=model_sig)
         clear_kv_state_for_session = self._reset_state_if_needed(request=request, deps=deps, mgr=mgr)

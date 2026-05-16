@@ -60,6 +60,35 @@ Recommended usage:
 
 ---
 
+### tensor_split
+Advanced Simple-node setting for multi-GPU llama.cpp / llama-cpp-python environments.
+
+This setting is read from `config/simple_defaults.json` only. Leave it as `null` or omit it to use the llama.cpp default behavior.
+
+Examples:
+
+```json
+"tensor_split": [1.0, 0.0]
+```
+
+2 visible GPUs:
+- `[1.0, 0.0]`: use GPU 0 for llama.cpp model offload
+- `[0.0, 1.0]`: use GPU 1 for llama.cpp model offload
+- `[1.0, 1.0]`: split across GPU 0 and GPU 1
+
+3 visible GPUs:
+- `[1.0, 0.0, 0.0]`: use GPU 0
+- `[0.0, 1.0, 0.0]`: use GPU 1
+- `[0.0, 0.0, 1.0]`: use GPU 2
+- `[1.0, 1.0, 1.0]`: split across all three GPUs
+
+Notes:
+- `tensor_split` applies to GPUs visible to the current ComfyUI process.
+- If `CUDA_VISIBLE_DEVICES` is set, physical GPU numbers may differ from the internal GPU order. For example, `CUDA_VISIBLE_DEVICES=1,0` makes physical GPU 1 appear as internal GPU 0.
+- `n_gpu_layers` must be greater than `0` or `-1` for GPU offload to happen.
+
+---
+
 ### temperature / top_p
 Sampling parameters controlling randomness.
 

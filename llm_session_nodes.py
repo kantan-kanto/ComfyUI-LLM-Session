@@ -142,6 +142,27 @@ def _normalize_config_path(config_path: Optional[str]) -> str:
     except Exception:
         return raw
 
+def _normalize_tensor_split(value: Any) -> Optional[List[float]]:
+    """Return a llama.cpp tensor_split list, or None when unset/invalid."""
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)):
+        return None
+
+    split: List[float] = []
+    for item in value:
+        try:
+            f = float(item)
+        except Exception:
+            return None
+        if f < 0:
+            return None
+        split.append(f)
+
+    if not split or not any(x > 0 for x in split):
+        return None
+    return split
+
 def _simple_config_path() -> str:
     try:
         base = Path(__file__).parent
@@ -228,6 +249,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["max_tokens"] = max(1, _as_int(defaults.get("max_tokens"), _SIMPLE_DEFAULTS_BUILTIN["max_tokens"]))
     defaults["n_ctx"] = max(512, _as_int(defaults.get("n_ctx"), _SIMPLE_DEFAULTS_BUILTIN["n_ctx"]))
     defaults["n_gpu_layers"] = _as_int(defaults.get("n_gpu_layers"), _SIMPLE_DEFAULTS_BUILTIN["n_gpu_layers"])
+    defaults["tensor_split"] = _normalize_tensor_split(defaults.get("tensor_split"))
     defaults["max_turns"] = max(0, _as_int(defaults.get("max_turns"), _SIMPLE_DEFAULTS_BUILTIN["max_turns"]))
     defaults["summary_chunk_turns"] = max(1, _as_int(defaults.get("summary_chunk_turns"), _SIMPLE_DEFAULTS_BUILTIN["summary_chunk_turns"]))
     defaults["max_tokens_summary"] = max(16, _as_int(defaults.get("max_tokens_summary"), _SIMPLE_DEFAULTS_BUILTIN["max_tokens_summary"]))
@@ -328,6 +350,7 @@ def _build_dialogue_cycle_simple_chat_kwargs(
         "temperature": float(defaults["temperature"]),
         "top_p": float(defaults["top_p"]),
         "n_gpu_layers": int(defaults["n_gpu_layers"]),
+        "tensor_split": defaults.get("tensor_split"),
         "n_ctx": int(defaults["n_ctx"]),
         "max_turns": int(defaults["max_turns"]),
         "summarize_old_history": bool(defaults["summarize_old_history"]),
@@ -365,6 +388,7 @@ def _build_session_chat_simple_chat_kwargs(
         "temperature": float(defaults["temperature"]),
         "top_p": float(defaults["top_p"]),
         "n_gpu_layers": int(defaults["n_gpu_layers"]),
+        "tensor_split": defaults.get("tensor_split"),
         "n_ctx": int(defaults["n_ctx"]),
         "max_turns": int(defaults["max_turns"]),
         "summarize_old_history": bool(defaults["summarize_old_history"]),
@@ -1736,6 +1760,7 @@ class GGUFModelManager:
         mmproj_path: Optional[str],
         n_ctx: int,
         n_gpu_layers: int,
+        tensor_split: Optional[List[float]],
         use_vision: bool,
         chat_handler_kwargs: Optional[Dict[str, Any]] = None,
     ) -> tuple:
@@ -1744,6 +1769,7 @@ class GGUFModelManager:
             self._normalize_path(mmproj_path),
             int(n_ctx),
             int(n_gpu_layers),
+            tuple(float(x) for x in tensor_split) if tensor_split is not None else None,
             bool(use_vision),
             json.dumps(chat_handler_kwargs or {}, sort_keys=True, ensure_ascii=True),
         )
@@ -1754,6 +1780,7 @@ class GGUFModelManager:
         mmproj_path: Optional[str] = None,
         n_ctx: int = 4096,
         n_gpu_layers: int = 0,
+        tensor_split: Optional[List[float]] = None,
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         verbose: bool = False,
     ) -> Llama:
@@ -1761,6 +1788,7 @@ class GGUFModelManager:
         _require_llama_cpp_available()
 
         model_path = self._normalize_path(model_path)
+        tensor_split = _normalize_tensor_split(tensor_split)
 
         # If user explicitly selected "(Not required)", force text-only.
         force_no_mmproj = (mmproj_path == _MMPROJ_NOT_REQUIRED)
@@ -1828,6 +1856,7 @@ class GGUFModelManager:
             mmproj_path=mmproj_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
+            tensor_split=tensor_split,
             use_vision=use_vision,
             chat_handler_kwargs=active_chat_handler_kwargs,
         )
@@ -1844,32 +1873,37 @@ class GGUFModelManager:
 
         print(f"[GGUFModelManager] Loading model: {model_path}")
         print(f"[GGUFModelManager] n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}")
+        if tensor_split is not None:
+            print(f"[GGUFModelManager] tensor_split={tensor_split}")
 
         # Store handler on manager (used later to decide if images are supported)
         self.chat_handler = chat_handler
         self.chat_format = chat_format
 
         # Model loading
+        llama_kwargs: Dict[str, Any] = {
+            "model_path": model_path,
+            "n_ctx": n_ctx,
+            "n_gpu_layers": n_gpu_layers,
+            "verbose": verbose,
+        }
+        if tensor_split is not None:
+            llama_kwargs["tensor_split"] = tensor_split
+
         if use_vision and self.chat_handler is not None:
             print("[GGUFModelManager] Loading with vision support")
             self.model = Llama(
-                model_path=model_path,
+                **llama_kwargs,
                 chat_handler=self.chat_handler,
-                n_ctx=n_ctx,
-                n_gpu_layers=n_gpu_layers,
                 chat_format=self.chat_format,
-                verbose=verbose,
                 # Vision models often need this; safe default for vision path.
                 logits_all=True,
             )
         else:
             print("[GGUFModelManager] Loading in text-only mode")
             self.model = Llama(
-                model_path=model_path,
-                n_ctx=n_ctx,
-                n_gpu_layers=n_gpu_layers,
+                **llama_kwargs,
                 # chat_format=self.chat_format,
-                verbose=verbose,
             )
 
         self.current_model_path = model_path
@@ -1896,7 +1930,14 @@ class GGUFModelManager:
             pass
         return f"llama_cpp_py={pkg_ver}|llama_cpp_backend={backend_ver}"
 
-    def _default_cache_dir(self, model_path: str, mmproj_path: str, n_ctx: int, n_gpu_layers: int = 0) -> str:
+    def _default_cache_dir(
+        self,
+        model_path: str,
+        mmproj_path: str,
+        n_ctx: int,
+        n_gpu_layers: int = 0,
+        tensor_split: Optional[List[float]] = None,
+    ) -> str:
         """
         Compute a stable cache directory for cache data.
         Cache root can be scoped by session; under that root, we key by model settings
@@ -1907,6 +1948,7 @@ class GGUFModelManager:
         key_src = (
             f"{os.path.abspath(model_path)}|{os.path.abspath(mmproj_path or '')}|"
             f"n_ctx={int(n_ctx)}|n_gpu_layers={int(n_gpu_layers)}|"
+            f"tensor_split={json.dumps(tensor_split or [], sort_keys=True)}|"
             f"chat_format={self.chat_format or ''}|use_vision={bool(self.chat_handler is not None)}|"
             f"{self._runtime_cache_fingerprint()}"
         )
@@ -1922,6 +1964,7 @@ class GGUFModelManager:
         mmproj_path: str,
         n_ctx: int,
         n_gpu_layers: int = 0,
+        tensor_split: Optional[List[float]] = None,
         persistent_cache: str = _FULL_UI_SESSION_CHAT_DEFAULTS["persistent_cache"],
         runtime_cache: str = _FULL_UI_SESSION_CHAT_DEFAULTS["runtime_cache"],
     ) -> None:
@@ -1973,7 +2016,13 @@ class GGUFModelManager:
             persistent_obj = None
             persistent_desc = _PERSISTENT_CACHE_OPTIONS[1]
             if persistent_cache == _PERSISTENT_CACHE_OPTIONS[0]:
-                cache_dir = self._default_cache_dir(model_path, mmproj_path, n_ctx, n_gpu_layers=n_gpu_layers)
+                cache_dir = self._default_cache_dir(
+                    model_path,
+                    mmproj_path,
+                    n_ctx,
+                    n_gpu_layers=n_gpu_layers,
+                    tensor_split=tensor_split,
+                )
                 disk_dir = cache_dir
                 if hasattr(llama_cpp, "LlamaDiskCache"):
                     persistent_obj = llama_cpp.LlamaDiskCache(cache_dir)
@@ -2781,6 +2830,7 @@ def _build_dialogue_cycle_common_turn_kwargs(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     max_turns: int,
     summarize_old_history: bool,
@@ -2805,6 +2855,7 @@ def _build_dialogue_cycle_common_turn_kwargs(
         "temperature": temperature,
         "top_p": top_p,
         "n_gpu_layers": n_gpu_layers,
+        "tensor_split": tensor_split,
         "n_ctx": n_ctx,
         "max_turns": max_turns,
         "summarize_old_history": summarize_old_history,
@@ -2841,6 +2892,7 @@ def _build_session_chat_turn_kwargs(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     image: Any,
     max_turns: int,
@@ -2875,6 +2927,7 @@ def _build_session_chat_turn_kwargs(
         "temperature": temperature,
         "top_p": top_p,
         "n_gpu_layers": n_gpu_layers,
+        "tensor_split": tensor_split,
         "n_ctx": n_ctx,
         "image": image,
         "max_turns": max_turns,
@@ -2961,6 +3014,7 @@ def _build_session_chat_node_execution_request(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     image: Any,
     max_turns: int,
@@ -2996,6 +3050,7 @@ def _build_session_chat_node_execution_request(
             temperature=temperature,
             top_p=top_p,
             n_gpu_layers=n_gpu_layers,
+            tensor_split=tensor_split,
             n_ctx=n_ctx,
             image=image,
             max_turns=max_turns,
@@ -3058,6 +3113,7 @@ def _execute_session_chat_turn(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     image: Any,
     max_turns: Optional[int],
@@ -3094,6 +3150,7 @@ def _execute_session_chat_turn(
         temperature=temperature,
         top_p=top_p,
         n_gpu_layers=n_gpu_layers,
+        tensor_split=tensor_split,
         n_ctx=n_ctx,
         image=image,
         max_turns=max_turns,
@@ -3132,6 +3189,7 @@ def _execute_dialogue_cycle_turn(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     max_turns: Optional[int],
     summarize_old_history: bool,
@@ -3167,6 +3225,7 @@ def _execute_dialogue_cycle_turn(
         temperature=temperature,
         top_p=top_p,
         n_gpu_layers=n_gpu_layers,
+        tensor_split=tensor_split,
         n_ctx=n_ctx,
         image=None,
         max_turns=max_turns,
@@ -3205,6 +3264,7 @@ def _run_session_chat_from_inputs(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     image: Any,
     max_turns: int,
@@ -3238,6 +3298,7 @@ def _run_session_chat_from_inputs(
         temperature=temperature,
         top_p=top_p,
         n_gpu_layers=n_gpu_layers,
+        tensor_split=tensor_split,
         n_ctx=n_ctx,
         image=image,
         max_turns=max_turns,
@@ -3321,6 +3382,7 @@ class LLMSessionChatNode:
              history_dir: str = "",
              reset_session: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["reset_session"],
              stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
+             tensor_split: Optional[List[float]] = None,
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
         return _run_session_chat_from_inputs(
@@ -3333,6 +3395,7 @@ class LLMSessionChatNode:
             temperature=temperature,
             top_p=top_p,
             n_gpu_layers=n_gpu_layers,
+            tensor_split=tensor_split,
             n_ctx=n_ctx,
             image=image,
             max_turns=max_turns,
@@ -3373,6 +3436,7 @@ def _chat_one_turn(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     max_turns: int = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["max_turns"],
     summarize_old_history: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["summarize_old_history"],
@@ -3413,6 +3477,7 @@ def _chat_one_turn(
         temperature=temperature,
         top_p=top_p,
         n_gpu_layers=n_gpu_layers,
+        tensor_split=tensor_split,
         n_ctx=n_ctx,
         max_turns=max_turns,
         summarize_old_history=summarize_old_history,
@@ -3460,6 +3525,7 @@ def _run_dialogue_cycle_from_inputs(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     max_turns: int,
     summarize_old_history: bool,
@@ -3497,6 +3563,7 @@ def _run_dialogue_cycle_from_inputs(
         temperature=temperature,
         top_p=top_p,
         n_gpu_layers=n_gpu_layers,
+        tensor_split=tensor_split,
         n_ctx=n_ctx,
         max_turns=max_turns,
         summarize_old_history=summarize_old_history,
@@ -3545,6 +3612,7 @@ def _build_dialogue_cycle_node_execution_request(
     temperature: float,
     top_p: float,
     n_gpu_layers: int,
+    tensor_split: Optional[List[float]],
     n_ctx: int,
     max_turns: int,
     summarize_old_history: bool,
@@ -3582,6 +3650,7 @@ def _build_dialogue_cycle_node_execution_request(
         temperature=temperature,
         top_p=top_p,
         n_gpu_layers=n_gpu_layers,
+        tensor_split=tensor_split,
         n_ctx=n_ctx,
         max_turns=max_turns,
         summarize_old_history=summarize_old_history,
@@ -3663,6 +3732,7 @@ class LLMDialogueCycleNode:
         history_dir: str = "",
         reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
         stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
+        tensor_split: Optional[List[float]] = None,
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
@@ -3681,6 +3751,7 @@ class LLMDialogueCycleNode:
             temperature=temperature,
             top_p=top_p,
             n_gpu_layers=n_gpu_layers,
+            tensor_split=tensor_split,
             n_ctx=n_ctx,
             max_turns=max_turns,
             summarize_old_history=summarize_old_history,

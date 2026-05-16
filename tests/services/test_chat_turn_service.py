@@ -217,6 +217,7 @@ def test_dialogue_cycle_node_execution_service_builds_and_runs() -> None:
         temperature=0.7,
         top_p=0.9,
         n_gpu_layers=0,
+        tensor_split=None,
         n_ctx=1024,
         max_turns=12,
         summarize_old_history=True,
@@ -312,6 +313,7 @@ def test_dialogue_cycle_node_execution_service_passes_model_and_mmproj() -> None
         temperature=0.7,
         top_p=0.9,
         n_gpu_layers=0,
+        tensor_split=None,
         n_ctx=1024,
         max_turns=12,
         summarize_old_history=True,
@@ -407,4 +409,3 @@ def test_run_dialogue_cycle_llama_trie_cache_skips_all_unload() -> None:
 
     assert unload_calls.count("A") == 0
     assert unload_calls.count("B") == 0
-
