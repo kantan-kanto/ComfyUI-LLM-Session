@@ -39,6 +39,7 @@ def test_session_chat_input_types_default_values(monkeypatch):
     assert optional["runtime_cache"][1]["default"] == "LlamaTrieCache"
     assert optional["log_level"][1]["default"] == "timing"
     assert optional["stream_to_console"][1]["default"] is False
+    assert optional["enable_thinking"][1]["default"] is False
     assert optional["persistent_cache"][0] == list(PERSISTENT_CACHE_OPTIONS)
     assert optional["runtime_cache"][0] == list(RUNTIME_CACHE_OPTIONS)
     assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
@@ -59,6 +60,26 @@ def test_dialogue_cycle_input_types_default_values(monkeypatch):
     assert optional["runtime_cache"][1]["default"] == "LlamaTrieCache"
     assert optional["log_level"][1]["default"] == "timing"
     assert optional["stream_to_console"][1]["default"] is False
+    assert optional["enable_thinking"][1]["default"] is False
     assert optional["persistent_cache"][0] == list(PERSISTENT_CACHE_OPTIONS)
     assert optional["runtime_cache"][0] == list(RUNTIME_CACHE_OPTIONS)
     assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
+
+
+def test_enable_thinking_overrides_supported_chat_formats(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    chat_handler_overrides = module._merge_enable_thinking_chat_handler_overrides(
+        {"qwen3.5": {"image_min_tokens": 2048}},
+        True,
+    )
+    text_chat_builder_overrides = module._merge_enable_thinking_text_chat_builder_overrides(
+        None,
+        True,
+    )
+
+    assert chat_handler_overrides["qwen3.5"]["enable_thinking"] is True
+    assert chat_handler_overrides["qwen3.5"]["image_min_tokens"] == 2048
+    assert chat_handler_overrides["gemma4"]["enable_thinking"] is True
+    assert text_chat_builder_overrides["qwen3.5"]["enable_thinking"] is True
+    assert "gemma4" not in text_chat_builder_overrides

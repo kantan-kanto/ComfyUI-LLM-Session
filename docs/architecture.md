@@ -80,6 +80,7 @@ External:
   - Default runtime container is lazily initialized via resolver helpers.
   - Dialogue-cycle managers are resolved from runtime container slots (`A`/`B`) so they can persist across runs.
   - Chat handler classes are tracked in an internal registry map (not `globals()` mutation).
+  - Chat-format-specific UI overrides such as `enable_thinking` are assembled near the chat handler/text builder config maps before entering service orchestration.
 - `services/chat_turn_service.py`: dialogue-cycle orchestration and node-execution orchestration (`DialogueCycleNodeExecutionService`).
 - `services/turn_execution_service.py`: thin orchestration for shared single-turn execution and node-entry invocation (`SessionChatNodeExecutionService`).
 - `services/generation_execution_service.py`: adaptive generation orchestration and assistant output normalization.

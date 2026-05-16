@@ -36,6 +36,7 @@ def test_full_ui_shared_defaults_consistency():
         "suppress_backend_logs",
         "reset_session",
         "stream_to_console",
+        "enable_thinking",
     ]
 
     for key in shared_keys:

@@ -446,12 +446,75 @@ CHAT_HANDLER_KWARGS_MAP = {
 }
 
 TEXT_CHAT_BUILDER_CONFIG_MAP = {
+    "gemma4": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
 }
 
 SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP = {
+    "gemma4": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
 }
+
+def _chat_formats_with_config_key(
+    config_map: Dict[str, Dict[str, Any]],
+    key: str,
+) -> tuple[str, ...]:
+    return tuple(sorted({
+        chat_format
+        for chat_format, config in config_map.items()
+        if isinstance(config, dict) and key in config
+    }))
+
+
+_ENABLE_THINKING_CHAT_HANDLER_FORMATS = _chat_formats_with_config_key(
+    CHAT_HANDLER_KWARGS_MAP,
+    "enable_thinking",
+)
+_ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS = _chat_formats_with_config_key(
+    TEXT_CHAT_BUILDER_CONFIG_MAP,
+    "enable_thinking",
+)
+
+
+def _merge_chat_format_bool_overrides(
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+    chat_formats: tuple[str, ...],
+    key: str,
+    value: bool,
+) -> Dict[str, Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    if isinstance(overrides, dict):
+        for chat_format, values in overrides.items():
+            if isinstance(values, dict):
+                merged[chat_format] = dict(values)
+    for chat_format in chat_formats:
+        merged.setdefault(chat_format, {})[key] = bool(value)
+    return merged
+
+
+def _merge_enable_thinking_chat_handler_overrides(
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+    enable_thinking: bool,
+) -> Dict[str, Dict[str, Any]]:
+    return _merge_chat_format_bool_overrides(
+        overrides,
+        _ENABLE_THINKING_CHAT_HANDLER_FORMATS,
+        "enable_thinking",
+        enable_thinking,
+    )
+
+
+def _merge_enable_thinking_text_chat_builder_overrides(
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+    enable_thinking: bool,
+) -> Dict[str, Dict[str, Any]]:
+    return _merge_chat_format_bool_overrides(
+        overrides,
+        _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS,
+        "enable_thinking",
+        enable_thinking,
+    )
+
 
 normalized_chat_format_map = {
     "llava-1-5": "llava-1-5",
@@ -2591,6 +2654,10 @@ def _input_types_session_chat() -> dict:
                 bool(session_chat_defaults["stream_to_console"]),
                 tooltip="Stream tokens to console while generating.",
             ),
+            "enable_thinking": _ui_bool_input(
+                bool(session_chat_defaults["enable_thinking"]),
+                tooltip="Enable model thinking/reasoning output for supported chat formats.",
+            ),
         }
     }
 
@@ -2646,6 +2713,10 @@ def _input_types_dialogue_cycle() -> dict:
                 tooltip="If true, resets both {id}_A and {id}_B histories (transcript file is not deleted). Session disk caches are kept.",
             ),
             "stream_to_console": _ui_bool_input(bool(dialogue_cycle_defaults["stream_to_console"]), tooltip="Stream tokens to console while generating."),
+            "enable_thinking": _ui_bool_input(
+                bool(dialogue_cycle_defaults["enable_thinking"]),
+                tooltip="Enable model thinking/reasoning output for supported chat formats.",
+            ),
         }
     }
 
@@ -3321,8 +3392,17 @@ class LLMSessionChatNode:
              history_dir: str = "",
              reset_session: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["reset_session"],
              stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
+             enable_thinking: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["enable_thinking"],
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
+        chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
+            chat_handler_overrides,
+            enable_thinking,
+        )
+        text_chat_builder_overrides = _merge_enable_thinking_text_chat_builder_overrides(
+            text_chat_builder_overrides,
+            enable_thinking,
+        )
         return _run_session_chat_from_inputs(
             user_text=user_text,
             session_id=session_id,
@@ -3663,9 +3743,18 @@ class LLMDialogueCycleNode:
         history_dir: str = "",
         reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
         stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
+        enable_thinking: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["enable_thinking"],
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
+        chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
+            chat_handler_overrides,
+            enable_thinking,
+        )
+        text_chat_builder_overrides = _merge_enable_thinking_text_chat_builder_overrides(
+            text_chat_builder_overrides,
+            enable_thinking,
+        )
         transcript_text = _run_dialogue_cycle_from_inputs(
             initial_user_text=initial_user_text,
             session_id=session_id,

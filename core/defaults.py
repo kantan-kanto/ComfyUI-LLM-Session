@@ -62,6 +62,7 @@ _FULL_UI_SHARED_CHAT_DEFAULTS: Dict[str, Any] = {
     "suppress_backend_logs": True,
     "reset_session": False,
     "stream_to_console": False,
+    "enable_thinking": False,
 }
 
 FULL_UI_DEFAULTS: Dict[str, Dict[str, Any]] = {
