@@ -19,7 +19,7 @@ This document summarizes empirical compatibility results obtained during develop
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / 31B)*
+- Gemma 4 (E2B / E4B /31B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
@@ -34,7 +34,7 @@ This document summarizes empirical compatibility results obtained during develop
 - Qwen3-30B-A3B
 - Qwen3-VL (4B / 8B)
 - Qwen3.5 (9B / 27B / 35B-A3B)*
-- Qwen3.6 (35B-A3B)*
+- Qwen3.6 (27B / 35B-A3B)*
 
 **Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 

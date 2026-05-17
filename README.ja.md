@@ -3,7 +3,7 @@
 
 ---
 
-**Version:** 1.1.2
+**Version:** 1.2.0
 **License:** GPL-3.0
 
 **ComfyUI 上だけで動作するローカル LLM 実行環境**です。  
@@ -94,6 +94,8 @@ ComfyUI/models/LLM/
 - **history_dir**：同じディレクトリを使う限り、会話が継続されます
 - **config_path**：Simple ノードの内部デフォルトを JSON で上書きできます
 - **force_text_only**（Dialogue Cycle Simple）：Vision 経路を無効化し、再現性を高めます
+- **tensor_split**（`config/simple_defaults.json`）：llama.cpp の multi-GPU 分割を指定できます
+- **enable_thinking**：対応モデル形式（Gemma 4 / Qwen3.5・Qwen3.6 互換経路）の thinking 出力制御に使います
 
 詳細設定は **[PARAMETERS.md](PARAMETERS.md)** を参照してください。
 

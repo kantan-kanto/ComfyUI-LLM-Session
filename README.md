@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.1.2
+**Version:** 1.2.0
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -17,7 +17,7 @@ for **observation, experimentation, and analysis**.
 
 ## Upgrade Notes for Existing Users
 
-The following notes are intended for existing users upgrading to the `1.1.x` series.
+The following notes are intended for existing users upgrading to the `1.1.x` / `1.2.x` series.
 
 - Cache-related setting names have changed. The previous `prompt_cache_mode` / `kv_state_mode` options have been reorganized into `persistent_cache` / `runtime_cache`.
 - The cache storage directory name has changed from `prompt_cache/` to `cache/`. Existing cache data is not migrated automatically.
@@ -29,7 +29,7 @@ The following notes are intended for existing users upgrading to the `1.1.x` ser
 - History loading now restores from `*.bak` when the primary history JSON is invalid or missing.
 - Adaptive retry now recognizes additional context-overflow error wording (`context window ... exceed ...`).
 
-For details, see the `1.1.x` sections in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
+For details, see the `1.1.x` and `1.2.x` sections in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ---
 
@@ -222,7 +222,7 @@ The following GGUF instruction models have been tested.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / 31B)*
+- Gemma 4 (E2B / E4B /31B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
@@ -237,7 +237,7 @@ The following GGUF instruction models have been tested.
 - Qwen3-30B-A3B
 - Qwen3-VL (4B / 8B)
 - Qwen3.5 (9B / 27B / 35B-A3B)*
-- Qwen3.6 (35B-A3B)*
+- Qwen3.6 (27B / 35B-A3B)*
 
 **Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 
@@ -322,10 +322,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.1.2
+### Current Version: 1.2.0
 
-- Added `step3-vl` alias support and chat-handler mapping (`Step3VLChatHandler`)
-- Added `qwen3.6` aliases (`qwen3.6` / `qwen3_6` / `qwen36`) mapped to the `qwen3.5` compatibility path
-- Set `gemma4` default chat-handler behavior to `enable_thinking: false` for safer default output
-- Added `gemma4.enable_thinking: false` to `config/simple_defaults.json` (Simple nodes)
-- Updated tested-model references to include `Gemma 4 (E2B / 31B)` and `Qwen3.6 (35B-A3B)*`
+- Added Simple-node `tensor_split` support for llama.cpp multi-GPU environments
+- Added Full UI `enable_thinking` controls for supported chat formats
+- Improved Gemma 4 text prompting and thinking-control wiring
+- Preserved explicit per-model Simple config overrides when Full-node defaults are applied
+- Added model-specific parameter flow documentation and focused regression tests

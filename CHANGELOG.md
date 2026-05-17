@@ -4,6 +4,32 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [1.2.0] - 2026-05-17
+
+- Added llama.cpp `tensor_split` support for Simple nodes
+  - Added `tensor_split` to `config/simple_defaults.json`
+  - Passes normalized split values through model loading, cache signatures, and model signatures
+  - Documents common multi-GPU examples in `PARAMETERS.md`
+
+- Added user-facing `enable_thinking` controls to Full UI nodes
+  - `LLM Session Chat` and `LLM Dialogue Cycle` now expose `enable_thinking`
+  - Supported model families currently include Gemma 4 and the Qwen3.5 / Qwen3.6 compatibility path
+  - Full-node defaults now preserve explicit per-model Simple config overrides
+
+- Improved Gemma 4 model-specific behavior
+  - Added Gemma 4 text prompt builder support for the `enable_thinking` setting
+  - Forces `enable_thinking=false` for Gemma 4 summary generation
+  - Warns when Gemma 4 E2B/E4B vision models are loaded with thinking disabled, since those variants may require thinking to be enabled in the JamePeng handler
+
+- Documented model-specific parameter flow
+  - Added `docs/model-specific-parameter-flow.md`
+  - Documented parameter precedence for model-family-specific overrides
+  - Added regression tests for override precedence, Gemma 4 thinking flow, and `tensor_split`
+
+- Bumped package/module version to `1.2.0`
+
+---
+
 ## [1.1.2] - 2026-04-21
 
 - Added Step3-VL compatibility aliases and handler mapping
