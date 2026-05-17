@@ -107,3 +107,7 @@ For model-family-specific parameters, prefer a named helper that makes this rule
 for example a helper whose name includes `preserving_explicit_overrides`. Add a regression test
 that proves a Simple config value wins over a Full-node default before adding or changing such
 merge behavior.
+
+For detailed wiring of `CHAT_HANDLER_KWARGS_MAP`, `TEXT_CHAT_BUILDER_CONFIG_MAP`,
+and `SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP`, see
+[`model-specific-parameter-flow.md`](model-specific-parameter-flow.md).

@@ -1224,6 +1224,42 @@ def _build_qwen35_text_prompt(messages: List[Dict[str, Any]], config: dict[str, 
     return prompt, ["<|im_end|>", "<|endoftext|>"]
 
 
+def _build_gemma4_text_prompt(messages: List[Dict[str, Any]], config: dict[str, Any]) -> tuple[str, list[str]]:
+    system_parts: List[str] = []
+    turns: List[tuple[str, str]] = []
+    enable_thinking = bool(config.get("enable_thinking", False))
+
+    for message in messages:
+        role = str((message or {}).get("role") or "")
+        content = _message_content_to_text((message or {}).get("content"))
+        if role == "system":
+            if content.strip():
+                system_parts.append(content.strip())
+            continue
+        if role == "user":
+            turns.append(("user", content))
+            continue
+        if role == "assistant":
+            turns.append(("model", content))
+
+    system_message = "\n\n".join(system_parts).strip()
+    if system_message:
+        if turns and turns[0][0] == "user":
+            role, content = turns[0]
+            turns[0] = (role, f"{system_message}\n\n{content}".strip())
+        else:
+            turns.insert(0, ("user", system_message))
+
+    prompt = ""
+    for role, content in turns:
+        prompt += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
+
+    prompt += "<start_of_turn>model\n"
+    if not enable_thinking:
+        prompt += "<|channel>thought\n<channel|>"
+    return prompt, ["<end_of_turn>", "<eos>"]
+
+
 def _build_text_chat_request(
     model_path: str,
     mmproj_path: Optional[str],
@@ -1247,6 +1283,15 @@ def _build_text_chat_request(
     )
     if model_family == "qwen3.5":
         prompt, stop = _build_qwen35_text_prompt(messages, config)
+        return {
+            "mode": "completion",
+            "model_family": model_family,
+            "prompt": prompt,
+            "stop": stop,
+            "config": config,
+        }
+    if model_family == "gemma4":
+        prompt, stop = _build_gemma4_text_prompt(messages, config)
         return {
             "mode": "completion",
             "model_family": model_family,
