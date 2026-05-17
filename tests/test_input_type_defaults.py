@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import types
 
@@ -82,4 +83,42 @@ def test_enable_thinking_overrides_supported_chat_formats(monkeypatch):
     assert chat_handler_overrides["qwen3.5"]["image_min_tokens"] == 2048
     assert chat_handler_overrides["gemma4"]["enable_thinking"] is True
     assert text_chat_builder_overrides["qwen3.5"]["enable_thinking"] is True
-    assert "gemma4" not in text_chat_builder_overrides
+    assert text_chat_builder_overrides["gemma4"]["enable_thinking"] is True
+
+
+def test_model_specific_config_override_wins_over_full_node_default(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    chat_handler_overrides = module._merge_enable_thinking_chat_handler_overrides(
+        {"gemma4": {"enable_thinking": True}},
+        False,
+    )
+    text_chat_builder_overrides = module._merge_enable_thinking_text_chat_builder_overrides(
+        {"gemma4": {"enable_thinking": True}},
+        False,
+    )
+
+    assert chat_handler_overrides["gemma4"]["enable_thinking"] is True
+    assert text_chat_builder_overrides["gemma4"]["enable_thinking"] is True
+
+
+def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(monkeypatch, tmp_path):
+    module = _load_nodes_module(monkeypatch)
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "qwen3.5": {"enable_thinking": "false"},
+                "gemma4": {"enable_thinking": "true"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["chat_handler_overrides"]["qwen3.5"]["enable_thinking"] is False
+    assert defaults["text_chat_builder_overrides"]["qwen3.5"]["enable_thinking"] is False
+    assert defaults["chat_handler_overrides"]["gemma4"]["enable_thinking"] is True
+    assert defaults["text_chat_builder_overrides"]["gemma4"]["enable_thinking"] is True

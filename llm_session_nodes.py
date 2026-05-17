@@ -187,14 +187,21 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     chat_handler_overrides: Dict[str, Dict[str, Any]] = {}
     text_chat_builder_overrides: Dict[str, Dict[str, Any]] = {}
-    qwen35_raw = config_obj.get("qwen3.5")
-    if isinstance(qwen35_raw, dict):
-        qwen35_overrides: Dict[str, Any] = {}
-        if "enable_thinking" in qwen35_raw:
-            qwen35_overrides["enable_thinking"] = qwen35_raw.get("enable_thinking")
-        if qwen35_overrides:
-            chat_handler_overrides["qwen3.5"] = qwen35_overrides
-            text_chat_builder_overrides["qwen3.5"] = dict(qwen35_overrides)
+    for chat_format in sorted(
+        set(_ENABLE_THINKING_CHAT_HANDLER_FORMATS)
+        | set(_ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS)
+    ):
+        raw_overrides = config_obj.get(chat_format)
+        if not isinstance(raw_overrides, dict) or "enable_thinking" not in raw_overrides:
+            continue
+        if chat_format in _ENABLE_THINKING_CHAT_HANDLER_FORMATS:
+            chat_handler_overrides.setdefault(chat_format, {})["enable_thinking"] = raw_overrides.get(
+                "enable_thinking"
+            )
+        if chat_format in _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS:
+            text_chat_builder_overrides.setdefault(chat_format, {})["enable_thinking"] = raw_overrides.get(
+                "enable_thinking"
+            )
 
     # Best-effort type coercion + clamping (never raise)
     def _as_int(x, d):
@@ -262,13 +269,13 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), _SIMPLE_DEFAULTS_BUILTIN["stream_to_console"])
 
     for chat_format, overrides in list(chat_handler_overrides.items()):
-        if chat_format == "qwen3.5" and "enable_thinking" in overrides:
+        if "enable_thinking" in overrides:
             overrides["enable_thinking"] = _as_bool(
                 overrides.get("enable_thinking"),
                 CHAT_HANDLER_KWARGS_MAP.get(chat_format, {}).get("enable_thinking", True),
             )
     for chat_format, overrides in list(text_chat_builder_overrides.items()):
-        if chat_format == "qwen3.5" and "enable_thinking" in overrides:
+        if "enable_thinking" in overrides:
             overrides["enable_thinking"] = _as_bool(
                 overrides.get("enable_thinking"),
                 TEXT_CHAT_BUILDER_CONFIG_MAP.get(chat_format, {}).get("enable_thinking", False),
@@ -476,19 +483,20 @@ _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS = _chat_formats_with_config_key(
 )
 
 
-def _merge_chat_format_bool_overrides(
+def _merge_chat_format_bool_ui_default_preserving_explicit_overrides(
     overrides: Optional[Dict[str, Dict[str, Any]]],
     chat_formats: tuple[str, ...],
     key: str,
     value: bool,
 ) -> Dict[str, Dict[str, Any]]:
+    """Merge UI defaults without overwriting explicit config/model overrides."""
     merged: Dict[str, Dict[str, Any]] = {}
     if isinstance(overrides, dict):
         for chat_format, values in overrides.items():
             if isinstance(values, dict):
                 merged[chat_format] = dict(values)
     for chat_format in chat_formats:
-        merged.setdefault(chat_format, {})[key] = bool(value)
+        merged.setdefault(chat_format, {}).setdefault(key, bool(value))
     return merged
 
 
@@ -496,7 +504,7 @@ def _merge_enable_thinking_chat_handler_overrides(
     overrides: Optional[Dict[str, Dict[str, Any]]],
     enable_thinking: bool,
 ) -> Dict[str, Dict[str, Any]]:
-    return _merge_chat_format_bool_overrides(
+    return _merge_chat_format_bool_ui_default_preserving_explicit_overrides(
         overrides,
         _ENABLE_THINKING_CHAT_HANDLER_FORMATS,
         "enable_thinking",
@@ -508,7 +516,7 @@ def _merge_enable_thinking_text_chat_builder_overrides(
     overrides: Optional[Dict[str, Dict[str, Any]]],
     enable_thinking: bool,
 ) -> Dict[str, Dict[str, Any]]:
-    return _merge_chat_format_bool_overrides(
+    return _merge_chat_format_bool_ui_default_preserving_explicit_overrides(
         overrides,
         _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS,
         "enable_thinking",

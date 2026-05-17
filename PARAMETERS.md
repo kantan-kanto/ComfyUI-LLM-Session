@@ -77,6 +77,46 @@ Typical values:
 
 ---
 
+### enable_thinking
+Controls thinking / reasoning output for supported chat formats.
+
+Default:
+- `false`
+
+Currently supported formats:
+- Gemma 4
+- Qwen3.5 / Qwen3.6 compatibility path
+
+Full nodes expose this as an optional UI setting. Simple nodes can override it in `config/simple_defaults.json`:
+
+```json
+"gemma4": {
+  "enable_thinking": false
+},
+"qwen3.5": {
+  "enable_thinking": false
+}
+```
+
+When disabled, the node asks the supported model/chat handler not to expose thinking output. This behavior still depends on the model, chat handler, and `llama-cpp-python` build, so some models may still emit internal channel text.
+
+Gemma 4 note:
+
+Gemma 4 may emit internal channel delimiters such as:
+
+```text
+<|channel>thought
+...
+<channel|>
+final answer...
+```
+
+In this case, the text after the last `<channel|>` appears to be the final answer intended for the user. The node therefore treats the text after the last channel delimiter as the displayed final output.
+
+If `max_tokens` is too small, generation may stop before Gemma 4 emits `<channel|>` and the final answer. In that case, the node cannot remove the earlier internal text. Increase `max_tokens` if you see unfinished thinking/channel output.
+
+---
+
 ## Summarization Parameters
 
 ### summarize_old_history
