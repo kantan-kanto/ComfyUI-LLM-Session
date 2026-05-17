@@ -142,6 +142,7 @@ When using Vision-capable models, please follow these rules:
 - **config_path**: Optional JSON file to override internal defaults in Simple nodes.
 - **force_text_only** (Dialogue Cycle Simple): Forces pure text mode to avoid mmproj / vision handler differences and improve reproducibility.
 - **reset_session** (Dialogue Cycle Simple): Overwrites the history and summary files associated with the session name, and resets per-session KV state. The session's disk cache is kept.
+- **tensor_split** (`config/simple_defaults.json`): Optional llama.cpp multi-GPU split. For example, `"tensor_split": [1.0, 0.0]` keeps llama.cpp model offload on visible GPU 0 in a 2-GPU setup. Leave it `null` or omit it for default behavior.
 
 ### Cache Scope Notes
 

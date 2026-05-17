@@ -19,6 +19,7 @@ def build_kv_state_signature(
     mmproj_path: Optional[str],
     n_ctx: int,
     n_gpu_layers: int,
+    tensor_split: Optional[list[float]] = None,
     get_context_turns: Callable[..., Any],
 ) -> str:
     turns_ctx = get_context_turns(history, max_turns=max_turns)
@@ -32,6 +33,7 @@ def build_kv_state_signature(
             "mmproj_path": os.path.abspath(mmproj_path) if mmproj_path else "",
             "n_ctx": int(n_ctx) if n_ctx is not None else None,
             "n_gpu_layers": int(n_gpu_layers) if n_gpu_layers is not None else None,
+            "tensor_split": [float(x) for x in tensor_split] if tensor_split is not None else None,
             "system": effective_system,
             "summary": summary_txt,
             "turns": turns_ctx,

@@ -16,6 +16,7 @@ SIMPLE_DEFAULTS: Dict[str, Any] = {
     "temperature": 0.7,
     "top_p": 0.9,
     "n_gpu_layers": 0,
+    "tensor_split": None,
     "n_ctx": 4096,
     "max_turns": 6,
     "summarize_old_history": True,

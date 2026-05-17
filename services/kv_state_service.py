@@ -46,6 +46,7 @@ class KvStateService:
                     mmproj_path=mmproj_path,
                     n_ctx=int(request.n_ctx),
                     n_gpu_layers=int(request.n_gpu_layers),
+                    tensor_split=getattr(request, "tensor_split", None),
                     get_context_turns=get_context_turns,
                 )
                 try_restore_kv_state(
@@ -100,6 +101,7 @@ class KvStateService:
                 mmproj_path=mmproj_path,
                 n_ctx=int(request.n_ctx),
                 n_gpu_layers=int(request.n_gpu_layers),
+                tensor_split=getattr(request, "tensor_split", None),
                 get_context_turns=get_context_turns,
             )
             try_save_kv_state = self._dep(deps, "try_save_kv_state")
