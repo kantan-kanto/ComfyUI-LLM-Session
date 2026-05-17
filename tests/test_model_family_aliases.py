@@ -27,6 +27,53 @@ def test_detect_model_family_gemma4_aliases(monkeypatch):
     assert family_nodash == "gemma4"
 
 
+def test_detect_gemma4_variant(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    assert module._detect_gemma4_variant("C:/models/Gemma-4-E2B-it.gguf") == "e2b"
+    assert module._detect_gemma4_variant("C:/models/Gemma4-E4B-it.gguf") == "e4b"
+    assert module._detect_gemma4_variant("C:/models/Gemma-4-26B-A4B-it.gguf") == "26ba4b"
+    assert module._detect_gemma4_variant("C:/models/Gemma-4-31B-it.gguf") == "31b"
+    assert module._detect_gemma4_variant("C:/models/Gemma-4-unknown.gguf") is None
+
+
+def test_gemma4_e2b_false_vision_warning(monkeypatch, capsys):
+    module = _load_nodes_module(monkeypatch)
+
+    module._warn_if_gemma4_vision_thinking_required(
+        "C:/models/Gemma-4-E2B-it.gguf",
+        "gemma4",
+        {"enable_thinking": False},
+    )
+
+    captured = capsys.readouterr()
+    assert "Gemma4 E2B/E4B vision models" in captured.out
+    assert "enable_thinking=True" in captured.out
+
+
+def test_gemma4_toggle_capable_variants_do_not_warn(monkeypatch, capsys):
+    module = _load_nodes_module(monkeypatch)
+
+    module._warn_if_gemma4_vision_thinking_required(
+        "C:/models/Gemma-4-31B-it.gguf",
+        "gemma4",
+        {"enable_thinking": False},
+    )
+    module._warn_if_gemma4_vision_thinking_required(
+        "C:/models/Gemma-4-26B-A4B-it.gguf",
+        "gemma4",
+        {"enable_thinking": False},
+    )
+    module._warn_if_gemma4_vision_thinking_required(
+        "C:/models/Gemma-4-E4B-it.gguf",
+        "gemma4",
+        {"enable_thinking": True},
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
 def test_detect_model_family_lfm25_aliases(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 

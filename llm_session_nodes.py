@@ -632,6 +632,40 @@ def _detect_model_family(model_path: str) -> Optional[str]:
     return None
 
 
+def _detect_gemma4_variant(model_path: str) -> Optional[str]:
+    model_name_lower = os.path.basename(model_path).lower()
+    compact_name = re.sub(r"[^a-z0-9]+", "", model_name_lower)
+    if "e2b" in compact_name:
+        return "e2b"
+    if "e4b" in compact_name:
+        return "e4b"
+    if "26ba4b" in compact_name:
+        return "26ba4b"
+    if "31b" in compact_name:
+        return "31b"
+    return None
+
+
+def _warn_if_gemma4_vision_thinking_required(
+    model_path: str,
+    model_family: str,
+    active_chat_handler_kwargs: Dict[str, Any],
+) -> None:
+    if model_family != "gemma4":
+        return
+    if active_chat_handler_kwargs.get("enable_thinking") is not False:
+        return
+    variant = _detect_gemma4_variant(model_path)
+    if variant not in ("e2b", "e4b"):
+        return
+    print(
+        "[GGUFModelManager] Warning: Gemma4 E2B/E4B vision models appear to "
+        "require enable_thinking=True in the JamePeng Gemma4ChatHandler. "
+        "The current override is enable_thinking=False, so the model may "
+        "ignore it or behave unexpectedly."
+    )
+
+
 # ============================================================================
 # Text/Chat Prompt Builders
 # ============================================================================
@@ -1915,6 +1949,11 @@ class GGUFModelManager:
                         active_chat_handler_kwargs = _get_chat_handler_kwargs(
                             model_family,
                             chat_handler_overrides=chat_handler_overrides,
+                        )
+                        _warn_if_gemma4_vision_thinking_required(
+                            model_path,
+                            model_family,
+                            active_chat_handler_kwargs,
                         )
                         chat_handler = handler_cls(
                             clip_model_path=mmproj_path,
