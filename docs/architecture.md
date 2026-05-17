@@ -80,9 +80,34 @@ External:
   - Default runtime container is lazily initialized via resolver helpers.
   - Dialogue-cycle managers are resolved from runtime container slots (`A`/`B`) so they can persist across runs.
   - Chat handler classes are tracked in an internal registry map (not `globals()` mutation).
+  - Chat-format-specific UI overrides such as `enable_thinking` are assembled near the chat handler/text builder config maps before entering service orchestration.
 - `services/chat_turn_service.py`: dialogue-cycle orchestration and node-execution orchestration (`DialogueCycleNodeExecutionService`).
 - `services/turn_execution_service.py`: thin orchestration for shared single-turn execution and node-entry invocation (`SessionChatNodeExecutionService`).
 - `services/generation_execution_service.py`: adaptive generation orchestration and assistant output normalization.
 - `services/kv_state_service.py`: KV cache restore/save orchestration and mismatch recovery handling.
 - `services/history_persistence_service.py`: turn append, optional summarization, and history JSON persistence.
 - `infra/history_store.py`: history/transcript path and file I/O helpers.
+
+## Parameter Precedence
+Parameters may come from multiple layers: built-in model-family defaults, Full-node UI inputs,
+Simple-node defaults, and explicit per-model overrides in `config/simple_defaults.json`.
+
+When these layers overlap, the intended precedence is:
+
+1. Explicit per-model config overrides, such as `gemma4.enable_thinking` in `config/simple_defaults.json`
+2. Explicit Full-node UI input values
+3. Simple built-in defaults / Full UI defaults
+4. Model-family fallback maps such as `CHAT_HANDLER_KWARGS_MAP`, `TEXT_CHAT_BUILDER_CONFIG_MAP`, and `SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP`
+
+Simple nodes may delegate to Full-node methods for compatibility, but a Full-node default argument
+must not overwrite an explicit Simple config override. Merge helpers that apply UI defaults should
+preserve existing per-model override values and only fill missing keys.
+
+For model-family-specific parameters, prefer a named helper that makes this rule visible in code,
+for example a helper whose name includes `preserving_explicit_overrides`. Add a regression test
+that proves a Simple config value wins over a Full-node default before adding or changing such
+merge behavior.
+
+For detailed wiring of `CHAT_HANDLER_KWARGS_MAP`, `TEXT_CHAT_BUILDER_CONFIG_MAP`,
+and `SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP`, see
+[`model-specific-parameter-flow.md`](model-specific-parameter-flow.md).

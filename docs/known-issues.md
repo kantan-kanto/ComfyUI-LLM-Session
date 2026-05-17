@@ -45,6 +45,17 @@
 - Regression status: Fixed with focused tests in `tests/infra/test_history_store.py`.
 - Notes: This issue is tracked separately from behavior-preserving refactor commits.
 
+## Simple config model-specific overrides can be overwritten by Full-node defaults
+- Status: Resolved (2026-05-17)
+- First recorded: 2026-05-17
+- Scope: `LLM Session Chat (Simple)` / `LLM Dialogue Cycle (Simple)` model-specific override wiring
+- Symptom: A model-specific setting loaded from `config/simple_defaults.json` could be replaced when the Simple wrapper delegated to the Full node.
+- Example: `gemma4.enable_thinking=true` loaded from Simple config could be overwritten by the Full-node default `enable_thinking=false`.
+- Root cause: The merge helper used assignment after copying explicit overrides, so the Full-node default value replaced an already present per-model override.
+- Resolution: UI-default merge now preserves explicit per-model override values and only fills missing keys.
+- Regression status: Covered by `test_model_specific_config_override_wins_over_full_node_default`.
+- Notes: Future model-specific parameters added through `CHAT_HANDLER_KWARGS_MAP`, `TEXT_CHAT_BUILDER_CONFIG_MAP`, or `SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP` must follow the precedence documented in `docs/architecture.md`.
+
 ## Potential Refactoring Candidates (Not Confirmed Bugs)
 - Status: Tracking
 - First recorded: 2026-03-22

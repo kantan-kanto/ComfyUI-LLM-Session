@@ -208,14 +208,21 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     chat_handler_overrides: Dict[str, Dict[str, Any]] = {}
     text_chat_builder_overrides: Dict[str, Dict[str, Any]] = {}
-    qwen35_raw = config_obj.get("qwen3.5")
-    if isinstance(qwen35_raw, dict):
-        qwen35_overrides: Dict[str, Any] = {}
-        if "enable_thinking" in qwen35_raw:
-            qwen35_overrides["enable_thinking"] = qwen35_raw.get("enable_thinking")
-        if qwen35_overrides:
-            chat_handler_overrides["qwen3.5"] = qwen35_overrides
-            text_chat_builder_overrides["qwen3.5"] = dict(qwen35_overrides)
+    for chat_format in sorted(
+        set(_ENABLE_THINKING_CHAT_HANDLER_FORMATS)
+        | set(_ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS)
+    ):
+        raw_overrides = config_obj.get(chat_format)
+        if not isinstance(raw_overrides, dict) or "enable_thinking" not in raw_overrides:
+            continue
+        if chat_format in _ENABLE_THINKING_CHAT_HANDLER_FORMATS:
+            chat_handler_overrides.setdefault(chat_format, {})["enable_thinking"] = raw_overrides.get(
+                "enable_thinking"
+            )
+        if chat_format in _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS:
+            text_chat_builder_overrides.setdefault(chat_format, {})["enable_thinking"] = raw_overrides.get(
+                "enable_thinking"
+            )
 
     # Best-effort type coercion + clamping (never raise)
     def _as_int(x, d):
@@ -284,13 +291,13 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), _SIMPLE_DEFAULTS_BUILTIN["stream_to_console"])
 
     for chat_format, overrides in list(chat_handler_overrides.items()):
-        if chat_format == "qwen3.5" and "enable_thinking" in overrides:
+        if "enable_thinking" in overrides:
             overrides["enable_thinking"] = _as_bool(
                 overrides.get("enable_thinking"),
                 CHAT_HANDLER_KWARGS_MAP.get(chat_format, {}).get("enable_thinking", True),
             )
     for chat_format, overrides in list(text_chat_builder_overrides.items()):
-        if chat_format == "qwen3.5" and "enable_thinking" in overrides:
+        if "enable_thinking" in overrides:
             overrides["enable_thinking"] = _as_bool(
                 overrides.get("enable_thinking"),
                 TEXT_CHAT_BUILDER_CONFIG_MAP.get(chat_format, {}).get("enable_thinking", False),
@@ -470,12 +477,76 @@ CHAT_HANDLER_KWARGS_MAP = {
 }
 
 TEXT_CHAT_BUILDER_CONFIG_MAP = {
+    "gemma4": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
 }
 
 SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP = {
+    "gemma4": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
 }
+
+def _chat_formats_with_config_key(
+    config_map: Dict[str, Dict[str, Any]],
+    key: str,
+) -> tuple[str, ...]:
+    return tuple(sorted({
+        chat_format
+        for chat_format, config in config_map.items()
+        if isinstance(config, dict) and key in config
+    }))
+
+
+_ENABLE_THINKING_CHAT_HANDLER_FORMATS = _chat_formats_with_config_key(
+    CHAT_HANDLER_KWARGS_MAP,
+    "enable_thinking",
+)
+_ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS = _chat_formats_with_config_key(
+    TEXT_CHAT_BUILDER_CONFIG_MAP,
+    "enable_thinking",
+)
+
+
+def _merge_chat_format_bool_ui_default_preserving_explicit_overrides(
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+    chat_formats: tuple[str, ...],
+    key: str,
+    value: bool,
+) -> Dict[str, Dict[str, Any]]:
+    """Merge UI defaults without overwriting explicit config/model overrides."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    if isinstance(overrides, dict):
+        for chat_format, values in overrides.items():
+            if isinstance(values, dict):
+                merged[chat_format] = dict(values)
+    for chat_format in chat_formats:
+        merged.setdefault(chat_format, {}).setdefault(key, bool(value))
+    return merged
+
+
+def _merge_enable_thinking_chat_handler_overrides(
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+    enable_thinking: bool,
+) -> Dict[str, Dict[str, Any]]:
+    return _merge_chat_format_bool_ui_default_preserving_explicit_overrides(
+        overrides,
+        _ENABLE_THINKING_CHAT_HANDLER_FORMATS,
+        "enable_thinking",
+        enable_thinking,
+    )
+
+
+def _merge_enable_thinking_text_chat_builder_overrides(
+    overrides: Optional[Dict[str, Dict[str, Any]]],
+    enable_thinking: bool,
+) -> Dict[str, Dict[str, Any]]:
+    return _merge_chat_format_bool_ui_default_preserving_explicit_overrides(
+        overrides,
+        _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS,
+        "enable_thinking",
+        enable_thinking,
+    )
+
 
 normalized_chat_format_map = {
     "llava-1-5": "llava-1-5",
@@ -583,6 +654,40 @@ def _detect_model_family(model_path: str) -> Optional[str]:
         if key in model_name_lower:
             return family
     return None
+
+
+def _detect_gemma4_variant(model_path: str) -> Optional[str]:
+    model_name_lower = os.path.basename(model_path).lower()
+    compact_name = re.sub(r"[^a-z0-9]+", "", model_name_lower)
+    if "e2b" in compact_name:
+        return "e2b"
+    if "e4b" in compact_name:
+        return "e4b"
+    if "26ba4b" in compact_name:
+        return "26ba4b"
+    if "31b" in compact_name:
+        return "31b"
+    return None
+
+
+def _warn_if_gemma4_vision_thinking_required(
+    model_path: str,
+    model_family: str,
+    active_chat_handler_kwargs: Dict[str, Any],
+) -> None:
+    if model_family != "gemma4":
+        return
+    if active_chat_handler_kwargs.get("enable_thinking") is not False:
+        return
+    variant = _detect_gemma4_variant(model_path)
+    if variant not in ("e2b", "e4b"):
+        return
+    print(
+        "[GGUFModelManager] Warning: Gemma4 E2B/E4B vision models appear to "
+        "require enable_thinking=True in the JamePeng Gemma4ChatHandler. "
+        "The current override is enable_thinking=False, so the model may "
+        "ignore it or behave unexpectedly."
+    )
 
 
 # ============================================================================
@@ -1177,6 +1282,42 @@ def _build_qwen35_text_prompt(messages: List[Dict[str, Any]], config: dict[str, 
     return prompt, ["<|im_end|>", "<|endoftext|>"]
 
 
+def _build_gemma4_text_prompt(messages: List[Dict[str, Any]], config: dict[str, Any]) -> tuple[str, list[str]]:
+    system_parts: List[str] = []
+    turns: List[tuple[str, str]] = []
+    enable_thinking = bool(config.get("enable_thinking", False))
+
+    for message in messages:
+        role = str((message or {}).get("role") or "")
+        content = _message_content_to_text((message or {}).get("content"))
+        if role == "system":
+            if content.strip():
+                system_parts.append(content.strip())
+            continue
+        if role == "user":
+            turns.append(("user", content))
+            continue
+        if role == "assistant":
+            turns.append(("model", content))
+
+    system_message = "\n\n".join(system_parts).strip()
+    if enable_thinking:
+        system_message = f"<|think|>\n{system_message}".strip()
+    if system_message:
+        if turns and turns[0][0] == "user":
+            role, content = turns[0]
+            turns[0] = (role, f"{system_message}\n\n{content}".strip())
+        else:
+            turns.insert(0, ("user", system_message))
+
+    prompt = ""
+    for role, content in turns:
+        prompt += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
+
+    prompt += "<start_of_turn>model\n"
+    return prompt, ["<end_of_turn>", "<eos>"]
+
+
 def _build_text_chat_request(
     model_path: str,
     mmproj_path: Optional[str],
@@ -1200,6 +1341,15 @@ def _build_text_chat_request(
     )
     if model_family == "qwen3.5":
         prompt, stop = _build_qwen35_text_prompt(messages, config)
+        return {
+            "mode": "completion",
+            "model_family": model_family,
+            "prompt": prompt,
+            "stop": stop,
+            "config": config,
+        }
+    if model_family == "gemma4":
+        prompt, stop = _build_gemma4_text_prompt(messages, config)
         return {
             "mode": "completion",
             "model_family": model_family,
@@ -1827,6 +1977,11 @@ class GGUFModelManager:
                         active_chat_handler_kwargs = _get_chat_handler_kwargs(
                             model_family,
                             chat_handler_overrides=chat_handler_overrides,
+                        )
+                        _warn_if_gemma4_vision_thinking_required(
+                            model_path,
+                            model_family,
+                            active_chat_handler_kwargs,
                         )
                         chat_handler = handler_cls(
                             clip_model_path=mmproj_path,
@@ -2640,6 +2795,10 @@ def _input_types_session_chat() -> dict:
                 bool(session_chat_defaults["stream_to_console"]),
                 tooltip="Stream tokens to console while generating.",
             ),
+            "enable_thinking": _ui_bool_input(
+                bool(session_chat_defaults["enable_thinking"]),
+                tooltip="Enable model thinking/reasoning output for supported chat formats.",
+            ),
         }
     }
 
@@ -2695,6 +2854,10 @@ def _input_types_dialogue_cycle() -> dict:
                 tooltip="If true, resets both {id}_A and {id}_B histories (transcript file is not deleted). Session disk caches are kept.",
             ),
             "stream_to_console": _ui_bool_input(bool(dialogue_cycle_defaults["stream_to_console"]), tooltip="Stream tokens to console while generating."),
+            "enable_thinking": _ui_bool_input(
+                bool(dialogue_cycle_defaults["enable_thinking"]),
+                tooltip="Enable model thinking/reasoning output for supported chat formats.",
+            ),
         }
     }
 
@@ -3382,9 +3545,18 @@ class LLMSessionChatNode:
              history_dir: str = "",
              reset_session: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["reset_session"],
              stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
+             enable_thinking: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["enable_thinking"],
              tensor_split: Optional[List[float]] = None,
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple:
+        chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
+            chat_handler_overrides,
+            enable_thinking,
+        )
+        text_chat_builder_overrides = _merge_enable_thinking_text_chat_builder_overrides(
+            text_chat_builder_overrides,
+            enable_thinking,
+        )
         return _run_session_chat_from_inputs(
             user_text=user_text,
             session_id=session_id,
@@ -3732,10 +3904,19 @@ class LLMDialogueCycleNode:
         history_dir: str = "",
         reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
         stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
+        enable_thinking: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["enable_thinking"],
         tensor_split: Optional[List[float]] = None,
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> tuple:
+        chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
+            chat_handler_overrides,
+            enable_thinking,
+        )
+        text_chat_builder_overrides = _merge_enable_thinking_text_chat_builder_overrides(
+            text_chat_builder_overrides,
+            enable_thinking,
+        )
         transcript_text = _run_dialogue_cycle_from_inputs(
             initial_user_text=initial_user_text,
             session_id=session_id,
