@@ -113,9 +113,9 @@ if model_family == "gemma4":
 
 `_build_gemma4_text_prompt()` also consumes `config["enable_thinking"]`:
 
-- `True`: opens the model turn without an empty thought-channel prefix.
-- `False`: inserts an empty Gemma4 thought channel,
-  `<|channel>thought\n<channel|>`, at the start of the model turn.
+- `True`: prepends `<|think|>` to the effective system prompt before it is
+  folded into the first user turn.
+- `False`: does not add any thinking marker or empty thought-channel prefix.
 
 The resulting request is later executed by `_create_text_or_chat_completion()`
 using `llm.create_completion(...)`.

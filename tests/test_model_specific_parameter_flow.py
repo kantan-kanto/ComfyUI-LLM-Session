@@ -35,7 +35,9 @@ def test_gemma4_text_builder_consumes_enable_thinking_false(monkeypatch):
     assert request["model_family"] == "gemma4"
     assert request["config"]["enable_thinking"] is False
     assert "System rules.\n\nHello" in request["prompt"]
-    assert request["prompt"].endswith("<start_of_turn>model\n<|channel>thought\n<channel|>")
+    assert request["prompt"].endswith("<start_of_turn>model\n")
+    assert "<|think|>" not in request["prompt"]
+    assert "<|channel>thought\n<channel|>" not in request["prompt"]
     assert request["stop"] == ["<end_of_turn>", "<eos>"]
 
 
@@ -52,6 +54,7 @@ def test_gemma4_text_builder_consumes_enable_thinking_true(monkeypatch):
 
     assert request is not None
     assert request["config"]["enable_thinking"] is True
+    assert request["prompt"].startswith("<start_of_turn>user\n<|think|>\n\nThink if needed.")
     assert request["prompt"].endswith("<start_of_turn>model\n")
     assert "<|channel>thought\n<channel|>" not in request["prompt"]
 
@@ -75,4 +78,6 @@ def test_gemma4_summary_forced_override_wins_over_request_override(monkeypatch):
     assert overrides == {"gemma4": {"enable_thinking": False}}
     assert request is not None
     assert request["config"]["enable_thinking"] is False
-    assert request["prompt"].endswith("<start_of_turn>model\n<|channel>thought\n<channel|>")
+    assert request["prompt"].endswith("<start_of_turn>model\n")
+    assert "<|think|>" not in request["prompt"]
+    assert "<|channel>thought\n<channel|>" not in request["prompt"]

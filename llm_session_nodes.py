@@ -1243,6 +1243,8 @@ def _build_gemma4_text_prompt(messages: List[Dict[str, Any]], config: dict[str, 
             turns.append(("model", content))
 
     system_message = "\n\n".join(system_parts).strip()
+    if enable_thinking:
+        system_message = f"<|think|>\n{system_message}".strip()
     if system_message:
         if turns and turns[0][0] == "user":
             role, content = turns[0]
@@ -1255,8 +1257,6 @@ def _build_gemma4_text_prompt(messages: List[Dict[str, Any]], config: dict[str, 
         prompt += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
 
     prompt += "<start_of_turn>model\n"
-    if not enable_thinking:
-        prompt += "<|channel>thought\n<channel|>"
     return prompt, ["<end_of_turn>", "<eos>"]
 
 
