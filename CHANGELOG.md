@@ -4,6 +4,13 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## Unreleased
+
+- Raised the Full UI `max_tokens` upper limit from `8192` to `32768` for long-form generation and editing workflows.
+- Documented `max_tokens` and `n_ctx` UI ranges and long-form sizing guidance.
+
+---
+
 ## [1.2.0] - 2026-05-17
 
 - Added llama.cpp `tensor_split` support for Simple nodes

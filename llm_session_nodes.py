@@ -2670,7 +2670,7 @@ def _input_types_session_chat() -> dict:
             "max_tokens": _ui_int_input(
                 int(session_chat_defaults["max_tokens"]),
                 min_value=1,
-                max_value=8192,
+                max_value=32768,
                 tooltip="Maximum tokens to generate for this turn",
             ),
             "temperature": _ui_float_input(
@@ -2822,7 +2822,7 @@ def _input_types_dialogue_cycle() -> dict:
             "system_prompt_A": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt_A"]), "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),
             "system_prompt_B": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt_B"]), "tooltip": "Role-specific system prompt for model B (overrides shared prompt if set)"}),
 
-            "max_tokens": _ui_int_input(int(dialogue_cycle_defaults["max_tokens"]), min_value=1, max_value=8192),
+            "max_tokens": _ui_int_input(int(dialogue_cycle_defaults["max_tokens"]), min_value=1, max_value=32768),
             "temperature": _ui_float_input(float(dialogue_cycle_defaults["temperature"]), min_value=0.0, max_value=2.0, step=0.05),
             "top_p": _ui_float_input(float(dialogue_cycle_defaults["top_p"]), min_value=0.05, max_value=1.0, step=0.01),
             "n_gpu_layers": _ui_int_input(int(dialogue_cycle_defaults["n_gpu_layers"]), min_value=-1, max_value=200, step=1),

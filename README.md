@@ -144,6 +144,12 @@ When using Vision-capable models, please follow these rules:
 - **reset_session** (Dialogue Cycle Simple): Overwrites the history and summary files associated with the session name, and resets per-session KV state. The session's disk cache is kept.
 - **tensor_split** (`config/simple_defaults.json`): Optional llama.cpp multi-GPU split. For example, `"tensor_split": [1.0, 0.0]` keeps llama.cpp model offload on visible GPU 0 in a 2-GPU setup. Leave it `null` or omit it for default behavior.
 
+### Generation Limits
+
+- Full UI nodes allow `max_tokens` up to `32768` and `n_ctx` up to `131072`.
+- Defaults remain conservative: `max_tokens=512` and `n_ctx=4096`.
+- For long-form generation, raise `n_ctx` together with `max_tokens`; for example, `max_tokens=8192` usually needs at least `n_ctx=16384`, and `24576` or `32768` is safer with history or long source text.
+
 ### Cache Scope Notes
 
 - `persistent_cache = LlamaDiskCache` stores disk cache data under `history_dir/cache/<session_id>/`.

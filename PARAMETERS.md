@@ -29,17 +29,25 @@ Maximum number of tokens generated per turn.
 
 - Small values: faster, may truncate output
 - Large values: slower, more complete responses
+- Full UI range: `1` to `32768`
+- Simple-node default: `512` unless overridden in `config/simple_defaults.json`
 
 Typical values:
 - CPU: 256–512
+- Long-form generation or editing: 2048–8192, if the model and memory budget allow it
 
 ---
 
 ### n_ctx
 Maximum context length passed to the model.
 
+- Full UI range: `512` to `131072`
+- Simple-node default: `4096` unless overridden in `config/simple_defaults.json`
+- `n_ctx` must be large enough to hold the prompt, conversation history, chat template overhead, safety margin, and the requested `max_tokens`.
+
 Typical values:
 - CPU: 4096
+- `max_tokens=8192`: use at least `n_ctx=16384` for short prompts; `24576` or `32768` is safer when conversation history or long source text is included.
 
 ---
 

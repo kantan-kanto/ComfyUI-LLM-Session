@@ -97,6 +97,12 @@ ComfyUI/models/LLM/
 - **tensor_split**（`config/simple_defaults.json`）：llama.cpp の multi-GPU 分割を指定できます
 - **enable_thinking**：対応モデル形式（Gemma 4 / Qwen3.5・Qwen3.6 互換経路）の thinking 出力制御に使います
 
+## 生成上限
+
+- Full UI ノードでは `max_tokens` を最大 `32768`、`n_ctx` を最大 `131072` まで設定できます。
+- デフォルト値は控えめに、`max_tokens=512`、`n_ctx=4096` のままです。
+- 長文生成では `max_tokens` と一緒に `n_ctx` も増やしてください。たとえば `max_tokens=8192` なら、短い入力でも `n_ctx=16384` 以上、履歴や長い本文を含める場合は `24576` または `32768` がより安全です。
+
 詳細設定は **[PARAMETERS.md](PARAMETERS.md)** を参照してください。
 
 ---
