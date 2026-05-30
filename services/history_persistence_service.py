@@ -1,12 +1,20 @@
 # Service for turn history append, optional summarization, and history file persistence.
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
 
 try:
     from ..core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
 except Exception:
     from core.logging_utils import log_error_safely, LOG_LEVEL_MINIMAL
+
+
+@dataclass(frozen=True)
+class HistoryPersistenceResult:
+    history: Dict[str, Any]
+    persistence_succeeded: bool = True
+    persistence_error: Optional[Exception] = None
 
 
 class HistoryPersistenceService:
@@ -27,7 +35,7 @@ class HistoryPersistenceService:
         hist_path: str,
         model_path: str,
         mmproj_path: Optional[str],
-    ) -> Dict[str, Any]:
+    ) -> HistoryPersistenceResult:
         next_turn_id = self._dep(deps, "next_turn_id")
         now_iso = self._dep(deps, "now_iso")
 
@@ -95,10 +103,18 @@ class HistoryPersistenceService:
                 log_error_safely("TurnExecutionService", e, "Failed to summarize history", LOG_LEVEL_MINIMAL)
 
         atomic_write_json = self._dep(deps, "atomic_write_json")
+        persistence_succeeded = True
+        persistence_error: Optional[Exception] = None
         try:
             atomic_write_json(hist_path, history)
         except Exception as e:
             # P0: Log history file save failure - this is critical as it can cause data loss
             log_error_safely("TurnExecutionService", e, f"Failed to save history file: {hist_path}", LOG_LEVEL_MINIMAL)
+            persistence_succeeded = False
+            persistence_error = e
 
-        return history
+        return HistoryPersistenceResult(
+            history=history,
+            persistence_succeeded=persistence_succeeded,
+            persistence_error=persistence_error,
+        )

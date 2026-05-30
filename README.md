@@ -228,7 +228,7 @@ The following GGUF instruction models have been tested.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / E4B /31B)*
+- Gemma 4 (E2B / E4B /31B / 26B-A4B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)

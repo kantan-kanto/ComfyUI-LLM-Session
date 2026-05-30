@@ -449,6 +449,35 @@ def test_session_chat_node_execution_service_failure_with_error_uses_error_retur
     assert "boom" in str(error_calls[0][1])
 
 
+def test_session_chat_node_execution_service_warns_on_persistence_failure(capsys) -> None:
+    service = SessionChatNodeExecutionService()
+
+    request = SessionChatNodeExecutionRequest(
+        model="model.gguf",
+        turn_kwargs={"user_text": "hello"},
+    )
+    deps = SessionChatNodeExecutionDependencies(
+        require_llama_cpp_available=lambda: None,
+        resolve_valid_model_path=lambda _model, _start_time: "/models/model.gguf",
+        get_or_create_model_manager=lambda: "mgr",
+        execute_session_chat_turn=lambda **_kwargs: TurnExecutionResult(
+            assistant_text="ok",
+            generation_succeeded=True,
+            persistence_succeeded=False,
+            persistence_error=RuntimeError("disk full"),
+        ),
+        session_chat_error_return=lambda _start, _msg=None: ("",),
+        log_session_chat_total=lambda _start, _status: None,
+    )
+
+    result = service.run(request=request, dependencies=deps)
+
+    assert result == ("ok",)
+    captured = capsys.readouterr()
+    assert "response generated but history was not saved" in captured.out
+    assert "disk full" in captured.out
+
+
 def test_session_chat_node_execution_service_keeps_existing_model_manager() -> None:
     service = SessionChatNodeExecutionService()
     calls: dict[str, object] = {"factory_calls": 0, "executed": None}
@@ -614,6 +643,9 @@ class TestErrorHandlingP0P1:
 
         # Generation should still succeed despite history save failure
         assert result.generation_succeeded is True
+        assert result.persistence_succeeded is False
+        assert isinstance(result.persistence_error, RuntimeError)
+        assert "Failed to write history" in str(result.persistence_error)
 
     def test_kv_state_restore_failure_logs_error(self, caplog) -> None:
         """P1: Test that KV state restore failure is logged."""

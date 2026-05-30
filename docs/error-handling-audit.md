@@ -287,6 +287,7 @@ Created `core/logging_utils.py` with:
 | `turn_execution_service.py:397-399` | Cache directory creation | `log_error_safely()` |
 | `infra/history_store.py:61-66` | Backup creation failure | `log_error_safely()` |
 | `turn_execution_service.py:569-578` | History save failure | `log_error_safely()` |
+| `infra/history_store.py` | Unreadable primary history load | `log_error_safely()` + quarantine before fresh history creation |
 
 ### P1 Improvements (Phase 4)
 
@@ -320,4 +321,3 @@ Added `TestErrorHandlingP0P1` class in `tests/services/test_turn_execution_servi
 6. ✅ Document P3 acceptable silent errors - Completed
 7. ✅ Add tests for P0/P1 improvements - Completed
 8. Consider P2 improvements (24 occurrences) as time permits
-

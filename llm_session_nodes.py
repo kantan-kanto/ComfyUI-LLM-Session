@@ -79,6 +79,7 @@ TurnExecutionService = _services_turn_execution.TurnExecutionService
 
 _core_logging_utils = _import_layer_module("core.logging_utils")
 log_error_safely = _core_logging_utils.log_error_safely
+get_module_logger = _core_logging_utils.get_module_logger
 LOG_LEVEL_MINIMAL = _core_logging_utils.LOG_LEVEL_MINIMAL
 
 # ============================================================================
@@ -761,7 +762,6 @@ try:
     from llama_cpp import Llama
 
     llama_chat_format = import_module("llama_cpp.llama_chat_format")
-    print("[DEBUG] llama_chat_format module:", getattr(llama_chat_format, "__file__", "(unknown)"))
 
     chat_handler_map, chat_handler_factory_map, chat_handler_class_registry = _load_available_chat_handlers(
         handler_map=chat_handler_map,
@@ -770,7 +770,6 @@ try:
     )
 
     LLAMA_CPP_AVAILABLE = True
-    print("[DEBUG] Llama.__init__ args:", getattr(Llama, "__init__", None))
 
 except Exception as e:
     LLAMA_CPP_AVAILABLE = False
@@ -3677,6 +3676,14 @@ def _chat_one_turn(
         if log_level == "debug" and result.error is not None:
             print(f"[LLM Dialogue Cycle] generation failed: {result.error}")
         return ""
+
+    if not result.persistence_succeeded:
+        logger = get_module_logger("LLM Dialogue Cycle")
+        detail = f": {result.persistence_error}" if result.persistence_error is not None else ""
+        logger(
+            f"[LLM Dialogue Cycle] Warning: response generated but history was not saved{detail}",
+            LOG_LEVEL_MINIMAL,
+        )
 
     return result.assistant_text
 

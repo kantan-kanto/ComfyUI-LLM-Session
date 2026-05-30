@@ -174,3 +174,70 @@ def test_load_history_reset_session_creates_fresh_history(tmp_path) -> None:
     with open(path, "r", encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["system_prompt"] == "sys"
+
+
+def test_load_history_quarantines_invalid_primary_before_creating_new(tmp_path, capsys) -> None:
+    default_dir = str(tmp_path)
+    path = history_store.history_path("sid", None, default_dir)
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{ invalid json")
+
+    hist, loaded_path = history_store.load_history(
+        session_id="sid",
+        history_dir=None,
+        system_prompt="sys",
+        model_sig=None,
+        log_level="timing",
+        reset_session=False,
+        default_dir=default_dir,
+        now_iso=lambda: "2026-05-31T12:34:56+09:00",
+    )
+
+    assert loaded_path == path
+    assert hist["system_prompt"] == "sys"
+    assert hist["turns"] == []
+
+    quarantined = list(tmp_path.glob("sid.json.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_text(encoding="utf-8") == "{ invalid json"
+
+    with open(path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["system_prompt"] == "sys"
+
+    out = capsys.readouterr().out
+    assert "Failed to load history file" in out
+    assert "Quarantined unreadable history file" in out
+
+
+def test_load_history_raises_without_overwrite_when_quarantine_fails(tmp_path, monkeypatch) -> None:
+    default_dir = str(tmp_path)
+    path = history_store.history_path("sid", None, default_dir)
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{ invalid json")
+
+    def _raise_quarantine_failure(_path, _now_iso):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(history_store, "_quarantine_corrupt_history", _raise_quarantine_failure)
+
+    try:
+        history_store.load_history(
+            session_id="sid",
+            history_dir=None,
+            system_prompt="sys",
+            model_sig=None,
+            reset_session=False,
+            default_dir=default_dir,
+            now_iso=lambda: "2026-05-31T12:34:56+09:00",
+        )
+    except PermissionError as err:
+        assert "locked" in str(err)
+    else:
+        raise AssertionError("load_history should raise when corrupt history cannot be quarantined")
+
+    assert os.path.exists(path)
+    with open(path, "r", encoding="utf-8") as f:
+        assert f.read() == "{ invalid json"

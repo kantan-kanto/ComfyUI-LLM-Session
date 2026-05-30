@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -96,11 +97,39 @@ def _atomic_restore_json(path: str) -> Optional[str]:
     return None
 
 
+def _safe_timestamp_for_filename(now_iso: Callable[[], str]) -> str:
+    try:
+        raw = str(now_iso() or "")
+    except Exception:
+        raw = ""
+    safe = "".join(c if c.isalnum() else "-" for c in raw).strip("-")
+    return safe or "unknown-time"
+
+
+def _quarantine_corrupt_history(path: str, now_iso: Callable[[], str]) -> str:
+    suffix = _safe_timestamp_for_filename(now_iso)
+    quarantine_path = f"{path}.corrupt-{suffix}"
+    if os.path.exists(quarantine_path):
+        i = 1
+        while os.path.exists(f"{quarantine_path}-{i}"):
+            i += 1
+        quarantine_path = f"{quarantine_path}-{i}"
+    os.replace(path, quarantine_path)
+    return quarantine_path
+
+
 def _coerce_int(v: Any, default: int) -> int:
     try:
         return int(v)
     except Exception:
         return default
+
+
+@dataclass(frozen=True)
+class HistoryLoadAttempt:
+    history: Optional[Dict[str, Any]]
+    path: str
+    error: Optional[Exception] = None
 
 
 def normalize_history_schema(hist: Dict[str, Any]) -> Dict[str, Any]:
@@ -196,9 +225,9 @@ def _try_load_history_file(
     path: str,
     system_prompt: str,
     model_sig: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+) -> HistoryLoadAttempt:
     if not os.path.exists(path):
-        return None
+        return HistoryLoadAttempt(history=None, path=path)
     else:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -210,9 +239,9 @@ def _try_load_history_file(
                 hist["system_prompt"] = system_prompt
             if model_sig:
                 hist.setdefault("meta", {}).setdefault("model_signature", {}).update(model_sig)
-            return hist
+            return HistoryLoadAttempt(history=hist, path=path)
         except Exception as e:
-            return None
+            return HistoryLoadAttempt(history=None, path=path, error=e)
         
 
 def load_history(
@@ -241,25 +270,53 @@ def load_history(
         atomic_write_json(path, hist)
         return hist, path
     
-    hist = _try_load_history_file(path, system_prompt, model_sig)
-    if hist is not None:
+    primary_attempt = _try_load_history_file(path, system_prompt, model_sig)
+    primary_exists = os.path.exists(path)
+    if primary_attempt.history is not None:
         log(f"Success load history: {path}", LOG_LEVEL_TIMING)
-        return hist, path
+        return primary_attempt.history, path
+    if primary_attempt.error is not None:
+        log_error_safely(
+            "HistoryStore",
+            primary_attempt.error,
+            f"Failed to load history file: {path}",
+            LOG_LEVEL_MINIMAL,
+        )
 
     bak = path + ".bak"
-    hist = _try_load_history_file(bak, system_prompt, model_sig)
-    if hist is not None:
+    backup_attempt = _try_load_history_file(bak, system_prompt, model_sig)
+    if backup_attempt.history is not None:
         log(f"Success load backup history: {bak}", LOG_LEVEL_TIMING)
         try:
             _atomic_restore_json(path)
-            atomic_write_json(path, hist)
+            atomic_write_json(path, backup_attempt.history)
             log(f"Success restore history file: {path}", LOG_LEVEL_DEBUG)
         except Exception as e:
             # P0: Log history file save failure - this is critical as it can cause data loss
             log_error_safely("HistoryStore", e, f"Failed to restore history file: {path}", LOG_LEVEL_DEBUG)
-        return hist, path
+        return backup_attempt.history, path
     else:
+        if backup_attempt.error is not None:
+            log_error_safely(
+                "HistoryStore",
+                backup_attempt.error,
+                f"Failed to load backup history file: {bak}",
+                LOG_LEVEL_MINIMAL,
+            )
         log(f"Failed to load backup history: {bak}", LOG_LEVEL_TIMING)
+
+    if primary_exists:
+        try:
+            quarantined = _quarantine_corrupt_history(path, now_iso)
+            log(f"Quarantined unreadable history file: {quarantined}", LOG_LEVEL_TIMING)
+        except Exception as e:
+            log_error_safely(
+                "HistoryStore",
+                e,
+                f"Failed to quarantine unreadable history file; refusing to overwrite: {path}",
+                LOG_LEVEL_MINIMAL,
+            )
+            raise
     
     hist = new_history(session_id, system_prompt, model_sig=model_sig, now_iso=now_iso)
     atomic_write_json(path, hist)

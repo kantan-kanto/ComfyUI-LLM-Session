@@ -8,6 +8,10 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 - Raised the Full UI `max_tokens` upper limit from `8192` to `32768` for long-form generation and editing workflows.
 - Documented `max_tokens` and `n_ctx` UI ranges and long-form sizing guidance.
+- Report history persistence failures through `TurnExecutionResult` while still returning successful generations.
+- Added warning logs when a response is generated but the session history could not be saved.
+- Removed startup-only debug prints from the llama.cpp import path.
+- Log unreadable history files and quarantine corrupt primary history files before creating a fresh history.
 
 ---
 

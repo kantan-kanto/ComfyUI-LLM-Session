@@ -15,7 +15,7 @@ try:
     )
     from .generation_execution_service import GenerationExecutionService
     from .kv_state_service import KvStateService
-    from .history_persistence_service import HistoryPersistenceService
+    from .history_persistence_service import HistoryPersistenceResult, HistoryPersistenceService
 except Exception:
     from core.logging_utils import (
         log_error_safely,
@@ -25,7 +25,7 @@ except Exception:
     )
     from services.generation_execution_service import GenerationExecutionService
     from services.kv_state_service import KvStateService
-    from services.history_persistence_service import HistoryPersistenceService
+    from services.history_persistence_service import HistoryPersistenceResult, HistoryPersistenceService
 
 class TurnExecutionDependencies(TypedDict):
     llama_cpp_available: bool
@@ -211,6 +211,8 @@ class TurnExecutionResult:
     history_path: Optional[str] = None
     generation_succeeded: bool = False
     error: Optional[Exception] = None
+    persistence_succeeded: bool = True
+    persistence_error: Optional[Exception] = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +255,14 @@ class SessionChatNodeExecutionService:
                     f"[LLM Session Chat] Error during generation: {result.error}",
                 )
             return dependencies.session_chat_error_return(start_time, None)
+
+        if not result.persistence_succeeded:
+            module_logger = get_module_logger("SessionChatNodeExecutionService")
+            detail = f": {result.persistence_error}" if result.persistence_error is not None else ""
+            module_logger(
+                f"[LLM Session Chat] Warning: response generated but history was not saved{detail}",
+                LOG_LEVEL_MINIMAL,
+            )
 
         dependencies.log_session_chat_total(start_time, "Finished")
         return (result.assistant_text,)
@@ -534,7 +544,7 @@ class TurnExecutionService:
         hist_path: str,
         model_path: str,
         mmproj_path: Optional[str],
-    ) -> Dict[str, Any]:
+    ) -> HistoryPersistenceResult:
         return self._history_persistence_service.persist_history_and_summary(
             request=request,
             deps=deps,
@@ -735,7 +745,7 @@ class TurnExecutionService:
 
         assistant_text = generation_outcome.assistant_text
 
-        history = self._persist_history_and_summary(
+        persistence_result = self._persist_history_and_summary(
             request=request,
             deps=deps,
             history=history,
@@ -746,6 +756,7 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
         )
+        history = persistence_result.history
         self._maybe_save_kv_state(
             request=request,
             deps=deps,
@@ -762,4 +773,6 @@ class TurnExecutionService:
             history_path=hist_path,
             generation_succeeded=True,
             error=None,
+            persistence_succeeded=persistence_result.persistence_succeeded,
+            persistence_error=persistence_result.persistence_error,
         )
