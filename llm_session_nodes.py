@@ -2428,6 +2428,30 @@ def _is_state_data_mismatch_error(err: Exception) -> bool:
     return False
 
 
+def _processing_interrupted() -> bool:
+    try:
+        import comfy.model_management  # type: ignore
+        return bool(comfy.model_management.processing_interrupted())
+    except Exception:
+        return False
+
+
+def _throw_if_processing_interrupted() -> None:
+    try:
+        import comfy.model_management  # type: ignore
+    except ImportError:
+        return
+    comfy.model_management.throw_exception_if_processing_interrupted()
+
+
+def _is_interrupt_error(err: Exception) -> bool:
+    try:
+        import comfy.model_management  # type: ignore
+        return isinstance(err, comfy.model_management.InterruptProcessingException)
+    except Exception:
+        return False
+
+
 def _cache_debug_label(manager: Optional["GGUFModelManager"]) -> str:
     try:
         info = getattr(manager, "_current_cache_info", None) or {}
@@ -2921,6 +2945,9 @@ def _build_turn_execution_dependencies(
         "cache_debug_label": _cache_debug_label,
         "run_generation_with_adaptive_retry": run_generation_with_adaptive_retry,
         "make_suppress_backend_logs": _make_suppress_backend_logs,
+        "processing_interrupted": _processing_interrupted,
+        "throw_if_processing_interrupted": _throw_if_processing_interrupted,
+        "is_interrupt_error": _is_interrupt_error,
         "iter_chat_completion_robust": _iter_chat_completion_robust,
         "create_chat_completion_robust": _create_chat_completion_robust,
         "extract_stream_content": _extract_stream_content,

@@ -13,6 +13,7 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 - Removed startup-only debug prints from the llama.cpp import path.
 - Log unreadable history files and quarantine corrupt primary history files before creating a fresh history.
 - Stop with an explicit error instead of falling back to text-only mode when image input or an explicitly selected mmproj requires vision support.
+- Support ComfyUI Cancel during non-stream llama.cpp generation by forwarding interrupts to `llm.abort()`.
 
 ---
 

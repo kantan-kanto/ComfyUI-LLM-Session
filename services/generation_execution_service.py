@@ -128,6 +128,9 @@ class GenerationExecutionService:
             create_chat_completion_robust=self._dep(deps, "create_chat_completion_robust"),
             extract_stream_content=self._dep(deps, "extract_stream_content"),
             retry_kwargs_with_repeat_last_n_fallback=self._dep(deps, "retry_kwargs_with_repeat_last_n_fallback"),
+            processing_interrupted=deps.get("processing_interrupted", lambda: False),
+            throw_if_processing_interrupted=deps.get("throw_if_processing_interrupted", lambda: None),
+            is_interrupt_error=deps.get("is_interrupt_error", lambda _err: False),
         )
 
         assistant_text = generation_result.assistant_text

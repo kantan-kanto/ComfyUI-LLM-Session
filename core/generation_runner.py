@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
@@ -12,6 +13,84 @@ except Exception:
 
 
 T = TypeVar("T")
+
+
+class _AbortWatch:
+    def __init__(
+        self,
+        *,
+        llm: Any,
+        processing_interrupted: Callable[[], bool],
+        poll_interval: float = 0.1,
+    ) -> None:
+        self.abort_requested = False
+        self._llm = llm
+        self._processing_interrupted = processing_interrupted
+        self._poll_interval = max(0.01, float(poll_interval))
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def __enter__(self) -> "_AbortWatch":
+        if not callable(getattr(self._llm, "abort", None)):
+            return self
+        self._thread = threading.Thread(target=self._watch, name="llm-session-abort-watch", daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def _watch(self) -> None:
+        while not self._stop_event.wait(self._poll_interval):
+            try:
+                if not self._processing_interrupted():
+                    continue
+            except Exception:
+                continue
+            self.abort_requested = True
+            try:
+                self._llm.abort()
+            except Exception:
+                pass
+            return
+
+
+def _noop_processing_interrupted() -> bool:
+    return False
+
+
+def _noop_throw_if_processing_interrupted() -> None:
+    return None
+
+
+def _false_interrupt_error(_err: Exception) -> bool:
+    return False
+
+
+def _finish_reason(resp: Any) -> str:
+    if not isinstance(resp, dict):
+        return ""
+    choices = resp.get("choices")
+    if not choices:
+        return ""
+    choice = choices[0] or {}
+    if not isinstance(choice, dict):
+        return ""
+    return str(choice.get("finish_reason") or "")
+
+
+def _raise_if_abort_detected(
+    *,
+    abort_requested: bool,
+    resp: Any,
+    throw_if_processing_interrupted: Callable[[], None],
+) -> None:
+    if not abort_requested and _finish_reason(resp) != "abort":
+        return
+    throw_if_processing_interrupted()
+    raise RuntimeError("Generation aborted")
 
 
 def run_with_typeerror_fallback(
@@ -47,6 +126,8 @@ def _run_generation_once(
     extract_stream_content: Callable[[Any], str],
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
     repeat_last_n: int,
+    processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
+    throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
 ) -> str:
     def _stream_execute(active_kwargs: Dict[str, Any]):
         if text_chat_request is not None:
@@ -71,31 +152,44 @@ def _run_generation_once(
         if stream_to_console:
             pieces: List[str] = []
             out = sys.__stdout__
-            stream_iter = run_with_typeerror_fallback(
-                execute_with_kwargs=_stream_execute,
+            with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
+                stream_iter = run_with_typeerror_fallback(
+                    execute_with_kwargs=_stream_execute,
+                    completion_kwargs=completion_kwargs,
+                    retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
+                    repeat_last_n=int(repeat_last_n),
+                )
+
+                for chunk in stream_iter:
+                    throw_if_processing_interrupted()
+                    _raise_if_abort_detected(
+                        abort_requested=abort_watch.abort_requested,
+                        resp={"choices": [chunk.get("choices", [{}])[0]]} if isinstance(chunk, dict) else chunk,
+                        throw_if_processing_interrupted=throw_if_processing_interrupted,
+                    )
+                    token = extract_stream_content(chunk)
+                    if not token:
+                        continue
+                    pieces.append(token)
+                    try:
+                        out.write(token)
+                        out.flush()
+                    except Exception:
+                        pass
+            return "".join(pieces)
+
+        with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
+            resp = run_with_typeerror_fallback(
+                execute_with_kwargs=_non_stream_execute,
                 completion_kwargs=completion_kwargs,
                 retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
                 repeat_last_n=int(repeat_last_n),
             )
-
-            for chunk in stream_iter:
-                token = extract_stream_content(chunk)
-                if not token:
-                    continue
-                pieces.append(token)
-                try:
-                    out.write(token)
-                    out.flush()
-                except Exception:
-                    pass
-            return "".join(pieces)
-
-        resp = run_with_typeerror_fallback(
-            execute_with_kwargs=_non_stream_execute,
-            completion_kwargs=completion_kwargs,
-            retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
-            repeat_last_n=int(repeat_last_n),
-        )
+            _raise_if_abort_detected(
+                abort_requested=abort_watch.abort_requested,
+                resp=resp,
+                throw_if_processing_interrupted=throw_if_processing_interrupted,
+            )
 
         if text_chat_request is not None:
             return resp["choices"][0]["text"] or ""
@@ -131,6 +225,9 @@ def run_generation_with_adaptive_retry(
     create_chat_completion_robust: Callable[..., Dict[str, Any]],
     extract_stream_content: Callable[[Any], str],
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
+    processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
+    throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
+    is_interrupt_error: Callable[[Exception], bool] = _false_interrupt_error,
 ) -> GenerationRunResult:
     assistant_text = ""
     gen_tokens = int(max_tokens)
@@ -168,6 +265,8 @@ def run_generation_with_adaptive_retry(
                 extract_stream_content=extract_stream_content,
                 retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
                 repeat_last_n=int(repeat_last_n),
+                processing_interrupted=processing_interrupted,
+                throw_if_processing_interrupted=throw_if_processing_interrupted,
             )
 
             if attempt_logger is not None:
@@ -182,6 +281,8 @@ def run_generation_with_adaptive_retry(
                 non_ctx_error=False,
             )
         except Exception as err:
+            if is_interrupt_error(err):
+                raise
             last_err = err
             if attempt_logger is not None:
                 attempt_logger(False, attempt_no, time.perf_counter() - t_start, int(gen_tokens), turns_limit, err)

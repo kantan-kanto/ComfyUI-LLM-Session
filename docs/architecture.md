@@ -66,6 +66,7 @@ llm_session_nodes.py
 External:
 - llama-cpp-python (generation/cache backend)
 - folder_paths (ComfyUI path resolution)
+- comfy.model_management interrupt APIs (injected from the node composition root)
 - filesystem (history json, transcript txt, cache dir)
 ```
 
@@ -74,13 +75,14 @@ External:
 - `core/turn_types.py`: shared dataclass result types.
 - `core/continue_rewrite.py`: language-aware rewrite of `continue` prompts.
 - `core/kv_state.py`: KV state signature/build/restore/save helpers.
-- `core/generation_runner.py`: shared generation retry and fallback flow.
+- `core/generation_runner.py`: shared generation retry, fallback flow, and injected interrupt/abort handling.
 - `core/runtime_container.py`: runtime-scoped container for injected session-chat manager, dialogue-cycle manager pool, and in-memory KV state.
 - `llm_session_nodes.py` runtime behavior:
   - Default runtime container is lazily initialized via resolver helpers.
   - Dialogue-cycle managers are resolved from runtime container slots (`A`/`B`) so they can persist across runs.
   - Chat handler classes are tracked in an internal registry map (not `globals()` mutation).
   - Chat-format-specific UI overrides such as `enable_thinking` are assembled near the chat handler/text builder config maps before entering service orchestration.
+  - ComfyUI interrupt/cancel callbacks are assembled here and injected into the generation runner so `core/` remains independent of ComfyUI imports.
 - `services/chat_turn_service.py`: dialogue-cycle orchestration and node-execution orchestration (`DialogueCycleNodeExecutionService`).
 - `services/turn_execution_service.py`: thin orchestration for shared single-turn execution and node-entry invocation (`SessionChatNodeExecutionService`).
 - `services/generation_execution_service.py`: adaptive generation orchestration and assistant output normalization.
