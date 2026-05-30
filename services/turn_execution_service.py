@@ -33,6 +33,7 @@ class TurnExecutionDependencies(TypedDict):
     is_no_models_placeholder: Callable[[Optional[str]], bool]
     get_llm_model_roots: Callable[[], List[str]]
     resolve_model_and_mmproj: Callable[[List[str], str, str], tuple[str, Optional[str]]]
+    mmproj_auto: str
     mmproj_not_required: str
     load_history: Callable[..., tuple[Dict[str, Any], str]]
     clear_kv_state_for_session: Callable[[str], None]
@@ -444,6 +445,17 @@ class TurnExecutionService:
             log_error_safely("TurnExecutionService", e, "Failed to create cache directory, continuing without cache", LOG_LEVEL_MINIMAL)
             mgr.cache_dir_override = None
 
+        mmproj_choice = str(request.mmproj or "").strip()
+        mmproj_choice_normalized = "".join(c for c in mmproj_choice.lower() if c.isalnum())
+        mmproj_auto = str(deps.get("mmproj_auto", "(Auto-detect)") or "").strip()
+        mmproj_auto_normalized = "".join(c for c in mmproj_auto.lower() if c.isalnum())
+        mmproj_not_required = str(deps.get("mmproj_not_required", "") or "").strip()
+        explicit_mmproj_selected = bool(mmproj_choice) and (
+            mmproj_choice != mmproj_not_required
+            and mmproj_choice_normalized not in {"autodetect", "auto", mmproj_auto_normalized}
+        )
+        vision_required = request.image is not None or explicit_mmproj_selected
+
         try:
             llm = mgr.load_model(
                 model_path=model_path,
@@ -452,6 +464,7 @@ class TurnExecutionService:
                 n_gpu_layers=int(request.n_gpu_layers),
                 tensor_split=request.tensor_split,
                 chat_handler_overrides=request.chat_handler_overrides,
+                vision_required=vision_required,
                 verbose=False,
             )
         except Exception as err:

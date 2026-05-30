@@ -18,9 +18,11 @@ class DummyManager:
         self.cache_dir_override = None
         self.loaded = False
         self.cache_configured = False
+        self.last_load_kwargs = None
 
-    def load_model(self, **_kwargs):
+    def load_model(self, **kwargs):
         self.loaded = True
+        self.last_load_kwargs = kwargs
         self.model = object()
         return self.model
 
@@ -40,6 +42,7 @@ def _base_deps(history_ref, *, run_generation_result: GenerationRunResult):
         "is_no_models_placeholder": lambda _model: False,
         "get_llm_model_roots": lambda: ["/models"],
         "resolve_model_and_mmproj": lambda _roots, _model, _mmproj: ("/models/m.gguf", None),
+        "mmproj_auto": "(Auto-detect)",
         "mmproj_not_required": "(Not required)",
         "load_history": lambda **_kwargs: (history_ref, "hist.json"),
         "clear_kv_state_for_session": lambda _sid: None,
@@ -164,6 +167,78 @@ def test_execute_turn_returns_failure_when_model_placeholder() -> None:
 
     assert result.generation_succeeded is False
     assert result.assistant_text == ""
+
+
+def test_execute_turn_requires_vision_when_image_is_present() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    request = _make_request(deps, mgr)
+    request = TurnExecutionRequest(**{**request.__dict__, "image": object(), "mmproj": "(Auto-detect)"})
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    assert mgr.last_load_kwargs["vision_required"] is True
+
+
+def test_execute_turn_requires_vision_when_mmproj_is_explicit() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    request = _make_request(deps, mgr)
+    request = TurnExecutionRequest(**{**request.__dict__, "mmproj": "mmproj-gemma4.gguf"})
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    assert mgr.last_load_kwargs["vision_required"] is True
+
+
+def test_execute_turn_does_not_require_vision_for_auto_mmproj_without_image() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    request = _make_request(deps, mgr)
+    request = TurnExecutionRequest(**{**request.__dict__, "mmproj": "(Auto-detect)"})
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    assert mgr.last_load_kwargs["vision_required"] is False
 
 
 def test_execute_from_node_inputs_matches_execute_turn_path() -> None:

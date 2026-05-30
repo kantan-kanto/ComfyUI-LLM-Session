@@ -929,7 +929,7 @@ def _resolve_model_and_mmproj(roots: list[str], model: str, mmproj: str) -> tupl
     elif mmproj != _MMPROJ_AUTO:
         mmproj_path = _resolve_llm_relpath(mmproj, roots=roots)
         if not os.path.exists(mmproj_path):
-            mmproj_path = None  # fall back to auto-detect
+            raise FileNotFoundError(f"mmproj not found: {mmproj_path}")
 
     return model_path, mmproj_path
 
@@ -1931,6 +1931,7 @@ class GGUFModelManager:
         n_gpu_layers: int = 0,
         tensor_split: Optional[List[float]] = None,
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        vision_required: bool = False,
         verbose: bool = False,
     ) -> Llama:
         """Load GGUF model."""
@@ -1941,6 +1942,8 @@ class GGUFModelManager:
 
         # If user explicitly selected "(Not required)", force text-only.
         force_no_mmproj = (mmproj_path == _MMPROJ_NOT_REQUIRED)
+        if force_no_mmproj and vision_required:
+            raise RuntimeError("Vision is required but mmproj was explicitly disabled.")
         if force_no_mmproj:
             mmproj_path = None
 
@@ -1948,6 +1951,7 @@ class GGUFModelManager:
         chat_handler = None
         chat_format = None
         use_vision = False
+        matched_vision_family = False
         active_chat_handler_kwargs: Dict[str, Any] = {}
 
         model_name_lower = os.path.basename(model_path).lower()
@@ -1956,13 +1960,20 @@ class GGUFModelManager:
 
             if k in model_name_lower and v in chat_handler_factory_map:
                 model_family = v
+                matched_vision_family = True
 
                 if not force_no_mmproj:
                     if mmproj_path is None:
                         mmproj_path = self._auto_detect_mmproj(model_path, model_family)
                         if mmproj_path is None:
                             model_dir = os.path.dirname(model_path)
-                            print("[GGUFModelManager] Warning: Failed to auto_detect mmproj file.")
+                            msg = (
+                                "[GGUFModelManager] Failed to auto-detect mmproj file "
+                                f"for model family {model_family} in {model_dir}"
+                            )
+                            if vision_required:
+                                raise RuntimeError(msg)
+                            print(f"{msg}; falling back to text-only mode.")
                     else:
                         mmproj_path = self._normalize_path(mmproj_path)
                 
@@ -1989,6 +2000,8 @@ class GGUFModelManager:
                         chat_format = model_family
                         use_vision = True
                     except Exception as e:
+                        if vision_required:
+                            raise RuntimeError(f"Vision chat handler initialization failed: {e}") from e
                         print(f"[GGUFModelManager] Warning: Failed to initialize chat handler: {e}")
                         chat_handler = None
                         chat_format = None
@@ -1999,6 +2012,12 @@ class GGUFModelManager:
                     use_vision = False
 
                 break
+
+        if vision_required and not matched_vision_family:
+            raise RuntimeError(
+                "Vision is required but no supported vision chat handler was detected "
+                f"for model: {os.path.basename(model_path)}"
+            )
 
         if not use_vision:
             print("[GGUFModelManager] Using text-only mode")
@@ -2879,6 +2898,7 @@ def _build_turn_execution_dependencies(
         "is_no_models_placeholder": _is_no_models_placeholder,
         "get_llm_model_roots": _get_llm_model_roots,
         "resolve_model_and_mmproj": _resolve_model_and_mmproj,
+        "mmproj_auto": _MMPROJ_AUTO,
         "mmproj_not_required": _MMPROJ_NOT_REQUIRED,
         "load_history": load_history,
         "clear_kv_state_for_session": lambda session_id: _clear_kv_state_for_session(

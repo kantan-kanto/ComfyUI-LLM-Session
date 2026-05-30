@@ -4,6 +4,8 @@ import importlib
 import sys
 import types
 
+import pytest
+
 
 def _load_nodes_module(monkeypatch):
     fake_folder_paths = types.SimpleNamespace(
@@ -82,3 +84,113 @@ def test_detect_model_family_lfm25_aliases(monkeypatch):
 
     assert family_dash == "lfm2.5-vl"
     assert family_nodash == "lfm2.5-vl"
+
+
+def _prepare_vision_manager_test(module, monkeypatch, handler_cls):
+    class DummyLlama:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.calls.append(kwargs)
+
+    monkeypatch.setattr(module, "LLAMA_CPP_AVAILABLE", True)
+    monkeypatch.setattr(module, "Llama", DummyLlama)
+    monkeypatch.setattr(module, "chat_handler_factory_map", {"gemma4": object()})
+    monkeypatch.setattr(module, "chat_handler_map", {"gemma4": "Gemma4ChatHandler"})
+    monkeypatch.setattr(module, "chat_handler_class_registry", {"Gemma4ChatHandler": handler_cls})
+    return DummyLlama
+
+
+def test_model_manager_keeps_text_fallback_when_vision_is_not_required(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class FailingHandler:
+        def __init__(self, **_kwargs):
+            raise RuntimeError("handler boom")
+
+    dummy_llama = _prepare_vision_manager_test(module, monkeypatch, FailingHandler)
+    manager = module.GGUFModelManager()
+
+    manager.load_model(
+        model_path="C:/models/Gemma-4-test.gguf",
+        mmproj_path="C:/models/mmproj-gemma4.gguf",
+        n_ctx=1024,
+        n_gpu_layers=0,
+        vision_required=False,
+    )
+
+    assert dummy_llama.calls
+    assert "chat_handler" not in dummy_llama.calls[0]
+
+
+def test_model_manager_raises_when_required_mmproj_auto_detect_fails(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyHandler:
+        def __init__(self, **_kwargs):
+            pass
+
+    _prepare_vision_manager_test(module, monkeypatch, DummyHandler)
+    manager = module.GGUFModelManager()
+
+    with pytest.raises(RuntimeError, match="Failed to auto-detect mmproj"):
+        manager.load_model(
+            model_path="C:/models/Gemma-4-test.gguf",
+            mmproj_path=None,
+            n_ctx=1024,
+            n_gpu_layers=0,
+            vision_required=True,
+        )
+
+
+def test_model_manager_raises_when_required_handler_initialization_fails(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class FailingHandler:
+        def __init__(self, **_kwargs):
+            raise RuntimeError("handler boom")
+
+    _prepare_vision_manager_test(module, monkeypatch, FailingHandler)
+    manager = module.GGUFModelManager()
+
+    with pytest.raises(RuntimeError, match="Vision chat handler initialization failed"):
+        manager.load_model(
+            model_path="C:/models/Gemma-4-test.gguf",
+            mmproj_path="C:/models/mmproj-gemma4.gguf",
+            n_ctx=1024,
+            n_gpu_layers=0,
+            vision_required=True,
+        )
+
+
+def test_model_manager_raises_when_required_family_is_not_supported(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyHandler:
+        def __init__(self, **_kwargs):
+            pass
+
+    _prepare_vision_manager_test(module, monkeypatch, DummyHandler)
+    manager = module.GGUFModelManager()
+
+    with pytest.raises(RuntimeError, match="no supported vision chat handler"):
+        manager.load_model(
+            model_path="C:/models/unknown-model.gguf",
+            mmproj_path="C:/models/mmproj-unknown.gguf",
+            n_ctx=1024,
+            n_gpu_layers=0,
+            vision_required=True,
+        )
+
+
+def test_resolve_model_and_mmproj_raises_when_explicit_mmproj_is_missing(monkeypatch, tmp_path):
+    module = _load_nodes_module(monkeypatch)
+    model_path = tmp_path / "Gemma-4-test.gguf"
+    model_path.write_text("dummy", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="mmproj not found"):
+        module._resolve_model_and_mmproj(
+            [str(tmp_path)],
+            "Gemma-4-test.gguf",
+            "mmproj-gemma4.gguf",
+        )
