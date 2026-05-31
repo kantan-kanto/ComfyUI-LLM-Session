@@ -6,14 +6,29 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## Unreleased
 
-- Raised the Full UI `max_tokens` upper limit from `8192` to `32768` for long-form generation and editing workflows.
-- Documented `max_tokens` and `n_ctx` UI ranges and long-form sizing guidance.
-- Report history persistence failures through `TurnExecutionResult` while still returning successful generations.
-- Added warning logs when a response is generated but the session history could not be saved.
-- Removed startup-only debug prints from the llama.cpp import path.
-- Log unreadable history files and quarantine corrupt primary history files before creating a fresh history.
-- Stop with an explicit error instead of falling back to text-only mode when image input or an explicitly selected mmproj requires vision support.
-- Support ComfyUI Cancel during non-stream llama.cpp generation by forwarding interrupts to `llm.abort()`.
+---
+
+## [1.2.1] - 2026-05-31
+
+- Generation controls
+  - Raised the Full UI `max_tokens` upper limit from `8192` to `32768` for long-form generation and editing workflows.
+  - Documented `max_tokens` and `n_ctx` UI ranges and long-form sizing guidance.
+
+- Session history reliability
+  - Report history persistence failures through `TurnExecutionResult` while still returning successful generations.
+  - Added warning logs when a response is generated but the session history could not be saved.
+  - Log unreadable history files and quarantine corrupt primary history files before creating a fresh history.
+
+- Vision model error handling
+  - Stop with an explicit error instead of falling back to text-only mode when image input or an explicitly selected mmproj requires vision support.
+
+- ComfyUI integration
+  - Support ComfyUI Cancel during non-stream llama.cpp generation by forwarding interrupts to `llm.abort()`.
+  - Removed startup-only debug prints from the llama.cpp import path.
+
+- Registry and test packaging
+  - Exclude development-only test files from ComfyUI Registry archives.
+  - Added reproducible local test dependencies in `requirements-dev.txt`.
 
 ---
 

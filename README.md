@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.2.0
+**Version:** 1.2.1
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -328,10 +328,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.2.0
+### Current Version: 1.2.1
 
-- Added Simple-node `tensor_split` support for llama.cpp multi-GPU environments
-- Added Full UI `enable_thinking` controls for supported chat formats
-- Improved Gemma 4 text prompting and thinking-control wiring
-- Preserved explicit per-model Simple config overrides when Full-node defaults are applied
-- Added model-specific parameter flow documentation and focused regression tests
+- Raised the Full UI `max_tokens` upper limit to `32768` and documented long-form sizing guidance.
+- Improved session history reliability with persistence failure reporting, warning logs, and corrupt primary history quarantine.
+- Made vision/mmproj initialization failures explicit when image input or a selected mmproj requires vision support.
+- Added ComfyUI Cancel support during non-stream llama.cpp generation.
+- Excluded development-only test files from ComfyUI Registry archives and added reproducible local test requirements.

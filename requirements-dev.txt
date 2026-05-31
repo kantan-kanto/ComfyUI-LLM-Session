@@ -1,0 +1,6 @@
+# Development and test dependencies for ComfyUI-LLM-Session
+
+-r requirements.txt
+
+pytest>=8.0
+

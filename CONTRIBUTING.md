@@ -62,10 +62,17 @@ cd ComfyUI-LLM-Session
 pip install -r requirements.txt
 ```
 
+For local test runs, install the development requirements instead:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## Testing
 - Test with both local and API models
 - Verify error handling
 - Check compatibility with latest ComfyUI
+- Run the unit tests with `python -m pytest -q`
 
 ## Questions?
 Open an issue for questions or discussions.

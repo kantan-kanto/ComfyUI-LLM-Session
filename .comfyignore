@@ -1,0 +1,6 @@
+# Development-only files should stay out of ComfyUI Registry archives.
+tests/
+.pytest_cache/
+.github/
+.vscode/
+
