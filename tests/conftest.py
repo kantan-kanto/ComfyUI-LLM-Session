@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import types
 import pytest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+if "folder_paths" not in sys.modules:
+    sys.modules["folder_paths"] = types.SimpleNamespace(
+        models_dir=str(ROOT / "models"),
+        output_directory=str(ROOT / "output"),
+        get_folder_paths=lambda _key: [],
+        get_output_directory=lambda: str(ROOT / "output"),
+    )
 
 
 @pytest.fixture(autouse=True)
