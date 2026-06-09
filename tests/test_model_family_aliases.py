@@ -163,6 +163,41 @@ def test_model_manager_raises_when_required_handler_initialization_fails(monkeyp
         )
 
 
+def test_model_manager_reports_missing_required_handler_with_backend_guidance(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class DummyLlama:
+        calls = []
+
+        def __init__(self, **_kwargs):
+            self.calls.append(_kwargs)
+            pass
+
+    monkeypatch.setattr(module, "LLAMA_CPP_AVAILABLE", True)
+    monkeypatch.setattr(module, "Llama", DummyLlama)
+    monkeypatch.setattr(module, "chat_handler_factory_map", {})
+    monkeypatch.setattr(module, "chat_handler_map", {})
+    monkeypatch.setattr(module, "chat_handler_class_registry", {})
+    manager = module.GGUFModelManager()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        manager.load_model(
+            model_path="C:/models/Gemma-4-test.gguf",
+            mmproj_path="C:/models/mmproj-gemma4.gguf",
+            n_ctx=1024,
+            n_gpu_layers=0,
+            vision_required=True,
+        )
+
+    msg = str(exc_info.value)
+    assert "does not provide the required multimodal chat handler" in msg
+    assert "Detected model family: gemma4" in msg
+    assert "Required handler: Gemma4ChatHandler" in msg
+    assert "Installed llama-cpp-python:" in msg
+    assert "https://github.com/JamePeng/llama-cpp-python" in msg
+    assert DummyLlama.calls == []
+
+
 def test_model_manager_raises_when_required_family_is_not_supported(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 
@@ -173,7 +208,7 @@ def test_model_manager_raises_when_required_family_is_not_supported(monkeypatch)
     _prepare_vision_manager_test(module, monkeypatch, DummyHandler)
     manager = module.GGUFModelManager()
 
-    with pytest.raises(RuntimeError, match="no supported vision chat handler"):
+    with pytest.raises(RuntimeError) as exc_info:
         manager.load_model(
             model_path="C:/models/unknown-model.gguf",
             mmproj_path="C:/models/mmproj-unknown.gguf",
@@ -181,6 +216,12 @@ def test_model_manager_raises_when_required_family_is_not_supported(monkeypatch)
             n_gpu_layers=0,
             vision_required=True,
         )
+
+    msg = str(exc_info.value)
+    assert "does not provide the required multimodal chat handler" in msg
+    assert "Detected model family: unknown" in msg
+    assert "Required handler: unknown" in msg
+    assert "did not match any known multimodal family aliases" in msg
 
 
 def test_resolve_model_and_mmproj_raises_when_explicit_mmproj_is_missing(monkeypatch, tmp_path):

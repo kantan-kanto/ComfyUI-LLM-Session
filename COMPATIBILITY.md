@@ -62,7 +62,7 @@ Mixtral failures occur at model load time and are likely backend-related.
 
 The following notes are compatibility-related cautions for existing users upgrading to the `1.0.4` series.
 
-- Vision model chat handler detection now uses dynamic loading. Supported Vision model coverage has increased, but if the required handler implementation does not exist in your `llama-cpp-python` build, that chat format is disabled automatically.
+- Vision model chat handler detection now uses dynamic loading. Supported Vision model coverage has increased, but if an image input or explicit mmproj requires a handler that is unavailable in your `llama-cpp-python` build, execution stops with a diagnostic error instead of silently falling back to text-only mode.
 - mmproj auto-detection now depends on normalized aliases for both model and mmproj filenames. If filenames fall outside the expected prefix patterns, Auto-detect may fail.
 - Some Vision-family models remain highly backend-dependent. Even when the handler loads successfully, image input may still be unstable or unsupported in practice. In my environment, `Qwen3.5` Vision works with the JamePeng fork `0.3.33+`, but it should still be treated as backend-dependent.
 - The cache configuration model has changed. The new default settings are `persistent_cache = "off"` and `runtime_cache = "LlamaTrieCache"`. Existing UI settings should be reselected manually if needed. Older JSON config keys are ignored, so update your config files to use the new option names and values. Depending on your `llama-cpp-python` build, `KV_cache` and `LlamaDiskCache` may still be unstable or unavailable, which is why `LlamaTrieCache` is now the default.
@@ -82,8 +82,8 @@ The following notes are compatibility-related cautions for existing users upgrad
 
 **Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 
-**Recommended Installation (JamePeng fork for Qwen3-VL support):**  
-Please follow the build and installation instructions provided in the JamePeng fork repository, as this fork requires a custom build and cannot be reliably installed via a simple `pip install`.
+**Recommended Backend Notes:**  
+For newer Vision model families, please follow the build and installation information provided by the upstream JamePeng llama-cpp-python project and choose a build appropriate for your OS, Python version, and acceleration backend.
 
 `0.3.33+` (JamePeng fork) works for `Qwen3.5` Vision in my environment. Earlier `0.3.30+` builds added support for `Qwen3.5`, but Vision mode was not yet working reliably for me at that stage.
 

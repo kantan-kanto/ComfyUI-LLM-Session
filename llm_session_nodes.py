@@ -452,6 +452,8 @@ chat_handler_map = {
     "qwen3.5": "Qwen35ChatHandler",
     "step3-vl": "Step3VLChatHandler",
 }
+DECLARED_CHAT_HANDLER_MAP = dict(chat_handler_map)
+JAMEPENG_LLAMA_CPP_URL = "https://github.com/JamePeng/llama-cpp-python"
 
 # chat_format ごとの追加 kwargs
 CHAT_HANDLER_KWARGS_MAP = {
@@ -752,6 +754,57 @@ def _load_available_chat_handlers(
 
 def _empty_chat_handler_registry() -> dict[str, Any]:
     return {}
+
+
+def _llama_cpp_version_report() -> tuple[str, str]:
+    pkg_ver = "unknown"
+    backend_ver = "unknown"
+    try:
+        import llama_cpp  # type: ignore
+        pkg_ver = str(getattr(llama_cpp, "__version__", "unknown"))
+        try:
+            backend_fn = getattr(getattr(llama_cpp, "llama_cpp", None), "llama_cpp_version", None)
+            if callable(backend_fn):
+                backend_ver = str(backend_fn())
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return pkg_ver, backend_ver
+
+
+def _format_multimodal_handler_unavailable_error(
+    *,
+    model_path: str,
+    model_family: Optional[str],
+    required_handler: Optional[str],
+) -> str:
+    pkg_ver, backend_ver = _llama_cpp_version_report()
+    model_name = os.path.basename(model_path or "") or "(unknown)"
+    family = model_family or "unknown"
+    handler = required_handler or "unknown"
+    unknown_family_note = (
+        "Note: The model filename did not match any known multimodal family aliases.\n"
+        if model_family is None
+        else ""
+    )
+    return (
+        "Vision is required for this request, but the installed llama-cpp-python build\n"
+        "does not provide the required multimodal chat handler.\n\n"
+        f"Model: {model_name}\n"
+        f"Detected model family: {family}\n"
+        f"Required handler: {handler}\n"
+        f"{unknown_family_note}"
+        "\n"
+        f"Installed llama-cpp-python: {pkg_ver}\n"
+        f"llama.cpp backend: {backend_ver}\n"
+        "\n"
+        "This can happen when the model family is newer than the installed\n"
+        "llama-cpp-python build, or when the build does not include that multimodal\n"
+        "chat handler yet.\n\n"
+        "Please check the upstream JamePeng llama-cpp-python:\n"
+        f"{JAMEPENG_LLAMA_CPP_URL}"
+    )
 
 
 # ============================================================================
@@ -1958,9 +2011,24 @@ class GGUFModelManager:
 
         for k, v in normalized_chat_format_map.items():
 
-            if k in model_name_lower and v in chat_handler_factory_map:
+            if k in model_name_lower:
                 model_family = v
                 matched_vision_family = True
+                handler_name = DECLARED_CHAT_HANDLER_MAP.get(model_family)
+
+                if model_family not in chat_handler_factory_map:
+                    if vision_required:
+                        msg = _format_multimodal_handler_unavailable_error(
+                            model_path=model_path,
+                            model_family=model_family,
+                            required_handler=handler_name,
+                        )
+                        raise RuntimeError(msg)
+                    print(
+                        "[GGUFModelManager] Warning: Multimodal chat handler unavailable "
+                        f"for {model_family}; falling back to text-only mode."
+                    )
+                    break
 
                 if not force_no_mmproj:
                     if mmproj_path is None:
@@ -1983,7 +2051,13 @@ class GGUFModelManager:
                         handler_name = chat_handler_map.get(model_family)
                         handler_cls = chat_handler_class_registry.get(handler_name) if handler_name else None
                         if handler_cls is None:
-                            raise RuntimeError(f"Chat handler class unavailable for {model_family}")
+                            raise RuntimeError(
+                                _format_multimodal_handler_unavailable_error(
+                                    model_path=model_path,
+                                    model_family=model_family,
+                                    required_handler=DECLARED_CHAT_HANDLER_MAP.get(model_family),
+                                )
+                            )
                         active_chat_handler_kwargs = _get_chat_handler_kwargs(
                             model_family,
                             chat_handler_overrides=chat_handler_overrides,
@@ -2001,7 +2075,7 @@ class GGUFModelManager:
                         use_vision = True
                     except Exception as e:
                         if vision_required:
-                            raise RuntimeError(f"Vision chat handler initialization failed: {e}") from e
+                            raise RuntimeError(f"Vision chat handler initialization failed:\n{e}") from e
                         print(f"[GGUFModelManager] Warning: Failed to initialize chat handler: {e}")
                         chat_handler = None
                         chat_format = None
@@ -2015,8 +2089,11 @@ class GGUFModelManager:
 
         if vision_required and not matched_vision_family:
             raise RuntimeError(
-                "Vision is required but no supported vision chat handler was detected "
-                f"for model: {os.path.basename(model_path)}"
+                _format_multimodal_handler_unavailable_error(
+                    model_path=model_path,
+                    model_family=None,
+                    required_handler=None,
+                )
             )
 
         if not use_vision:

@@ -74,8 +74,10 @@ pip install -r requirements.txt
 
 llama-cpp-python のビルド内容によって、対応モデルや Vision 機能の挙動が変わります。
 
-- 公式ビルドは text-only 利用で安定
-- Qwen3-VL などはカスタムビルドが必要な場合があります
+- 公式ビルドは多くの text-only 用途で利用できます。
+- 新しいマルチモーダルモデルでは、現在の backend build に必要な chat handler が含まれていない場合があります。
+- Vision 実行時に必要な multimodal chat handler がないというエラーが出る場合は、OS、Python バージョン、アクセラレーション backend に合う build を JamePeng llama-cpp-python で確認してください:
+  https://github.com/JamePeng/llama-cpp-python
 
 詳細は **[COMPATIBILITY.md](COMPATIBILITY.md)** を参照してください。
 

@@ -103,8 +103,13 @@ pip install pillow numpy
 Model compatibility depends on the llama-cpp-python build.
 Vision support varies significantly by backend and environment.
 
-- Official releases work for text-only usage
-- Qwen3-VL requires a custom build (e.g. JamePeng fork)
+- Official releases work for many text-only workflows.
+- Newer multimodal model families can require chat handlers that are only
+  available in recent backend builds.
+- If a Vision request fails because the required multimodal chat handler is
+  unavailable, check the upstream JamePeng llama-cpp-python project and choose
+  a build that matches your OS, Python version, and acceleration backend:
+  https://github.com/JamePeng/llama-cpp-python
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for detailed environment test results.
 
