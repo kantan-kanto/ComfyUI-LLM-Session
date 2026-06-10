@@ -27,6 +27,9 @@
   "qwen3.5": {
     "enable_thinking": false
   },
+  "minicpm-v-4.6": {
+    "enable_thinking": false
+  },
   "gemma4": {
     "enable_thinking": false
   }

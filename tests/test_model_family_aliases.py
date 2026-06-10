@@ -86,6 +86,20 @@ def test_detect_model_family_lfm25_aliases(monkeypatch):
     assert family_nodash == "lfm2.5-vl"
 
 
+def test_detect_model_family_minicpm_v46_aliases(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    family_dash = module._detect_model_family("C:/models/LLM/MiniCPM-V-4.6.gguf")
+    family_underscore = module._detect_model_family("C:/models/LLM/MiniCPM-V-4_6.gguf")
+    family_compact = module._detect_model_family("C:/models/LLM/MiniCPMV46.gguf")
+
+    assert family_dash == "minicpm-v-4.6"
+    assert family_underscore == "minicpm-v-4.6"
+    assert family_compact == "minicpm-v-4.6"
+    assert module.DECLARED_CHAT_HANDLER_MAP["minicpm-v-4.6"] == "MiniCPMV46ChatHandler"
+    assert module.CHAT_HANDLER_KWARGS_MAP["minicpm-v-4.6"]["enable_thinking"] is False
+
+
 def _prepare_vision_manager_test(module, monkeypatch, handler_cls):
     class DummyLlama:
         calls = []

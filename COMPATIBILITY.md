@@ -25,6 +25,7 @@ This document summarizes empirical compatibility results obtained during develop
 - Llama 3.1 Instruct (8B / 70B)
 - LLaVA
 - MiniCPM-V 2.6
+- MiniCPM-V 4.6
 - Mistral NeMo 12B Instruct
 - Nemotron-Nano*
 - Phi-3 Mini Instruct

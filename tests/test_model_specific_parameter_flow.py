@@ -81,3 +81,65 @@ def test_gemma4_summary_forced_override_wins_over_request_override(monkeypatch):
     assert request["prompt"].endswith("<start_of_turn>model\n")
     assert "<|think|>" not in request["prompt"]
     assert "<|channel>thought\n<channel|>" not in request["prompt"]
+
+
+def test_minicpm_v46_text_builder_consumes_enable_thinking_false(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    messages = [
+        {"role": "system", "content": "System rules."},
+        {"role": "user", "content": "Hello"},
+    ]
+
+    request = module._build_text_chat_request(
+        model_path="C:/models/LLM/MiniCPM-V-4.6.gguf",
+        mmproj_path=module._MMPROJ_NOT_REQUIRED,
+        messages=messages,
+        text_chat_builder_overrides={"minicpm-v-4.6": {"enable_thinking": False}},
+    )
+
+    assert request is not None
+    assert request["model_family"] == "minicpm-v-4.6"
+    assert request["config"]["enable_thinking"] is False
+    assert "<|im_start|>system\nSystem rules.<|im_end|>" in request["prompt"]
+    assert "<|im_start|>user\nHello<|im_end|>" in request["prompt"]
+    assert request["prompt"].endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n")
+    assert request["stop"] == ["<|endoftext|>", "<|im_end|>"]
+
+
+def test_minicpm_v46_text_builder_consumes_enable_thinking_true(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    messages = [{"role": "user", "content": "Think if needed."}]
+
+    request = module._build_text_chat_request(
+        model_path="C:/models/LLM/MiniCPMV46.gguf",
+        mmproj_path="",
+        messages=messages,
+        text_chat_builder_overrides={"minicpm-v-4.6": {"enable_thinking": True}},
+    )
+
+    assert request is not None
+    assert request["config"]["enable_thinking"] is True
+    assert request["prompt"].endswith("<|im_start|>assistant\n<think>\n")
+    assert "</think>" not in request["prompt"]
+
+
+def test_minicpm_v46_summary_forced_override_wins_over_request_override(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    overrides = module._merge_text_chat_builder_overrides(
+        model_path="C:/models/LLM/minicpm-v-4_6.gguf",
+        base_overrides={"minicpm-v-4.6": {"enable_thinking": True}},
+        forced_overrides_map=module.SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP,
+    )
+
+    request = module._build_text_chat_request(
+        model_path="C:/models/LLM/minicpm-v-4_6.gguf",
+        mmproj_path=None,
+        messages=[{"role": "user", "content": "Summarize."}],
+        text_chat_builder_overrides=overrides,
+    )
+
+    assert overrides == {"minicpm-v-4.6": {"enable_thinking": False}}
+    assert request is not None
+    assert request["config"]["enable_thinking"] is False
+    assert request["prompt"].endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n")

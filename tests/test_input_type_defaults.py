@@ -110,6 +110,7 @@ def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(monkey
             {
                 "schema_version": 1,
                 "qwen3.5": {"enable_thinking": "false"},
+                "minicpm-v-4.6": {"enable_thinking": "false"},
                 "gemma4": {"enable_thinking": "true"},
             }
         ),
@@ -120,5 +121,7 @@ def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(monkey
 
     assert defaults["chat_handler_overrides"]["qwen3.5"]["enable_thinking"] is False
     assert defaults["text_chat_builder_overrides"]["qwen3.5"]["enable_thinking"] is False
+    assert defaults["chat_handler_overrides"]["minicpm-v-4.6"]["enable_thinking"] is False
+    assert defaults["text_chat_builder_overrides"]["minicpm-v-4.6"]["enable_thinking"] is False
     assert defaults["chat_handler_overrides"]["gemma4"]["enable_thinking"] is True
     assert defaults["text_chat_builder_overrides"]["gemma4"]["enable_thinking"] is True

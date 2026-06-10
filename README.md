@@ -130,11 +130,11 @@ When using Vision-capable models, please follow these rules:
 - Place the **model** and **mmproj** GGUF files in the **same folder**.
 - The model filename must start with one of the following prefixes and end with `.gguf`:
 
-  `llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen3.6, qwen3_6, qwen36, step3-vl, step3vl`
+  `llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, minicpm-v-4.6, minicpm-v-4_6, minicpmv46, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen3.6, qwen3_6, qwen36, step3-vl, step3vl`
   
 - The mmproj filename must start with `mmproj-` and end with `.gguf`.
 - If exactly one file matching
-  `mmproj-*[llava-1-5|llava15|llava-v1.5|llava-1-6|llava16|llava-v1.6|moondream2|nanollava|llama-3|llama3|minicpm-v-2.6|minicpm-v-2_6|minicpmv26|minicpm-v-4.0|minicpm-v-4_0|minicpmv40|minicpm-v-4.5|minicpm-v-4_5|minicpmv45|gemma3|gemma-3|gemma_3|gemma4|gemma-4|gemma_4|glm4.1v|glm4_1v|glm41v|glm-4.1v|glm4.6v|glm4_6v|glm46v|glm-4.6v|granitedocling|granite-docling|lfm2-vl|lfm2vl|lfm2.5-vl|lfm2.5vl|lfm2_5-vl|lfm2_5vl|paddleocr|qwen2.5-vl|qwen2_5-vl|qwen25vl|qwen3-vl|qwen3vl|qwen3.5|qwen3_5|qwen35|qwen3.6|qwen3_6|qwen36|step3-vl|step3vl]*.gguf`
+  `mmproj-*[llava-1-5|llava15|llava-v1.5|llava-1-6|llava16|llava-v1.6|moondream2|nanollava|llama-3|llama3|minicpm-v-2.6|minicpm-v-2_6|minicpmv26|minicpm-v-4.0|minicpm-v-4_0|minicpmv40|minicpm-v-4.5|minicpm-v-4_5|minicpmv45|minicpm-v-4.6|minicpm-v-4_6|minicpmv46|gemma3|gemma-3|gemma_3|gemma4|gemma-4|gemma_4|glm4.1v|glm4_1v|glm41v|glm-4.1v|glm4.6v|glm4_6v|glm46v|glm-4.6v|granitedocling|granite-docling|lfm2-vl|lfm2vl|lfm2.5-vl|lfm2.5vl|lfm2_5-vl|lfm2_5vl|paddleocr|qwen2.5-vl|qwen2_5-vl|qwen25vl|qwen3-vl|qwen3vl|qwen3.5|qwen3_5|qwen35|qwen3.6|qwen3_6|qwen36|step3-vl|step3vl]*.gguf`
   exists in the folder, it can be selected automatically via Auto-detect.
 - Filename matching is **case-insensitive**.
 - Both GGUF extension matching (for example `.gguf`, `.GGUF`) and `mmproj` prefix matching (for example `mmproj-`, `MMPROJ-`) are case-insensitive.
@@ -239,6 +239,7 @@ The following GGUF instruction models have been tested.
 - Llama 3.1 Instruct (8B / 70B)
 - LLaVA
 - MiniCPM-V 2.6
+- MiniCPM-V 4.6
 - Mistral NeMo 12B Instruct
 - Nemotron-Nano*
 - Phi-3 Mini Instruct

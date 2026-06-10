@@ -439,6 +439,7 @@ chat_handler_map = {
     "minicpm-v-2.6": "MiniCPMv26ChatHandler",
     "minicpm-v-4.0": "MiniCPMv26ChatHandler",
     "minicpm-v-4.5": "MiniCPMv45ChatHandler",
+    "minicpm-v-4.6": "MiniCPMV46ChatHandler",
     "gemma3": "Gemma3ChatHandler",
     "gemma4": "Gemma4ChatHandler",
     "glm4.1v": "GLM41VChatHandler",
@@ -465,6 +466,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-2.6": {},
     "minicpm-v-4.0": {},
     "minicpm-v-4.5": {},
+    "minicpm-v-4.6": {"enable_thinking": False},
     "gemma3": {},
     "gemma4": {"enable_thinking": False},
     "glm4.1v": {},
@@ -481,11 +483,13 @@ CHAT_HANDLER_KWARGS_MAP = {
 
 TEXT_CHAT_BUILDER_CONFIG_MAP = {
     "gemma4": {"enable_thinking": False},
+    "minicpm-v-4.6": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
 }
 
 SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP = {
     "gemma4": {"enable_thinking": False},
+    "minicpm-v-4.6": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
 }
 
@@ -571,6 +575,9 @@ normalized_chat_format_map = {
     "minicpm-v-4.5": "minicpm-v-4.5",
     "minicpm-v-4_5": "minicpm-v-4.5", 
     "minicpmv45": "minicpm-v-4.5",
+    "minicpm-v-4.6": "minicpm-v-4.6",
+    "minicpm-v-4_6": "minicpm-v-4.6",
+    "minicpmv46": "minicpm-v-4.6",
     "gemma3": "gemma3",
     "gemma-3": "gemma3",
     "gemma_3": "gemma3",
@@ -1370,6 +1377,28 @@ def _build_gemma4_text_prompt(messages: List[Dict[str, Any]], config: dict[str, 
     return prompt, ["<end_of_turn>", "<eos>"]
 
 
+def _build_minicpm_v46_text_prompt(messages: List[Dict[str, Any]], config: dict[str, Any]) -> tuple[str, list[str]]:
+    prompt_parts: List[str] = []
+    enable_thinking = bool(config.get("enable_thinking", False))
+
+    for message in messages:
+        role = str((message or {}).get("role") or "")
+        content = _message_content_to_text((message or {}).get("content")).strip()
+        if role not in {"system", "user", "assistant"}:
+            continue
+        prompt_parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
+
+    prompt = ""
+    if prompt_parts:
+        prompt += "\n".join(prompt_parts) + "\n"
+    prompt += "<|im_start|>assistant\n"
+    if enable_thinking:
+        prompt += "<think>\n"
+    else:
+        prompt += "<think>\n\n</think>\n\n"
+    return prompt, ["<|endoftext|>", "<|im_end|>"]
+
+
 def _build_text_chat_request(
     model_path: str,
     mmproj_path: Optional[str],
@@ -1402,6 +1431,15 @@ def _build_text_chat_request(
         }
     if model_family == "gemma4":
         prompt, stop = _build_gemma4_text_prompt(messages, config)
+        return {
+            "mode": "completion",
+            "model_family": model_family,
+            "prompt": prompt,
+            "stop": stop,
+            "config": config,
+        }
+    if model_family == "minicpm-v-4.6":
+        prompt, stop = _build_minicpm_v46_text_prompt(messages, config)
         return {
             "mode": "completion",
             "model_family": model_family,

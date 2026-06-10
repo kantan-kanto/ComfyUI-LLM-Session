@@ -6,6 +6,21 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## Unreleased
 
+- Vision model diagnostics
+  - Report the detected model family, required multimodal chat handler, installed `llama-cpp-python` version, and backend version when Vision is required but the handler is unavailable.
+  - Distinguish unknown model-family aliases from known families whose handlers are missing in the installed backend.
+  - Link users to the upstream JamePeng `llama-cpp-python` project for backend-specific multimodal compatibility and installation guidance, without printing install commands.
+
+- MiniCPM-V compatibility
+  - Added `minicpm-v-4.6` / `minicpm-v-4_6` / `minicpmv46` aliases.
+  - Mapped MiniCPM-V-4.6 to `MiniCPMV46ChatHandler`.
+  - Set the MiniCPM-V-4.6 chat-handler default to `enable_thinking=false` while preserving explicit overrides.
+  - Added MiniCPM-V-4.6 Text-only prompt building with `enable_thinking` control and summary forced-off behavior.
+
+- Dependency and compatibility documentation
+  - Keep `requirements.txt` on the conservative PyPI-compatible `llama-cpp-python>=0.3.16` dependency while noting that recent JamePeng builds may be needed for newer Vision models.
+  - Updated README and compatibility notes to explain that newer multimodal model families may require backend builds with matching chat handlers.
+
 ---
 
 ## [1.2.1] - 2026-05-31

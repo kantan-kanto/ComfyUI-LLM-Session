@@ -42,6 +42,24 @@ SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP["gemma4"] = {
 }
 ```
 
+MiniCPM-V-4.6 also uses all three maps for `enable_thinking`. The chat-handler
+entry applies only to Vision mode, while the text-builder entries apply only to
+Text-only completion-style prompts:
+
+```python
+CHAT_HANDLER_KWARGS_MAP["minicpm-v-4.6"] = {
+    "enable_thinking": False,
+}
+
+TEXT_CHAT_BUILDER_CONFIG_MAP["minicpm-v-4.6"] = {
+    "enable_thinking": False,
+}
+
+SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP["minicpm-v-4.6"] = {
+    "enable_thinking": False,
+}
+```
+
 ## Chat Handler Path
 
 The chat handler path is used when a model family is detected and an mmproj is
@@ -105,6 +123,13 @@ if model_family == "gemma4":
     prompt, stop = _build_gemma4_text_prompt(messages, config)
 ```
 
+For MiniCPM-V-4.6, the dispatch follows the same rule:
+
+```python
+if model_family == "minicpm-v-4.6":
+    prompt, stop = _build_minicpm_v46_text_prompt(messages, config)
+```
+
 `_build_qwen35_text_prompt()` consumes `config["enable_thinking"]`:
 
 - `True`: appends an opening `<think>` marker.
@@ -116,6 +141,13 @@ if model_family == "gemma4":
 - `True`: prepends `<|think|>` to the effective system prompt before it is
   folded into the first user turn.
 - `False`: does not add any thinking marker or empty thought-channel prefix.
+
+`_build_minicpm_v46_text_prompt()` consumes `config["enable_thinking"]`:
+
+- `True`: appends an opening `<think>` marker after
+  `<|im_start|>assistant`.
+- `False`: appends an empty `<think></think>` block after
+  `<|im_start|>assistant` to discourage thinking output.
 
 The resulting request is later executed by `_create_text_or_chat_completion()`
 using `llm.create_completion(...)`.
@@ -150,6 +182,8 @@ forced_text_chat_builder_overrides_map=SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP
 
 For Qwen3.5 summaries, `SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP["qwen3.5"]` forces
 `enable_thinking=False`, then `_build_qwen35_text_prompt()` consumes that value.
+MiniCPM-V-4.6 follows the same summary rule through
+`_build_minicpm_v46_text_prompt()`.
 
 ## Override Precedence
 
