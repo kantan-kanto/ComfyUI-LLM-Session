@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "system_prompt": "You are a helpful assistant.",
+  "max_tokens": 512,
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "n_gpu_layers": 0,
+  "tensor_split": null,
+  "n_ctx": 4096,
+  "max_turns": 6,
+  "summarize_old_history": true,
+  "summary_chunk_turns": 6,
+  "max_tokens_summary": 128,
+  "summary_max_chars": 1500,
+  "dynamic_max_tokens": true,
+  "min_generation_tokens": 96,
+  "safety_margin_tokens": 64,
+  "persistent_cache": "off",
+  "runtime_cache": "LlamaTrieCache",
+  "log_level": "timing",
+  "suppress_backend_logs": true,
+  "repeat_penalty": 1.12,
+  "repeat_last_n": 256,
+  "rewrite_continue": true,
+  "reset_session": false,
+  "stream_to_console": true,
+  "generation_kwargs": {
+    "seed": null,
+    "top_k": null,
+    "min_p": null,
+    "typical_p": null,
+    "tfs_z": null,
+    "mirostat_mode": null,
+    "mirostat_tau": null,
+    "mirostat_eta": null
+  },
+  "backend_kwargs": {
+    "ctx_checkpoints": null,
+    "checkpoint_on_device": null,
+    "verbosity": null,
+    "log_filters": null
+  },
+  "qwen3.5": {
+    "enable_thinking": false
+  },
+  "minicpm-v-4.6": {
+    "enable_thinking": false
+  },
+  "gemma4": {
+    "enable_thinking": false
+  }
+}
