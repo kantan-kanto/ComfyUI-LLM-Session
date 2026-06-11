@@ -121,6 +121,7 @@ class GenerationExecutionService:
             attempt_logger=attempt_logger,
             debug_traceback=(request.log_level in {"debug", "timing"}),
             traceback_print_exc=self._build_retry_error_logger(request),
+            advanced_generation_kwargs=request.advanced_generation_kwargs,
             suppress_backend_logs_ctx_factory=lambda: make_suppress_backend_logs(
                 bool(request.suppress_backend_logs) and (request.log_level != "debug")
             ),

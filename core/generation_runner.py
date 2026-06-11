@@ -225,6 +225,7 @@ def run_generation_with_adaptive_retry(
     create_chat_completion_robust: Callable[..., Dict[str, Any]],
     extract_stream_content: Callable[[Any], str],
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
+    advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
     throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
     is_interrupt_error: Callable[[Exception], bool] = _false_interrupt_error,
@@ -252,6 +253,8 @@ def run_generation_with_adaptive_retry(
                 completion_kwargs["penalty_last_n"] = int(repeat_last_n)
             if repeat_penalty and float(repeat_penalty) != 1.0:
                 completion_kwargs["repeat_penalty"] = float(repeat_penalty)
+            if isinstance(advanced_generation_kwargs, dict):
+                completion_kwargs.update(advanced_generation_kwargs)
 
             assistant_text = _run_generation_once(
                 llm=llm,

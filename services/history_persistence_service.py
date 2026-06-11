@@ -97,6 +97,7 @@ class HistoryPersistenceService:
                     model_path=model_path,
                     mmproj_path=mmproj_path,
                     text_chat_builder_overrides=request.text_chat_builder_overrides,
+                    advanced_generation_kwargs=request.advanced_summary_generation_kwargs,
                 )
             except Exception as e:
                 # P1: Log summarization failure for debugging

@@ -126,6 +126,62 @@ def test_execute_turn_success_updates_history_and_writes_file() -> None:
     assert writes and writes[0][0] == "hist.json"
 
 
+def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    observed: dict[str, object] = {}
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    generation_result = GenerationRunResult(
+        assistant_text="assistant reply",
+        gen_tokens=64,
+        turns_limit=12,
+        last_err=None,
+        succeeded=True,
+        non_ctx_error=False,
+    )
+    deps, _writes = _base_deps(history, run_generation_result=generation_result)
+    deps["run_generation_with_adaptive_retry"] = lambda **kwargs: observed.update(kwargs) or generation_result
+    request = TurnExecutionRequest(
+        **{
+            **_make_request(deps, mgr).__dict__,
+            "advanced_generation_kwargs": {"seed": 123},
+        }
+    )
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    assert observed["advanced_generation_kwargs"] == {"seed": 123}
+
+
+def test_execute_turn_passes_advanced_summary_seed_kwargs() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    observed: dict[str, object] = {}
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    generation_result = GenerationRunResult(
+        assistant_text="assistant reply",
+        gen_tokens=64,
+        turns_limit=12,
+        last_err=None,
+        succeeded=True,
+        non_ctx_error=False,
+    )
+    deps, _writes = _base_deps(history, run_generation_result=generation_result)
+    deps["maybe_summarize_history"] = lambda **kwargs: observed.update(kwargs) or history
+    request = TurnExecutionRequest(
+        **{
+            **_make_request(deps, mgr).__dict__,
+            "advanced_summary_generation_kwargs": {"seed": 456},
+        }
+    )
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    assert observed["advanced_generation_kwargs"] == {"seed": 456}
+
+
 def test_execute_turn_returns_failure_on_non_ctx_error() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()

@@ -17,6 +17,9 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Set the MiniCPM-V-4.6 chat-handler default to `enable_thinking=false` while preserving explicit overrides.
   - Added MiniCPM-V-4.6 Text-only prompt building with `enable_thinking` control and summary forced-off behavior.
 
+- Simple config
+  - Added seed-only read support for `advanced_generation_kwargs` and `advanced_summary_generation_kwargs`, keeping normal generation and summary generation seeds independent.
+
 - Dependency and compatibility documentation
   - Keep `requirements.txt` on the conservative PyPI-compatible `llama-cpp-python>=0.3.16` dependency while noting that recent JamePeng builds may be needed for newer Vision models.
   - Updated README and compatibility notes to explain that newer multimodal model families may require backend builds with matching chat handlers.

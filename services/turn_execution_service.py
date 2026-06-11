@@ -103,6 +103,8 @@ class TurnExecutionRequest:
     model_manager: Optional[Any] = None
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None
+    advanced_generation_kwargs: Optional[Dict[str, Any]] = None
+    advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None
 
     # Behavior switches to preserve subtle differences between legacy call paths.
     strip_assistant_before_reasoning_filter: bool = False
@@ -155,6 +157,8 @@ class TurnExecutionRequest:
         model_manager: Optional[Any],
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
+        advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
+        advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
         strip_assistant_before_reasoning_filter: bool,
         include_image_and_stream_in_turn_params: bool,
         kv_log_saved_when_not_minimal: bool,
@@ -198,6 +202,14 @@ class TurnExecutionRequest:
             model_manager=model_manager,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
+            advanced_generation_kwargs=(
+                dict(advanced_generation_kwargs) if isinstance(advanced_generation_kwargs, dict) else None
+            ),
+            advanced_summary_generation_kwargs=(
+                dict(advanced_summary_generation_kwargs)
+                if isinstance(advanced_summary_generation_kwargs, dict)
+                else None
+            ),
             strip_assistant_before_reasoning_filter=bool(strip_assistant_before_reasoning_filter),
             include_image_and_stream_in_turn_params=bool(include_image_and_stream_in_turn_params),
             kv_log_saved_when_not_minimal=bool(kv_log_saved_when_not_minimal),
@@ -716,6 +728,7 @@ class TurnExecutionService:
                         model_path=model_path,
                         mmproj_path=mmproj_path,
                         text_chat_builder_overrides=request.text_chat_builder_overrides,
+                        advanced_generation_kwargs=request.advanced_summary_generation_kwargs,
                     )
                 except Exception as e:
                     # P1: Log summary compaction failure for debugging

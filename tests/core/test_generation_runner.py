@@ -31,7 +31,10 @@ def test_run_with_typeerror_fallback_retries_then_succeeds() -> None:
 
 
 def test_generation_success_first_attempt() -> None:
+    observed_kwargs = {}
+
     def create_chat_completion_robust(_llm, _messages, **_kwargs):
+        observed_kwargs.update(_kwargs)
         return {"choices": [{"message": {"content": "ok"}}]}
 
     result = run_generation_with_adaptive_retry(
@@ -62,11 +65,13 @@ def test_generation_success_first_attempt() -> None:
         create_chat_completion_robust=create_chat_completion_robust,
         extract_stream_content=lambda _chunk: "",
         retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+        advanced_generation_kwargs={"seed": 123},
     )
 
     assert result.succeeded is True
     assert result.assistant_text == "ok"
     assert result.non_ctx_error is False
+    assert observed_kwargs["seed"] == 123
 
 
 def test_generation_retries_on_ctx_error_with_reduced_tokens() -> None:

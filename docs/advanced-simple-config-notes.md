@@ -1,7 +1,8 @@
 # Advanced Simple Config Notes
 
-This note records an unpublished design sketch for advanced JSON configuration
-used by the Simple nodes.
+This note records an advanced JSON configuration sketch for the Simple nodes.
+Only the seed read path has been implemented so far; the remaining options are
+kept as design notes until they have a concrete validation path.
 
 ## Branch
 
@@ -33,17 +34,24 @@ The proposed split was:
 ```json
 {
   "schema_version": 1,
-  "generation_kwargs": {
+  "advanced_generation_kwargs": {
     "seed": null,
     "top_k": null,
     "min_p": null,
     "typical_p": null,
-    "tfs_z": null,
     "mirostat_mode": null,
     "mirostat_tau": null,
     "mirostat_eta": null
   },
-  "backend_kwargs": {
+  "advanced_summary_generation_kwargs": {
+    "seed": null,
+    "temperature": null,
+    "top_p": null,
+    "top_k": null,
+    "min_p": null,
+    "typical_p": null
+  },
+  "advanced_backend_kwargs": {
     "ctx_checkpoints": null,
     "checkpoint_on_device": null,
     "verbosity": null,
@@ -52,36 +60,47 @@ The proposed split was:
 }
 ```
 
-`generation_kwargs` would be for `create_completion()` /
+`advanced_generation_kwargs` would be for `create_completion()` /
 `create_chat_completion()` options such as `seed` and `top_k`.
 
-`backend_kwargs` would be for model-load/backend options passed to `Llama(...)`,
+`advanced_summary_generation_kwargs` would be for summary-generation options
+needed for reproducibility. Summary generation does not inherit
+`advanced_generation_kwargs` implicitly. If a user wants fixed summary sampling,
+they should set `advanced_summary_generation_kwargs` explicitly. If omitted,
+summaries should continue using the normal summary settings.
+
+`advanced_backend_kwargs` would be for model-load/backend options passed to `Llama(...)`,
 such as checkpoint or backend logging controls.
 
 ## Current Decision
 
-Do not publish or wire this into the main branch yet.
+Implement only the narrow seed path for now.
 
 Reasons:
 
 - The maintainer does not currently need these advanced parameters.
 - Many of these options are backend-version, model, and device dependent.
-- Publishing an example before implementing and validating the read path could
-  imply support that does not exist yet.
 - A broad pass-through surface may increase issue triage and support cost.
 
-The current draft is useful as a design reference, but it should remain on a
-non-release branch until there is a concrete user need and implementation plan.
+Implemented behavior:
+
+- `advanced_generation_kwargs.seed` is read from Simple config and passed to
+  normal generation.
+- `advanced_summary_generation_kwargs.seed` is read separately and passed to
+  summary generation.
+- Summary generation does not inherit `advanced_generation_kwargs.seed`
+  implicitly.
+- Missing, `null`, or invalid seed values are omitted.
+- Other advanced keys in the example are not read yet.
 
 ## If Revisited
 
 Prefer starting with a narrow feature instead of opening a broad pass-through.
 
-The first candidate should be `generation_kwargs.seed`, because there has
-already been user interest in fixed-seed generation. Add other options only when
-there is a clear use case and a focused validation path.
+The next candidates should be added only when there is a clear use case and a
+focused validation path.
 
-If implemented, use:
+For further additions, use:
 
 - an allowlist of supported keys
 - type validation and clamping where appropriate

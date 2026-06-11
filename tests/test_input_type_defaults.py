@@ -125,3 +125,43 @@ def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(monkey
     assert defaults["text_chat_builder_overrides"]["minicpm-v-4.6"]["enable_thinking"] is False
     assert defaults["chat_handler_overrides"]["gemma4"]["enable_thinking"] is True
     assert defaults["text_chat_builder_overrides"]["gemma4"]["enable_thinking"] is True
+
+
+def test_simple_defaults_reads_only_advanced_seed_kwargs(monkeypatch, tmp_path):
+    module = _load_nodes_module(monkeypatch)
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "advanced_generation_kwargs": {"seed": "123", "top_k": 40},
+                "advanced_summary_generation_kwargs": {"seed": 456, "temperature": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["advanced_generation_kwargs"] == {"seed": 123}
+    assert defaults["advanced_summary_generation_kwargs"] == {"seed": 456}
+
+
+def test_simple_defaults_omits_invalid_advanced_seed_kwargs(monkeypatch, tmp_path):
+    module = _load_nodes_module(monkeypatch)
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "advanced_generation_kwargs": {"seed": None},
+                "advanced_summary_generation_kwargs": {"seed": "not-an-int"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["advanced_generation_kwargs"] == {}
+    assert defaults["advanced_summary_generation_kwargs"] == {}
