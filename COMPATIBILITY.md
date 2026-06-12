@@ -19,13 +19,13 @@ This document summarizes empirical compatibility results obtained during develop
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / E4B /31B / 26B-A4B)*
+- Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
 - LLaVA
 - MiniCPM-V 2.6
-- MiniCPM-V 4.6
+- MiniCPM-V 4.6*
 - Mistral NeMo 12B Instruct
 - Nemotron-Nano*
 - Phi-3 Mini Instruct
@@ -76,10 +76,10 @@ The following notes are compatibility-related cautions for existing users upgrad
 
 **Important:** Model compatibility varies by llama-cpp-python version. Based on my testing environment:
 
-| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> (Vision) | Qwen3-VL/3.5 <br> Gemma 3/4 <br> GLM-4.6V <br> (Vision) |
+| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> (Vision) | Qwen3-VL/3.5 <br> Gemma 3/4 <br> GLM-4.6V <br> MiniCPM-V 4.6 <br> (Vision) |
 |---------|-------------------|-------------------|-------------------|
 | 0.3.16 (official) | ✅* | ✅ | ❌ |
-| 0.3.35+ (JamePeng fork) | ✅ | ✅ | ✅ |
+| 0.3.40+ (JamePeng fork) | ✅ | ✅ | ✅ |
 
 **Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
 

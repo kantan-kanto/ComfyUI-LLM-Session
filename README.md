@@ -238,13 +238,13 @@ The following GGUF instruction models have been tested.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / E4B /31B / 26B-A4B)*
+- Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B)*
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
 - LLaVA
 - MiniCPM-V 2.6
-- MiniCPM-V 4.6
+- MiniCPM-V 4.6*
 - Mistral NeMo 12B Instruct
 - Nemotron-Nano*
 - Phi-3 Mini Instruct
@@ -261,7 +261,7 @@ The following GGUF instruction models have been tested.
 ### MoE Models
 
 - MoE models can work depending on backend support
-- Qwen3-30B-A3B, Qwen3.5/3.6-35B-A3B confirmed working
+- Qwen3-30B-A3B, Qwen3.5/3.6-35B-A3B, and Gemma4-26B-A4B confirmed working
 - Mixtral GGUF may fail to load depending on llama.cpp / llama-cpp-python build
 
 ### Vision Models
