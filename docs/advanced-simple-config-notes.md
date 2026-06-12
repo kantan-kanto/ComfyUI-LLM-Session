@@ -91,7 +91,17 @@ Implemented behavior:
 - Summary generation does not inherit `advanced_generation_kwargs.seed`
   implicitly.
 - Missing, `null`, or invalid seed values are omitted.
-- Other advanced keys in the example are not read yet.
+- Other advanced keys in the example are not read yet. They are ignored, with a
+  warning when `log_level` is not `minimal`.
+- Applied advanced kwargs are recorded in each turn's history `params`.
+- For strict reproducibility with `advanced_generation_kwargs.seed`, use
+  `runtime_cache: "off"`. Real-machine testing showed that `LlamaTrieCache` can
+  change deterministic output even when the same seed, prompt, model, and image
+  are used. Keeping the loaded model instance is not the issue by itself; the
+  runtime cache mode is the relevant difference.
+- Unsupported backend-kwarg fallback is not implemented for the seed-only path.
+  If broader kwargs are added later, targeted fallback should be considered only
+  for clearly identified unsupported-keyword `TypeError` cases.
 
 ## If Revisited
 

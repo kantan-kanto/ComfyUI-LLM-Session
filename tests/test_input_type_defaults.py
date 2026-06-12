@@ -147,6 +147,47 @@ def test_simple_defaults_reads_only_advanced_seed_kwargs(monkeypatch, tmp_path):
     assert defaults["advanced_summary_generation_kwargs"] == {"seed": 456}
 
 
+def test_simple_defaults_warns_for_unsupported_advanced_keys(monkeypatch, tmp_path, capsys):
+    module = _load_nodes_module(monkeypatch)
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "log_level": "timing",
+                "advanced_generation_kwargs": {"seed": 123, "top_k": 40, "min_p": 0.05},
+                "advanced_summary_generation_kwargs": {"seed": 456, "temperature": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    module._load_simple_defaults(str(config_path))
+
+    out = capsys.readouterr().out
+    assert "Warning: Ignoring unsupported advanced_generation_kwargs keys: min_p, top_k" in out
+    assert "Warning: Ignoring unsupported advanced_summary_generation_kwargs keys: temperature" in out
+
+
+def test_simple_defaults_suppresses_unsupported_advanced_key_warning_in_minimal_log(monkeypatch, tmp_path, capsys):
+    module = _load_nodes_module(monkeypatch)
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "log_level": "minimal",
+                "advanced_generation_kwargs": {"seed": 123, "top_k": 40},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    module._load_simple_defaults(str(config_path))
+
+    assert capsys.readouterr().out == ""
+
+
 def test_simple_defaults_omits_invalid_advanced_seed_kwargs(monkeypatch, tmp_path):
     module = _load_nodes_module(monkeypatch)
     config_path = tmp_path / "simple_defaults.json"

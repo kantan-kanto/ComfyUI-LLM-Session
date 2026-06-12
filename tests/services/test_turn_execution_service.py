@@ -182,6 +182,37 @@ def test_execute_turn_passes_advanced_summary_seed_kwargs() -> None:
     assert observed["advanced_generation_kwargs"] == {"seed": 456}
 
 
+def test_execute_turn_records_advanced_seed_kwargs_in_history_params() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    request = TurnExecutionRequest(
+        **{
+            **_make_request(deps, mgr).__dict__,
+            "advanced_generation_kwargs": {"seed": 123},
+            "advanced_summary_generation_kwargs": {"seed": 456},
+        }
+    )
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    params = history["turns"][0]["params"]
+    assert params["advanced_generation_kwargs"] == {"seed": 123}
+    assert params["advanced_summary_generation_kwargs"] == {"seed": 456}
+
+
 def test_execute_turn_returns_failure_on_non_ctx_error() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()

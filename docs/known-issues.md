@@ -56,6 +56,34 @@
 - Regression status: Covered by `test_model_specific_config_override_wins_over_full_node_default`.
 - Notes: Future model-specific parameters added through `CHAT_HANDLER_KWARGS_MAP`, `TEXT_CHAT_BUILDER_CONFIG_MAP`, or `SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP` must follow the precedence documented in `docs/architecture.md`.
 
+## Summary updated_at can be newer than history meta saved_at
+- Status: Open
+- First recorded: 2026-06-12
+- Scope: `LLM Session Chat` / Simple config summary generation
+- Symptom: A saved history file can show `summary.updated_at` later than `meta.updated_at` and `meta.last_params.saved_at`.
+- Observed case: With `max_turns=1`, `summary_chunk_turns=1`, `runtime_cache="off"`, and `advanced_summary_generation_kwargs.seed` set, summary generation completed after the history meta timestamps were written.
+- Impact: Low. Summary content and `covered_until_turn_id` are saved correctly; the mismatch appears limited to metadata timestamp consistency.
+- Expected behavior: When summary text is generated or compacted, history-level metadata timestamps should reflect the final persisted state.
+- Planned handling: Revisit the history persistence order so summary generation and final metadata timestamp updates happen in a consistent sequence.
+- Regression status: Not covered yet.
+
+## Gemma4 text-only output can enter channel/thought token sequences
+- Status: Open
+- First recorded: 2026-06-12
+- Scope: `LLM Session Chat` text-only generation with Gemma4-family GGUF models
+- Symptom: Gemma4 text-only output can start with or enter channel/thought token sequences even when `enable_thinking=false`.
+- Observed model: `gemma-4-26B-A4B-it-heretic.Q6_K.gguf`
+- Observed setup: text-only mode, `runtime_cache="off"`, `stream_to_console=true`, Simple config testing.
+- Observed progression across runs:
+  - test2 turn1 began with `<|channel>thought` followed by `<channel|>`.
+  - test2 turn2 began with repeated `<start_of_turn>model` fragments and later `_thought` / `<channel|>` fragments.
+  - test3 began with `thought` followed by repeated channel delimiters.
+  - test4 began with `thought` followed by repeated `<channel|>` delimiters.
+  - test5 began with `<|channel>` and saved reasoning-style English planning text as the assistant response.
+- Impact: Medium. Some runs still produce usable final Japanese text, but other runs can expose or persist intermediate reasoning/channel text instead of the requested final answer.
+- Notes: This was observed while testing advanced Simple config seed behavior. The seed/null-seed behavior itself was correct; this issue appears specific to Gemma4 text-only output behavior.
+- Regression status: Not covered yet.
+
 ## Potential Refactoring Candidates (Not Confirmed Bugs)
 - Status: Tracking
 - First recorded: 2026-03-22

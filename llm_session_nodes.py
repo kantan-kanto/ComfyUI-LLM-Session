@@ -118,6 +118,8 @@ _SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = dict(SUMMARY_HELPER_DEFAULTS)
 _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
+_ADVANCED_GENERATION_ALLOWED_KEYS = {"seed"}
+_ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
 
 def _simple_config_log(message: str, log_level: str) -> None:
     try:
@@ -172,6 +174,24 @@ def _advanced_seed_kwargs(value: Any) -> Dict[str, int]:
         return {"seed": int(value.get("seed"))}
     except Exception:
         return {}
+
+
+def _warn_unsupported_advanced_keys(
+    *,
+    section_name: str,
+    value: Any,
+    allowed_keys: set[str],
+    log_level: str,
+) -> None:
+    if not isinstance(value, dict):
+        return
+    unsupported = sorted(str(k) for k in value.keys() if k not in allowed_keys)
+    if not unsupported:
+        return
+    _simple_config_log(
+        f"Warning: Ignoring unsupported {section_name} keys: {', '.join(unsupported)}",
+        log_level,
+    )
 
 def _simple_config_path() -> str:
     try:
@@ -291,6 +311,19 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["log_level"] = str(defaults.get("log_level", _SIMPLE_DEFAULTS_BUILTIN["log_level"])).lower()
     if defaults["log_level"] not in _LOG_LEVEL_OPTIONS:
         defaults["log_level"] = _SIMPLE_DEFAULTS_BUILTIN["log_level"]
+
+    _warn_unsupported_advanced_keys(
+        section_name="advanced_generation_kwargs",
+        value=config_obj.get("advanced_generation_kwargs"),
+        allowed_keys=_ADVANCED_GENERATION_ALLOWED_KEYS,
+        log_level=defaults["log_level"],
+    )
+    _warn_unsupported_advanced_keys(
+        section_name="advanced_summary_generation_kwargs",
+        value=config_obj.get("advanced_summary_generation_kwargs"),
+        allowed_keys=_ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS,
+        log_level=defaults["log_level"],
+    )
 
     # Booleans
     defaults["summarize_old_history"] = _as_bool(defaults.get("summarize_old_history"), _SIMPLE_DEFAULTS_BUILTIN["summarize_old_history"])

@@ -52,6 +52,10 @@ class HistoryPersistenceService:
         if request.include_image_and_stream_in_turn_params:
             turn_params["image_used"] = request.image is not None
             turn_params["streamed"] = bool(request.stream_to_console)
+        if isinstance(request.advanced_generation_kwargs, dict) and request.advanced_generation_kwargs:
+            turn_params["advanced_generation_kwargs"] = dict(request.advanced_generation_kwargs)
+        if isinstance(request.advanced_summary_generation_kwargs, dict) and request.advanced_summary_generation_kwargs:
+            turn_params["advanced_summary_generation_kwargs"] = dict(request.advanced_summary_generation_kwargs)
 
         history.setdefault("turns", []).append(
             {
