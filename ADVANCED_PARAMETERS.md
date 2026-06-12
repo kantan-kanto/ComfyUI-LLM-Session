@@ -1,15 +1,18 @@
 # Advanced Parameters
 
-This page documents advanced JSON settings for the Simple nodes.
+This page explains advanced JSON-based parameter settings for the Simple nodes.
 
 Use these settings from a JSON file selected by the Simple node `config_path`.
-For a fuller example, see:
-
-- `config/simple_advanced.example.json`
 
 ## Supported Advanced Generation Settings
 
-The advanced generation section currently supports only `seed`.
+Candidate advanced parameters are listed in the following sample file:
+
+- `config/simple_advanced.example.json`
+
+Of those candidates, the only keys currently supported are `seed` in the
+`advanced_generation_kwargs` section and `seed` in the
+`advanced_summary_generation_kwargs` section.
 
 ```json
 {
@@ -19,17 +22,33 @@ The advanced generation section currently supports only `seed`.
 }
 ```
 
-`seed` is passed to llama-cpp-python generation. It improves repeatability for
-stochastic sampling, but it is not a global determinism guarantee.
+```json
+{
+  "advanced_summary_generation_kwargs": {
+    "seed": 456
+  }
+}
+```
 
-With the same model, prompt, image input, generation settings, session state,
-runtime cache behavior, and backend behavior, a fixed seed can make outputs
-repeatable even when `temperature` is greater than `0`.
+### Why `seed` Is an Advanced Parameter
 
-Unsupported keys in `advanced_generation_kwargs` are ignored. When `log_level`
-is not `minimal`, the node prints a warning for those unsupported keys.
+When the same model, prompt, image input, generation settings, session state,
+runtime cache behavior, and backend behavior all match, a fixed seed can improve
+the repeatability of stochastic sampling even when `temperature` is greater
+than `0`.
 
-## Summary Generation Settings
+However, it does not guarantee global determinism. Other factors can still make
+output vary, and a fixed seed may not provide the repeatability users expect.
+For that reason, `seed` is treated as an advanced parameter to try carefully
+rather than as a general parameter.
+
+### Advanced Parameters Other Than `seed`
+
+Unsupported parameters other than `seed` that are listed in
+`config/simple_advanced.example.json` are currently ignored. When `log_level` is
+not `minimal`, the node prints a warning for those unsupported keys.
+
+## About `advanced_summary_generation_kwargs`
 
 Summary generation has its own advanced section.
 
@@ -41,17 +60,23 @@ Summary generation has its own advanced section.
 }
 ```
 
-The main generation seed is not automatically reused for summaries. If you need
-summary reproducibility, set `advanced_summary_generation_kwargs.seed`
-explicitly.
+Summary parameters are defined separately from normal generation parameters:
 
-Unsupported keys in `advanced_summary_generation_kwargs` are ignored. When
-`log_level` is not `minimal`, the node prints a warning for those unsupported
-keys.
+- `summary temperature`: `0.2`
+- `summary max_tokens`: `max_tokens_summary`, default `128`
+- `summary top_p`: llama.cpp default (not specified by the node)
+- `summary repeat_penalty`: llama.cpp default (not specified by the node)
+
+Allowing these parameters to be overridden through
+`advanced_summary_generation_kwargs` is a possible future consideration.
 
 ## Reproducibility Notes
 
-For strict reproducibility tests, use:
+For reproducibility tests, try the following settings first.
+
+In real-machine testing, output changed with `LlamaTrieCache` enabled even when
+the same seed, prompt, model, and image were used. If you want to check
+repeatability, `runtime_cache: "off"` is recommended.
 
 ```json
 {
@@ -62,24 +87,6 @@ For strict reproducibility tests, use:
   }
 }
 ```
-
-Runtime caches such as `LlamaTrieCache` can change output even when the same
-seed, prompt, model, and image are used. `runtime_cache: "off"` is recommended
-when you want to verify exact repeatability.
-
-The log message `Using cached model` only means the already loaded model
-instance was reused. It is separate from runtime prompt/KV cache behavior.
-Exact repeatability depends more directly on `runtime_cache`, session state,
-prompt/history content, model, mmproj, image input, and generation settings.
-
-For repeatability checks:
-
-- Use the same model and mmproj.
-- Use the same prompt, image input, and generation settings.
-- Use `runtime_cache: "off"`.
-- Use `reset_session: true` or a fresh session id.
-- Confirm the saved history `params` contains the expected
-  `advanced_generation_kwargs.seed`.
 
 ## If Fixed Seed Output Still Changes
 
@@ -99,8 +106,7 @@ Check the following first:
 
 ## History Records
 
-Applied advanced generation settings are recorded in each saved turn's
-`params`.
+Applied advanced generation settings are recorded in each saved turn's `params`.
 
 For example:
 
@@ -128,10 +134,7 @@ If summary advanced settings are applied, they are also recorded:
 
 ## Not Yet Active
 
-`config/simple_advanced.example.json` may contain exploratory fields for future
-advanced backend or generation settings. At the moment, the only supported
-advanced generation key is `seed`.
-
-In particular, broad backend kwargs and unsupported generation kwargs are not
-forwarded automatically. They should be enabled only after each option has been
-validated against llama-cpp-python behavior.
+`config/simple_advanced.example.json` includes experimental fields for future
+advanced backend or generation settings. At the moment, the only advanced keys
+that are read are `advanced_generation_kwargs.seed` and
+`advanced_summary_generation_kwargs.seed`.

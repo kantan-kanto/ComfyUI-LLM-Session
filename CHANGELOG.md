@@ -17,11 +17,10 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Set the MiniCPM-V-4.6 chat-handler default to `enable_thinking=false` while preserving explicit overrides.
   - Added MiniCPM-V-4.6 Text-only prompt building with `enable_thinking` control and summary forced-off behavior.
 
-- Simple config
-  - Added seed-only read support for `advanced_generation_kwargs` and `advanced_summary_generation_kwargs`, keeping normal generation and summary generation seeds independent.
-  - Warn when unsupported advanced Simple config keys are ignored and record applied advanced kwargs in turn history params.
-  - Documented that strict seed reproducibility should use `runtime_cache: "off"` because runtime caches such as `LlamaTrieCache` may change deterministic output.
-  - Added `ADVANCED_PARAMETERS.md` for user-facing advanced Simple JSON config and seed reproducibility guidance.
+- Advanced JSON-based parameter settings
+  - Added support for configuring several advanced parameters through Simple-node JSON config files.
+  - Listed additional parameters that are present for future expansion but are not active yet.
+  - Added `ADVANCED_PARAMETERS.md` to document the advanced JSON-based parameter settings and their current limitations.
 
 - Dependency and compatibility documentation
   - Keep `requirements.txt` on the conservative PyPI-compatible `llama-cpp-python>=0.3.16` dependency while noting that recent JamePeng builds may be needed for newer Vision models.
