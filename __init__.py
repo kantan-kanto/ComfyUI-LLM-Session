@@ -6,7 +6,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 try:
     from .llm_session_nodes import (

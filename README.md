@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.2.1
+**Version:** 1.2.2
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -15,7 +15,8 @@ for **observation, experimentation, and analysis**.
 
 ---
 
-## Upgrade Notes for Existing Users
+<details>
+<summary><strong>Upgrade Notes for Existing Users</strong></summary>
 
 The following notes are intended for existing users upgrading to the `1.1.x` / `1.2.x` series.
 
@@ -30,6 +31,8 @@ The following notes are intended for existing users upgrading to the `1.1.x` / `
 - Adaptive retry now recognizes additional context-overflow error wording (`context window ... exceed ...`).
 
 For details, see the `1.1.x` and `1.2.x` sections in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
+
+</details>
 
 ---
 
@@ -336,10 +339,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.2.1
+### Current Version: 1.2.2
 
-- Raised the Full UI `max_tokens` upper limit to `32768` and documented long-form sizing guidance.
-- Improved session history reliability with persistence failure reporting, warning logs, and corrupt primary history quarantine.
-- Made vision/mmproj initialization failures explicit when image input or a selected mmproj requires vision support.
-- Added ComfyUI Cancel support during non-stream llama.cpp generation.
-- Excluded development-only test files from ComfyUI Registry archives and added reproducible local test requirements.
+- Improved Vision model diagnostics when a required multimodal chat handler is unavailable.
+- Added MiniCPM-V-4.6 aliases, chat-handler mapping, and Text-only prompt support.
+- Added advanced JSON-based parameter settings for Simple-node config files.
+- Added [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md) for advanced JSON settings and current limitations.
+- Kept the default `llama-cpp-python` dependency conservative while documenting backend compatibility notes for newer Vision models.

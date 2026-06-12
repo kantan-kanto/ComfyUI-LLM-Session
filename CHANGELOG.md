@@ -4,7 +4,7 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
-## Unreleased
+## [1.2.2] - 2026-06-12
 
 - Vision model diagnostics
   - Report the detected model family, required multimodal chat handler, installed `llama-cpp-python` version, and backend version when Vision is required but the handler is unavailable.
