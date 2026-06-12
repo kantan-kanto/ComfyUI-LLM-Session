@@ -6,6 +6,6 @@ pillow>=10.0.0
 numpy>=1.24.0
 
 # Note: Newer Vision/Qwen/Gemma model families can require a JamePeng llama-cpp-python build.
-# See: https://github.com/JamePeng/llama-cpp-python
+# See README.md and COMPATIBILITY.md for backend build notes.
 
 # Note: ComfyUI and its dependencies (torch, etc.) are assumed to be installed

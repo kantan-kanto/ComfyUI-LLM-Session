@@ -4,6 +4,14 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [1.2.3] - 2026-06-12
+
+- ComfyUI Registry compatibility
+  - Removed a plain URL comment from `requirements.txt` to avoid false-positive custom URL dependency flagging.
+  - No runtime behavior changes from `1.2.2`.
+
+---
+
 ## [1.2.2] - 2026-06-12
 
 - Vision model diagnostics

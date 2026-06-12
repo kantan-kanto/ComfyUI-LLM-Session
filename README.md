@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.2.2
+**Version:** 1.2.3
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -339,8 +339,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.2.2
+### Current Version: 1.2.2 / 1.2.3
 
+- `1.2.3` is a Registry compatibility re-release of `1.2.2`.
+- Removed a plain URL comment from `requirements.txt` to avoid false-positive dependency flagging by the ComfyUI Registry scanner.
 - Improved Vision model diagnostics when a required multimodal chat handler is unavailable.
 - Added MiniCPM-V-4.6 aliases, chat-handler mapping, and Text-only prompt support.
 - Added advanced JSON-based parameter settings for Simple-node config files.
