@@ -3017,6 +3017,14 @@ def _input_types_session_chat() -> dict:
                 bool(session_chat_defaults["enable_thinking"]),
                 tooltip="Enable model thinking/reasoning output for supported chat formats.",
             ),
+            "seed": ("INT", {
+                "default": 0,
+                "min": 0,
+                "max": 0xFFFFFFFF,
+                "step": 1,
+                "control_after_generate": True,
+                "tooltip": "Sampling seed passed to llama.cpp via advanced_generation_kwargs.seed. Use ComfyUI's seed control to keep fixed or randomize after each run.",
+            }),
         }
     }
 
@@ -3790,8 +3798,9 @@ class LLMSessionChatNode:
              suppress_backend_logs: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["suppress_backend_logs"],
              history_dir: str = "",
              reset_session: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["reset_session"],
-             stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
+            stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
              enable_thinking: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["enable_thinking"],
+             seed: int = 0,
              tensor_split: Optional[List[float]] = None,
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -3805,6 +3814,8 @@ class LLMSessionChatNode:
             text_chat_builder_overrides,
             enable_thinking,
         )
+        advanced_generation_kwargs = dict(advanced_generation_kwargs or {})
+        advanced_generation_kwargs["seed"] = int(seed)
         return _run_session_chat_from_inputs(
             user_text=user_text,
             session_id=session_id,
