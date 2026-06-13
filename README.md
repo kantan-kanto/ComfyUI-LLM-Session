@@ -40,12 +40,14 @@ For details, see the `1.1.x` and `1.2.x` sections in [CHANGELOG.md](CHANGELOG.md
 
 - **ComfyUI-native nodes**: chat and model-to-model dialogue run inside ComfyUI
   workflows
-- **Session-first local LLM execution**: conversations are organized around
-  persistent session IDs
-- **Explicit transcript outputs**: dialogue transcripts are saved and exposed
-  directly, rather than treated as transient chat state
-- **File-based persistence**: saved history and state let sessions resume
-  across executions
+- **Session-first persistence**: conversations are organized around persistent
+  session IDs, with transcripts and state saved so sessions can resume across
+  executions
+- **Standard and Simple node variants**: standard nodes expose the main runtime
+  controls, while Simple nodes keep the UI small and move advanced tuning into
+  JSON config
+- **Separate chat and dialogue workflows**: user-model chat and model-to-model
+  dialogue are handled by dedicated node types
 
 ---
 
