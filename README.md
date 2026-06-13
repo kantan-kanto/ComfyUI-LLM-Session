@@ -36,12 +36,16 @@ For details, see the `1.1.x` and `1.2.x` sections in [CHANGELOG.md](CHANGELOG.md
 
 ---
 
-## What This Project Is
+## Key Design Concepts
 
-- A **file-based session system** for local GGUF LLMs
-- A set of ComfyUI nodes for **persistent multi-turn conversations**
-- A tool for **observing model behavior**, convergence, and failure modes
-- Fully self-contained inside ComfyUI (no server, no daemon)
+- **ComfyUI-native nodes**: chat and model-to-model dialogue run inside ComfyUI
+  workflows
+- **Session-first local LLM execution**: conversations are organized around
+  persistent session IDs
+- **Explicit transcript outputs**: dialogue transcripts are saved and exposed
+  directly, rather than treated as transient chat state
+- **File-based persistence**: saved history and state let sessions resume
+  across executions
 
 ---
 
@@ -69,13 +73,6 @@ set advanced parameters that are not available on the standard node.
 A utility output node that manually unloads the current LLM from VRAM.
 Set `unload_now=true` and queue the node to release model memory.
 After running, set it back to false to avoid repeated unloads.
-
-## Key Design Concepts
-
-- **Session-first design**: sessions live beyond a single execution
-- **File-based persistence**: no external state or database
-- **Observation-oriented**: transcripts are first-class outputs
-- **Deterministic turn execution**: suitable for analysis
 
 ---
 
@@ -263,6 +260,8 @@ builds for the required chat handlers.
 - Vision support depends on model + mmproj + backend
 - Some vision-capable models may ignore images without errors
 - Text-only operation is always supported
+
+---
 
 ## Performance Notes
 

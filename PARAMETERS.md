@@ -127,16 +127,20 @@ Default:
 - `false`
 
 Currently supported formats:
-- Gemma 4
 - Qwen3.5 / Qwen3.6 compatibility path
+- Gemma 4
+- MiniCPM-V 4.6
 
 Full nodes expose this as an optional UI setting. Simple nodes can override it in `config/simple_defaults.json`:
 
 ```json
+"qwen3.5": {
+  "enable_thinking": false
+},
 "gemma4": {
   "enable_thinking": false
 },
-"qwen3.5": {
+"minicpm-v-4.6": {
   "enable_thinking": false
 }
 ```
@@ -145,18 +149,7 @@ When disabled, the node asks the supported model/chat handler not to expose thin
 
 Gemma 4 note:
 
-Gemma 4 may emit internal channel delimiters such as:
-
-```text
-<|channel>thought
-...
-<channel|>
-final answer...
-```
-
-In this case, the text after the last `<channel|>` appears to be the final answer intended for the user. The node therefore treats the text after the last channel delimiter as the displayed final output.
-
-If `max_tokens` is too small, generation may stop before Gemma 4 emits `<channel|>` and the final answer. In that case, the node cannot remove the earlier internal text. Increase `max_tokens` if you see unfinished thinking/channel output.
+When using Gemma 4 E2B / E4B with an mmproj loaded, the current JamePeng `Gemma4ChatHandler` appears to require thinking mode to be enabled. In that case, disabling thinking may not work as expected.
 
 ---
 
