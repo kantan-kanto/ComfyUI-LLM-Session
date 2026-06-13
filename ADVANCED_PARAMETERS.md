@@ -2,7 +2,9 @@
 
 This page explains advanced JSON-based parameter settings for the Simple nodes.
 
-Use these settings from a JSON file selected by the Simple node `config_path`.
+Use these settings from a JSON file selected by the Simple node `config_path`;
+this lets you override Simple-node defaults without editing
+`config/simple_defaults.json` directly.
 
 ## Supported Advanced Generation Settings
 
@@ -29,6 +31,10 @@ Of those candidates, the only keys currently supported are `seed` in the
   }
 }
 ```
+
+Note: `tensor_split` is not configured through `advanced_backend_kwargs` yet.
+It remains a root-level Simple-node JSON config key for backward compatibility;
+see [PARAMETERS.md](PARAMETERS.md).
 
 ### Why `seed` Is an Advanced Parameter
 
@@ -138,3 +144,7 @@ If summary advanced settings are applied, they are also recorded:
 advanced backend or generation settings. At the moment, the only advanced keys
 that are read are `advanced_generation_kwargs.seed` and
 `advanced_summary_generation_kwargs.seed`.
+
+`tensor_split` is an advanced backend-style setting, but it is intentionally
+kept outside `advanced_backend_kwargs` for now to avoid breaking existing
+Simple-node JSON configs.

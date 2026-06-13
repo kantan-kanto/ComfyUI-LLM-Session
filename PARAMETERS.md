@@ -71,7 +71,13 @@ Recommended usage:
 ### tensor_split
 Advanced Simple-node setting for multi-GPU llama.cpp / llama-cpp-python environments.
 
-This setting is read from `config/simple_defaults.json` only. Leave it as `null` or omit it to use the llama.cpp default behavior.
+This setting is read from the Simple-node JSON config (`config/simple_defaults.json`
+or a file selected with `config_path`). Leave it as `null` or omit it to use the
+llama.cpp default behavior.
+
+Although `tensor_split` is conceptually an advanced backend setting, it is
+currently kept as a root-level Simple-node JSON config key for backward
+compatibility.
 
 Examples:
 
@@ -179,6 +185,10 @@ Controls persistent disk cache.
 
 `LlamaDiskCache` is scoped per `session_id`. Inside each session cache root, cache entries are further separated by model settings so incompatible configurations do not share the same disk cache directory.
 
+When enabled, disk cache data is stored under `history_dir/cache/<session_id>/`.
+`reset_session` does not delete disk cache. To start with a different cache
+namespace, use a different `session_id`.
+
 Availability depends on the `llama-cpp-python` build. If disk cache support is unstable in your environment, use `off`.
 
 ---
@@ -190,6 +200,13 @@ Controls fast in-memory caches usage during conversation.
 - LlamaRAMCache
 - LlamaTrieCache (recommended)
 - off
+
+`LLM Dialogue Cycle` keeps model managers loaded during and after execution
+when `runtime_cache` is `KV_cache` or `LlamaTrieCache`. For other runtime cache
+modes, it unloads managers between turns and at execution end.
+
+To release VRAM explicitly after a keep-loaded run, execute `Unload LLM Model`
+manually.
 
 ---
 
@@ -211,8 +228,14 @@ Suppresses verbose llama.cpp backend logs.
 
 ## Simple Node Overrides
 
+Simple-node default values are defined in `config/simple_defaults.json`.
+
+To change Simple-node defaults, either edit `config/simple_defaults.json`
+directly or create another JSON file and point `config_path` to it.
+
 ### config_path
-Optional JSON file used to override internal defaults in Simple nodes.
+Optional JSON file used to override Simple-node defaults without directly
+editing `config/simple_defaults.json`.
 
 If the config is missing or invalid, built-in safe defaults are used.
 
@@ -266,6 +289,17 @@ Streams the LLM output to the console in real time.
 - top_p = 0.9
 - repeat_penalty = 1.1–1.15
 - repeat_last_n = 256–512
+
+---
+
+## Chat Template Compatibility
+
+Some GGUF models do not support the `system` role.
+
+When needed, the node automatically falls back by merging system messages into
+user messages.
+
+This behavior is generic and not model-specific.
 
 ---
 

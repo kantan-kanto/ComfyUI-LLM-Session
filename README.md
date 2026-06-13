@@ -48,27 +48,27 @@ For details, see the `1.1.x` and `1.2.x` sections in [CHANGELOG.md](CHANGELOG.md
 ## Provided Nodes
 
 ### LLM Session Chat
-Standard session-based chat node with full parameter control.
+A standard chat node that keeps session history.
 
 ### LLM Session Chat (Simple)
-A minimal UI version with safe defaults, designed for quick testing and demos.
-
-- Session persistence included
-- Parameters fixed internally
-- Optional external config override (JSON)
+A simplified node with fewer parameter controls in the UI than
+LLM Session Chat. The UI stays minimal, while the JSON config file can also set
+advanced parameters that are not available on the standard node.
 
 ### LLM Dialogue Cycle
-Model-to-model dialogue execution without graph cycles.
+A node for running dialogue between models.
+It runs inside a single node so workflows do not need to rely on cyclic graph
+connections.
 
 ### LLM Dialogue Cycle (Simple)
-Minimal version focused on **role-based dialogue observation**.
+A simplified node with fewer parameter controls in the UI than
+LLM Dialogue Cycle. The UI stays minimal, while the JSON config file can also
+set advanced parameters that are not available on the standard node.
 
 ### Unload LLM Model
 A utility output node that manually unloads the current LLM from VRAM.
 Set `unload_now=true` and queue the node to release model memory.
 After running, set it back to false to avoid repeated unloads.
-
----
 
 ## Key Design Concepts
 
@@ -89,32 +89,31 @@ cd ComfyUI/custom_nodes
 git clone https://github.com/kantan-kanto/ComfyUI-LLM-Session.git
 ```
 
-### 2. Install Dependencies
+### 2. Install Non-LLM Dependencies
 
-```bash
-cd ComfyUI-LLM-Session
-pip install -r requirements.txt
-```
-
-**Alternative manual installation:**
 ```bash
 pip install pillow numpy
 ```
 
-### 3. Install llama-cpp-python (Notes)
+### 3. Install llama-cpp-python
 
 Model compatibility depends on the llama-cpp-python build.
 Vision support varies significantly by backend and environment.
 
-- Official releases work for many text-only workflows.
-- Newer multimodal model families can require chat handlers that are only
-  available in recent backend builds.
-- If a Vision request fails because the required multimodal chat handler is
-  unavailable, check the upstream JamePeng llama-cpp-python project and choose
-  a build that matches your OS, Python version, and acceleration backend:
+- For newer Vision / multimodal models, use a recent JamePeng
+  llama-cpp-python build that matches your OS, Python version, and
+  acceleration backend:
   https://github.com/JamePeng/llama-cpp-python
+- Official PyPI releases work for many text-only workflows, but may not support
+  newer multimodal chat handlers.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for detailed environment test results.
+
+**Text-only quick start fallback:**
+
+```bash
+pip install llama-cpp-python
+```
 
 ### 4. Place Models
 
@@ -131,45 +130,36 @@ ComfyUI/models/LLM/
 When using Vision-capable models, please follow these rules:
 
 - Place the **model** and **mmproj** GGUF files in the **same folder**.
-- The model filename must start with one of the following prefixes and end with `.gguf`:
-
-  `llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, minicpm-v-4.6, minicpm-v-4_6, minicpmv46, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen3.6, qwen3_6, qwen36, step3-vl, step3vl`
-  
+- The model filename must start with one of the supported model-family prefixes
+  listed below and end with `.gguf`.
 - The mmproj filename must start with `mmproj-` and end with `.gguf`.
-- If exactly one file matching
-  `mmproj-*[llava-1-5|llava15|llava-v1.5|llava-1-6|llava16|llava-v1.6|moondream2|nanollava|llama-3|llama3|minicpm-v-2.6|minicpm-v-2_6|minicpmv26|minicpm-v-4.0|minicpm-v-4_0|minicpmv40|minicpm-v-4.5|minicpm-v-4_5|minicpmv45|minicpm-v-4.6|minicpm-v-4_6|minicpmv46|gemma3|gemma-3|gemma_3|gemma4|gemma-4|gemma_4|glm4.1v|glm4_1v|glm41v|glm-4.1v|glm4.6v|glm4_6v|glm46v|glm-4.6v|granitedocling|granite-docling|lfm2-vl|lfm2vl|lfm2.5-vl|lfm2.5vl|lfm2_5-vl|lfm2_5vl|paddleocr|qwen2.5-vl|qwen2_5-vl|qwen25vl|qwen3-vl|qwen3vl|qwen3.5|qwen3_5|qwen35|qwen3.6|qwen3_6|qwen36|step3-vl|step3vl]*.gguf`
-  exists in the folder, it can be selected automatically via Auto-detect.
-- Filename matching is **case-insensitive**.
-- Both GGUF extension matching (for example `.gguf`, `.GGUF`) and `mmproj` prefix matching (for example `mmproj-`, `MMPROJ-`) are case-insensitive.
+- If exactly one matching mmproj file in the folder contains one of the
+  supported model-family aliases listed below in its filename, it can be
+  selected automatically via Auto-detect.
+- Filename matching is **case-insensitive**, including `.gguf` / `.GGUF` and
+  `mmproj-` / `MMPROJ-`.
+
+Supported model-family prefixes / aliases:
+
+`llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, minicpm-v-4.6, minicpm-v-4_6, minicpmv46, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen3.6, qwen3_6, qwen36, step3-vl, step3vl`
 
 ---
 
-### Simple Node Settings (Quick Notes)
+## Simple Node Settings (Quick Notes)
+
+Simple-node defaults are defined in `config/simple_defaults.json`.
+To change them, you can either edit that file directly or create another JSON
+file elsewhere and select it with `config_path`.
 
 - **history_dir**: Conversations persist as long as the same directory is used.
-- **config_path**: Optional JSON file to override internal defaults in Simple nodes.
-  For fixed seed generation and other advanced Simple-node JSON settings, see
-  [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md).
+- **config_path**: Optional JSON file used to override Simple-node defaults
+  without directly editing `config/simple_defaults.json`.
 - **force_text_only** (Dialogue Cycle Simple): Forces pure text mode to avoid mmproj / vision handler differences and improve reproducibility.
 - **reset_session** (Dialogue Cycle Simple): Overwrites the history and summary files associated with the session name, and resets per-session KV state. The session's disk cache is kept.
-- **tensor_split** (`config/simple_defaults.json`): Optional llama.cpp multi-GPU split. For example, `"tensor_split": [1.0, 0.0]` keeps llama.cpp model offload on visible GPU 0 in a 2-GPU setup. Leave it `null` or omit it for default behavior.
 
-### Generation Limits
-
-- Full UI nodes allow `max_tokens` up to `32768` and `n_ctx` up to `131072`.
-- Defaults remain conservative: `max_tokens=512` and `n_ctx=4096`.
-- For long-form generation, raise `n_ctx` together with `max_tokens`; for example, `max_tokens=8192` usually needs at least `n_ctx=16384`, and `24576` or `32768` is safer with history or long source text.
-
-### Cache Scope Notes
-
-- `persistent_cache = LlamaDiskCache` stores disk cache data under `history_dir/cache/<session_id>/`.
-- Disk cache is isolated per session id, then split by model settings inside that session cache root.
-- `reset_session` does not delete disk cache. To start with a different cache namespace, use a different `session_id`.
-- `LLM Dialogue Cycle` keeps model managers loaded during and after execution when `runtime_cache` is `KV_cache` or `LlamaTrieCache`.
-- For other runtime cache modes, `LLM Dialogue Cycle` unloads managers between turns and at execution end.
-- To release VRAM explicitly after a keep-loaded run, execute `Unload LLM Model` manually.
-
-See [PARAMETERS.md](PARAMETERS.md) for the full list of settings and advanced usage.
+For the main parameter reference, see [PARAMETERS.md](PARAMETERS.md).
+For advanced Simple-node JSON settings, see
+[ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md).
 
 ---
 
@@ -232,6 +222,10 @@ Demonstrates model-to-model dialogue with separate roles and a full transcript o
 ## Model Compatibility (Tested)
 
 The following GGUF instruction models have been tested.
+For detailed environment results and backend-specific notes, see
+[COMPATIBILITY.md](COMPATIBILITY.md). Some newer multimodal model families
+depend on recent [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python)
+builds for the required chat handlers.
 
 ### Text Chat (Confirmed)
 
@@ -269,18 +263,6 @@ The following GGUF instruction models have been tested.
 - Vision support depends on model + mmproj + backend
 - Some vision-capable models may ignore images without errors
 - Text-only operation is always supported
-
----
-
-## Chat Template Compatibility
-
-Some GGUF models do not support the `system` role.
-
-This project automatically falls back by merging system messages into user messages when needed.
-
-This behavior is generic and not model-specific.
-
----
 
 ## Performance Notes
 
