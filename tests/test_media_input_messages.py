@@ -89,6 +89,22 @@ def test_build_chat_messages_rejects_audio_for_non_gemma4(monkeypatch):
         )
 
 
+def test_validate_chat_media_rejects_audio_for_non_gemma4_before_build(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
+
+    with pytest.raises(ValueError, match="Gemma 4"):
+        module.validate_chat_media(media=audio, model_path="C:/models/qwen3-vl.gguf")
+
+
+def test_validate_chat_media_rejects_invalid_audio_shape(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    audio = {"waveform": np.zeros((2, 1, 160), dtype=np.float32), "sample_rate": 16000}
+
+    with pytest.raises(ValueError, match="batches are not supported"):
+        module.validate_chat_media(media=audio, model_path="C:/models/gemma-4-12B.gguf")
+
+
 def test_build_chat_messages_rejects_unsupported_media(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 

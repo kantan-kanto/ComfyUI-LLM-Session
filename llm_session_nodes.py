@@ -1131,7 +1131,7 @@ def _to_numpy_array(value: Any) -> np.ndarray:
     return np.asarray(value)
 
 
-def _encode_audio_dict_as_wav_base64(audio: Dict[str, Any]) -> str:
+def _audio_dict_to_pcm16_and_rate(audio: Dict[str, Any]) -> tuple[np.ndarray, int]:
     sample_rate = int(audio.get("sample_rate") or 0)
     if sample_rate <= 0:
         raise ValueError("AUDIO media must include a positive sample_rate.")
@@ -1163,6 +1163,12 @@ def _encode_audio_dict_as_wav_base64(audio: Dict[str, Any]) -> str:
     channels = int(pcm16.shape[1])
     if channels <= 0:
         raise ValueError("AUDIO media must contain at least one channel.")
+    return pcm16, sample_rate
+
+
+def _encode_audio_dict_as_wav_base64(audio: Dict[str, Any]) -> str:
+    pcm16, sample_rate = _audio_dict_to_pcm16_and_rate(audio)
+    channels = int(pcm16.shape[1])
 
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
@@ -1191,6 +1197,26 @@ def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[st
             raise ValueError("AUDIO media is currently supported only for Gemma 4 models.")
         audio_b64 = _encode_audio_dict_as_wav_base64(media)
         return "audio", [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}]
+
+    raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
+
+
+def validate_chat_media(media: Any = None, model_path: str = "") -> None:
+    if media is None:
+        return
+
+    if _looks_like_image_tensor(media):
+        shape = _shape_tuple(media)
+        if len(shape) == 4 and shape[0] <= 0:
+            raise ValueError("IMAGE media batch is empty.")
+        return
+
+    if _looks_like_audio_dict(media):
+        model_family = _detect_model_family(model_path)
+        if model_family != "gemma4":
+            raise ValueError("AUDIO media is currently supported only for Gemma 4 models.")
+        _audio_dict_to_pcm16_and_rate(media)
+        return
 
     raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
 
@@ -3200,6 +3226,7 @@ def _build_turn_execution_dependencies(
         "rewrite_continue_prompt": rewrite_continue_prompt,
         "detect_history_language": _detect_history_language,
         "session_cache_root": _session_cache_root,
+        "validate_chat_media": validate_chat_media,
         "build_chat_messages": build_chat_messages,
         "build_text_chat_request": _build_text_chat_request,
         "build_kv_state_signature": build_kv_state_signature,
@@ -3840,7 +3867,7 @@ class LLMSessionChatNode:
     Phase 1 design:
     - History is stored/updated as a JSON file under output/llm_session_sessions/
     - History is NOT shown in ComfyUI UI (only assistant response is returned)
-    - Images are used ONLY for the current turn and never persisted
+    - Media inputs are used only for the current turn and never persisted
     - Supports max_turns / summarize_old_history / system_prompt
     """
 

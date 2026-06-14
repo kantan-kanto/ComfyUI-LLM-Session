@@ -11,6 +11,8 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - IMAGE tensors and IMAGE batches are accepted; batches are sent as multiple image message parts.
   - ComfyUI `AUDIO` objects are accepted only for Gemma 4 models, encoded as WAV, and sent as `input_audio` message parts.
   - Unsupported media inputs, and AUDIO inputs for non-Gemma 4 models, now stop with explicit errors.
+  - Validate media before model loading so unsupported AUDIO/media errors are reported before mmproj or handler loading errors.
+  - Route media validation and message-building failures through the normal node error result path.
   - Added a frontend workflow migration that maps legacy `image` inputs and links to `media` when old workflows are loaded.
   - Kept a backend compatibility shim so legacy `image` kwargs are treated as `media` if they still reach execution.
 

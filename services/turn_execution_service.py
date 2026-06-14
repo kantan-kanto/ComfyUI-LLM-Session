@@ -40,6 +40,7 @@ class TurnExecutionDependencies(TypedDict):
     rewrite_continue_prompt: Callable[..., Any]
     detect_history_language: Callable[[Dict[str, Any]], str]
     session_cache_root: Callable[[str, Optional[str]], str]
+    validate_chat_media: Callable[..., None]
     build_chat_messages: Callable[..., List[Dict[str, Any]]]
     build_text_chat_request: Callable[..., Optional[Dict[str, Any]]]
     build_kv_state_signature: Callable[..., str]
@@ -509,6 +510,26 @@ class TurnExecutionService:
 
         return llm, None
 
+    def _validate_media_input(
+        self,
+        *,
+        request: TurnExecutionRequest,
+        deps: TurnExecutionDependencies,
+        model_path: str,
+        hist_path: str,
+    ) -> Optional[TurnExecutionResult]:
+        validate_chat_media = self._dep(deps, "validate_chat_media")
+        try:
+            validate_chat_media(media=request.media, model_path=model_path)
+        except Exception as err:
+            return TurnExecutionResult(
+                assistant_text="",
+                history_path=hist_path,
+                generation_succeeded=False,
+                error=err,
+            )
+        return None
+
     def _build_generation_inputs(
         self,
         *,
@@ -634,6 +655,15 @@ class TurnExecutionService:
         clear_kv_state_for_session = self._reset_state_if_needed(request=request, deps=deps, mgr=mgr)
         user_text_for_model = self._rewrite_user_text(request=request, deps=deps, history=history)
 
+        early_result = self._validate_media_input(
+            request=request,
+            deps=deps,
+            model_path=model_path,
+            hist_path=hist_path,
+        )
+        if early_result is not None:
+            return early_result
+
         llm, early_result = self._load_model_with_cache(
             request=request,
             deps=deps,
@@ -648,14 +678,22 @@ class TurnExecutionService:
 
         build_chat_messages = self._dep(deps, "build_chat_messages")
         build_text_chat_request = self._dep(deps, "build_text_chat_request")
-        messages, text_chat_request = self._build_generation_inputs(
-            request=request,
-            deps=deps,
-            history=history,
-            user_text_for_model=user_text_for_model,
-            model_path=model_path,
-            mmproj_path=mmproj_path,
-        )
+        try:
+            messages, text_chat_request = self._build_generation_inputs(
+                request=request,
+                deps=deps,
+                history=history,
+                user_text_for_model=user_text_for_model,
+                model_path=model_path,
+                mmproj_path=mmproj_path,
+            )
+        except Exception as err:
+            return TurnExecutionResult(
+                assistant_text="",
+                history_path=hist_path,
+                generation_succeeded=False,
+                error=err,
+            )
 
         def _message_chars(msgs: Any) -> int:
             total = 0

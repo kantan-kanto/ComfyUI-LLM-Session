@@ -53,6 +53,7 @@ def _base_deps(history_ref, *, run_generation_result: GenerationRunResult):
         })(),
         "detect_history_language": lambda _history: "en",
         "session_cache_root": lambda _sid, _dir: "cache_dir",
+        "validate_chat_media": lambda **_kwargs: None,
         "build_chat_messages": lambda **_kwargs: [{"role": "user", "content": "hello"}],
         "build_text_chat_request": lambda **_kwargs: None,
         "build_kv_state_signature": lambda **_kwargs: "kvsig",
@@ -283,6 +284,59 @@ def test_execute_turn_requires_vision_when_media_is_present() -> None:
     assert mgr.last_load_kwargs["vision_required"] is True
 
 
+def test_execute_turn_validates_media_before_model_load() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    deps["validate_chat_media"] = lambda **_kwargs: (_ for _ in ()).throw(
+        ValueError("AUDIO media is currently supported only for Gemma 4 models.")
+    )
+    request = _make_request(deps, mgr)
+    request = TurnExecutionRequest(**{**request.__dict__, "media": object(), "mmproj": "(Auto-detect)"})
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is False
+    assert isinstance(result.error, ValueError)
+    assert "Gemma 4" in str(result.error)
+    assert mgr.loaded is False
+
+
+def test_execute_turn_wraps_message_build_errors() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    deps["build_chat_messages"] = lambda **_kwargs: (_ for _ in ()).throw(ValueError("bad media shape"))
+
+    result = service.execute_turn(_make_request(deps, mgr))
+
+    assert result.generation_succeeded is False
+    assert isinstance(result.error, ValueError)
+    assert "bad media shape" in str(result.error)
+
+
 def test_execute_turn_requires_vision_when_mmproj_is_explicit() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()
@@ -449,8 +503,74 @@ def test_execute_session_chat_turn_adds_media_stream_params() -> None:
 
     assert result.generation_succeeded is True
     params = history["turns"][0]["params"]
-    assert "media_used" in params
+    assert params["image_used"] is False
+    assert params["image_count"] == 0
+    assert params["audio_used"] is False
+    assert params["audio_format"] == ""
     assert "streamed" in params
+    user = history["turns"][0]["user"]
+    assert "image_note" in user
+    assert "audio_note" in user
+    assert "media_note" not in user
+
+
+def test_execute_session_chat_turn_records_image_media_params() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+
+    request = _make_request(deps, mgr)
+    media = type("ImageMedia", (), {"shape": (3, 16, 16, 3)})()
+    request = TurnExecutionRequest(**{**request.__dict__, "media": media})
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    params = history["turns"][0]["params"]
+    assert params["image_used"] is True
+    assert params["image_count"] == 3
+    assert params["audio_used"] is False
+    assert params["audio_format"] == ""
+
+
+def test_execute_session_chat_turn_records_audio_media_params() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+
+    request = _make_request(deps, mgr)
+    request = TurnExecutionRequest(**{**request.__dict__, "media": {"waveform": object(), "sample_rate": 16000}})
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    params = history["turns"][0]["params"]
+    assert params["image_used"] is False
+    assert params["image_count"] == 0
+    assert params["audio_used"] is True
+    assert params["audio_format"] == "wav"
 
 
 def test_execute_dialogue_cycle_turn_strips_and_omits_media_stream_params() -> None:
@@ -508,7 +628,8 @@ def test_execute_dialogue_cycle_turn_strips_and_omits_media_stream_params() -> N
     assert result.generation_succeeded is True
     assert result.assistant_text == "assistant reply"
     params = history["turns"][0]["params"]
-    assert "media_used" not in params
+    assert "image_used" not in params
+    assert "audio_used" not in params
     assert "streamed" not in params
 
 
