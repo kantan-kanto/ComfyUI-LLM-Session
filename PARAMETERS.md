@@ -153,6 +153,35 @@ When using Gemma 4 E2B / E4B with an mmproj loaded, the current JamePeng `Gemma4
 
 ---
 
+## Media Input
+
+`LLM Session Chat` and `LLM Session Chat (Simple)` expose an optional `media`
+input for the current user turn.
+
+Supported inputs:
+
+- `IMAGE`: sent as one `image_url` message part
+- `IMAGE` batch: sent as multiple `image_url` message parts
+- ComfyUI `AUDIO`: accepted only when the selected model is detected as
+  Gemma 4; the node encodes the audio object as WAV and sends it as an
+  `input_audio` message part
+
+For Gemma 4 media turns, the current JamePeng `Gemma4ChatHandler` still expects
+a valid `clip_model_path`, so configure a matching mmproj file even when testing
+Gemma 4 12B Unified AUDIO input.
+
+Unsupported media inputs stop execution with an explicit error. AUDIO input for
+non-Gemma 4 models is also rejected explicitly.
+
+Media input is turn-local. Raw media is not saved to session history. When media
+is present, KV state restore/save is disabled for that turn to avoid reusing
+state across different multimodal contexts.
+
+Compatibility depends on the selected `llama-cpp-python` backend and chat
+handler. See [COMPATIBILITY.md](COMPATIBILITY.md) before relying on AUDIO input.
+
+---
+
 ## Summarization Parameters
 
 ### summarize_old_history

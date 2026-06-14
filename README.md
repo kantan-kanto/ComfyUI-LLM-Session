@@ -25,6 +25,8 @@ The following notes are intended for existing users upgrading to the `1.1.x` / `
 - `reset_session` now clears history and per-session KV state, while keeping the session's disk cache so the same session can restart efficiently.
 - Older history JSON files are normalized automatically, but the tracking model for summarized ranges has changed. Long-lived sessions may therefore behave somewhat differently from previous versions.
 - When using Vision models, both mmproj auto-detection and handler selection logic have changed. Even combinations that worked before may need to be rechecked depending on backend behavior and filename conventions.
+- The optional `LLM Session Chat` / `LLM Session Chat (Simple)` media input is now named `media` instead of `image`.
+- Old workflows that still contain an `image` input are migrated in the ComfyUI UI when loaded. Save the workflow once after loading to persist the normalized `media` input in the workflow JSON.
 - `LLM Dialogue Cycle` now keeps model managers loaded when `runtime_cache` is `KV_cache` or `LlamaTrieCache`.
 - Added `Unload LLM Model` output node for explicit manual VRAM release after keep-loaded runs.
 - History loading now restores from `*.bak` when the primary history JSON is invalid or missing.
@@ -60,6 +62,11 @@ A standard chat node that keeps session history.
 A simplified node with fewer parameter controls in the UI than
 LLM Session Chat. The UI stays minimal, while the JSON config file can also set
 advanced parameters that are not available on the standard node.
+
+Both Session Chat nodes accept an optional `media` input for the current turn.
+It supports IMAGE tensors, IMAGE batches, and ComfyUI AUDIO objects. AUDIO input
+is only accepted for Gemma 4 models and is encoded as WAV before being passed to
+the backend. Media is not saved in the session history.
 
 ### LLM Dialogue Cycle
 A node for running dialogue between models.
@@ -260,6 +267,8 @@ builds for the required chat handlers.
 ### Vision Models
 
 - Vision support depends on model + mmproj + backend
+- IMAGE batch input is sent as multiple image message parts
+- Gemma 4 AUDIO input depends on backend support for `input_audio` message parts
 - Some vision-capable models may ignore images without errors
 - Text-only operation is always supported
 

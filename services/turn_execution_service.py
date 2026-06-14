@@ -81,7 +81,7 @@ class TurnExecutionRequest:
     n_gpu_layers: int
     n_ctx: int
     tensor_split: Optional[List[float]] = None
-    image: Any = None
+    media: Any = None
     max_turns: Optional[int] = 12
     summarize_old_history: bool = True
     summary_chunk_turns: int = 3
@@ -108,7 +108,7 @@ class TurnExecutionRequest:
 
     # Behavior switches to preserve subtle differences between legacy call paths.
     strip_assistant_before_reasoning_filter: bool = False
-    include_image_and_stream_in_turn_params: bool = True
+    include_media_and_stream_in_turn_params: bool = True
     kv_log_saved_when_not_minimal: bool = False
     kv_log_unsupported_when_not_minimal: bool = False
     include_error_in_invalidate_message: bool = False
@@ -135,7 +135,7 @@ class TurnExecutionRequest:
         n_gpu_layers: int,
         n_ctx: int,
         tensor_split: Optional[List[float]] = None,
-        image: Any,
+        media: Any,
         max_turns: Optional[int],
         summarize_old_history: bool,
         summary_chunk_turns: int,
@@ -160,7 +160,7 @@ class TurnExecutionRequest:
         advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
         advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
         strip_assistant_before_reasoning_filter: bool,
-        include_image_and_stream_in_turn_params: bool,
+        include_media_and_stream_in_turn_params: bool,
         kv_log_saved_when_not_minimal: bool,
         kv_log_unsupported_when_not_minimal: bool,
         include_error_in_invalidate_message: bool,
@@ -180,7 +180,7 @@ class TurnExecutionRequest:
             n_gpu_layers=int(n_gpu_layers),
             n_ctx=int(n_ctx),
             tensor_split=(list(tensor_split) if tensor_split is not None else None),
-            image=image,
+            media=media,
             max_turns=(int(max_turns) if max_turns is not None else None),
             summarize_old_history=bool(summarize_old_history),
             summary_chunk_turns=int(summary_chunk_turns),
@@ -211,7 +211,7 @@ class TurnExecutionRequest:
                 else None
             ),
             strip_assistant_before_reasoning_filter=bool(strip_assistant_before_reasoning_filter),
-            include_image_and_stream_in_turn_params=bool(include_image_and_stream_in_turn_params),
+            include_media_and_stream_in_turn_params=bool(include_media_and_stream_in_turn_params),
             kv_log_saved_when_not_minimal=bool(kv_log_saved_when_not_minimal),
             kv_log_unsupported_when_not_minimal=bool(kv_log_unsupported_when_not_minimal),
             include_error_in_invalidate_message=bool(include_error_in_invalidate_message),
@@ -307,7 +307,7 @@ class TurnExecutionService:
     def execute_session_chat_turn(self, **kwargs: Any) -> TurnExecutionResult:
         return self.execute_from_node_inputs(
             strip_assistant_before_reasoning_filter=False,
-            include_image_and_stream_in_turn_params=True,
+            include_media_and_stream_in_turn_params=True,
             kv_log_saved_when_not_minimal=False,
             kv_log_unsupported_when_not_minimal=False,
             include_error_in_invalidate_message=False,
@@ -319,7 +319,7 @@ class TurnExecutionService:
     def execute_dialogue_cycle_turn(self, **kwargs: Any) -> TurnExecutionResult:
         return self.execute_from_node_inputs(
             strip_assistant_before_reasoning_filter=True,
-            include_image_and_stream_in_turn_params=False,
+            include_media_and_stream_in_turn_params=False,
             kv_log_saved_when_not_minimal=True,
             kv_log_unsupported_when_not_minimal=True,
             include_error_in_invalidate_message=True,
@@ -469,7 +469,7 @@ class TurnExecutionService:
             mmproj_choice != mmproj_not_required
             and mmproj_choice_normalized not in {"autodetect", "auto", mmproj_auto_normalized}
         )
-        vision_required = request.image is not None or explicit_mmproj_selected
+        vision_required = request.media is not None or explicit_mmproj_selected
 
         try:
             llm = mgr.load_model(
@@ -524,7 +524,8 @@ class TurnExecutionService:
         messages = build_chat_messages(
             history=history,
             user_text=user_text_for_model or "",
-            image_tensor=request.image,
+            media=request.media,
+            model_path=model_path,
             max_turns=int(request.max_turns) if request.max_turns is not None else None,
             summarize_old_history=bool(request.summarize_old_history),
             system_prompt=request.system_prompt or "",
@@ -738,7 +739,8 @@ class TurnExecutionService:
             rebuilt_messages = build_chat_messages(
                 history=history,
                 user_text=user_text_for_model or "",
-                image_tensor=request.image,
+                media=request.media,
+                model_path=model_path,
                 max_turns=new_turns_limit,
                 summarize_old_history=bool(request.summarize_old_history),
                 system_prompt=request.system_prompt or "",

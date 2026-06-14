@@ -53,6 +53,9 @@ Mixtral failures occur at model load time and are likely backend-related.
 ## Vision Support Caveats
 
 - Some vision-capable models may ignore image inputs without errors
+- `LLM Session Chat` and `LLM Session Chat (Simple)` send IMAGE batches as
+  multiple image message parts. Whether every frame/image is used depends on the
+  active backend handler and model.
 - Vision compatibility depends on mmproj selection and chat template support
 - Vision chat handler detection uses dynamic loading. If a required handler is
   unavailable in your `llama-cpp-python` build, execution stops with a
@@ -60,6 +63,22 @@ Mixtral failures occur at model load time and are likely backend-related.
 - mmproj auto-detection depends on normalized model-family aliases in model and
   mmproj filenames. If filenames fall outside the expected alias patterns,
   Auto-detect may fail.
+
+---
+
+## Gemma 4 AUDIO Input
+
+ComfyUI `AUDIO` input is currently routed only for models detected as Gemma 4.
+The node encodes the AUDIO object as WAV and sends it as an OpenAI-style
+`input_audio` message part. Other model families reject AUDIO explicitly.
+
+This is intended for Gemma 4 builds whose chat handler actually consumes audio
+waveform input, especially the Gemma 4 12B Unified path. Model-card support and
+GGUF/backend support are separate requirements: use a recent JamePeng
+`llama-cpp-python` build and verify that its `Gemma4ChatHandler` accepts
+`input_audio` in your environment. In current testing, the handler still
+requires a valid mmproj path; leaving mmproj unset fails during handler
+initialization.
 
 ---
 

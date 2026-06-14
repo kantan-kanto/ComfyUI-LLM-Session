@@ -38,7 +38,7 @@ see [PARAMETERS.md](PARAMETERS.md).
 
 ### Why `seed` Is an Advanced Parameter
 
-When the same model, prompt, image input, generation settings, session state,
+When the same model, prompt, media input, generation settings, session state,
 runtime cache behavior, and backend behavior all match, a fixed seed can improve
 the repeatability of stochastic sampling even when `temperature` is greater
 than `0`.
@@ -81,7 +81,7 @@ Allowing these parameters to be overridden through
 For reproducibility tests, try the following settings first.
 
 In real-machine testing, output changed with `LlamaTrieCache` enabled even when
-the same seed, prompt, model, and image were used. If you want to check
+the same seed, prompt, model, and media were used. If you want to check
 repeatability, `runtime_cache: "off"` is recommended.
 
 ```json
@@ -103,7 +103,7 @@ Check the following first:
 
 - Set `runtime_cache` to `"off"`.
 - Use `reset_session: true` or a fresh `session_id`.
-- Use the same model file, mmproj file, image input, prompt, and config.
+- Use the same model file, mmproj file, media input, prompt, and config.
 - Make sure history and summary text are not changing the prompt.
 - If summary reproducibility matters, set
   `advanced_summary_generation_kwargs.seed`.
