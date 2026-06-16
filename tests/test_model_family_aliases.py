@@ -140,6 +140,24 @@ def test_chat_handler_instantiation_falls_back_to_clip_model_path(monkeypatch):
     }
 
 
+def test_chat_handler_instantiation_falls_back_when_clip_model_path_is_required(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class RequiredClipPathHandler:
+        def __init__(self, clip_model_path, **kwargs):
+            self.clip_model_path = clip_model_path
+            self.kwargs = kwargs
+
+    handler = module._instantiate_chat_handler(
+        RequiredClipPathHandler,
+        "C:/models/mmproj-gemma4.gguf",
+        {"enable_thinking": False},
+    )
+
+    assert handler.clip_model_path == "C:/models/mmproj-gemma4.gguf"
+    assert handler.kwargs == {"enable_thinking": False}
+
+
 def test_chat_handler_instantiation_preserves_unrelated_type_errors(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 
