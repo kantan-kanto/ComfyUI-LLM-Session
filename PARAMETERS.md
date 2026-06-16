@@ -212,6 +212,10 @@ Controls verbosity of internal logs.
 - timing (recommended)
 - debug
 
+`timing` keeps normal runtime logs concise. `debug` adds detailed diagnostics
+for troubleshooting, including per-turn phase timings, generation start
+settings, and heartbeat messages while long generation calls are still running.
+
 ---
 
 ### suppress_backend_logs

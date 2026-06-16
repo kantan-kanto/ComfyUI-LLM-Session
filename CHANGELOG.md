@@ -6,6 +6,9 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [Unreleased]
 
+- Runtime diagnostics
+  - Added `log_level: debug` phase timing diagnostics and long-generation heartbeat logs without changing the default `timing` log output.
+
 - Backend compatibility
   - Prefer `mmproj_path` when initializing multimodal chat handlers and fall back to the older `clip_model_path` keyword only when the installed handler rejects the new name.
   - Documented the JamePeng `llama-cpp-python` MTMD projector keyword compatibility path.
