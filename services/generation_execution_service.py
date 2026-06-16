@@ -87,14 +87,14 @@ class GenerationExecutionService:
         return _retry_error_logger
 
     def _build_heartbeat_logger(self, request: Any) -> Optional[Callable[[float, int], None]]:
-        if request.log_level != "debug":
+        if request.log_level != "debug" or bool(request.stream_to_console):
             return None
         module_logger = get_module_logger("TurnExecutionService")
 
-        def _heartbeat_logger(elapsed: float, attempt_no: int) -> None:
+        def _heartbeat_logger(elapsed: float, _attempt_no: int) -> None:
             module_logger(
                 f"{request.log_prefix} Generation still running... "
-                f"elapsed={elapsed:.1f}s (attempt={int(attempt_no)})",
+                f"elapsed={elapsed:.1f}s",
                 LOG_LEVEL_DEBUG,
             )
 

@@ -103,6 +103,24 @@ def _make_request(deps, mgr: DummyManager, *, log_level: str = "timing") -> Turn
     )
 
 
+def _capture_generation_kwargs(deps):
+    observed: dict[str, object] = {}
+
+    def run_generation_with_adaptive_retry(**kwargs):
+        observed.update(kwargs)
+        return GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        )
+
+    deps["run_generation_with_adaptive_retry"] = run_generation_with_adaptive_retry
+    return observed
+
+
 def test_execute_turn_success_updates_history_and_writes_file() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()
@@ -130,7 +148,6 @@ def test_execute_turn_success_updates_history_and_writes_file() -> None:
 def test_execute_turn_does_not_enable_heartbeat_for_timing_log_level() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()
-    observed: dict[str, object] = {}
     history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
     deps, _writes = _base_deps(
         history,
@@ -143,19 +160,7 @@ def test_execute_turn_does_not_enable_heartbeat_for_timing_log_level() -> None:
             non_ctx_error=False,
         ),
     )
-
-    def run_generation_with_adaptive_retry(**kwargs):
-        observed.update(kwargs)
-        return GenerationRunResult(
-            assistant_text="assistant reply",
-            gen_tokens=64,
-            turns_limit=12,
-            last_err=None,
-            succeeded=True,
-            non_ctx_error=False,
-        )
-
-    deps["run_generation_with_adaptive_retry"] = run_generation_with_adaptive_retry
+    observed = _capture_generation_kwargs(deps)
 
     result = service.execute_turn(_make_request(deps, mgr, log_level="timing"))
 
@@ -166,7 +171,6 @@ def test_execute_turn_does_not_enable_heartbeat_for_timing_log_level() -> None:
 def test_execute_turn_enables_heartbeat_for_debug_log_level() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()
-    observed: dict[str, object] = {}
     history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
     deps, _writes = _base_deps(
         history,
@@ -179,24 +183,41 @@ def test_execute_turn_enables_heartbeat_for_debug_log_level() -> None:
             non_ctx_error=False,
         ),
     )
+    observed = _capture_generation_kwargs(deps)
 
-    def run_generation_with_adaptive_retry(**kwargs):
-        observed.update(kwargs)
-        return GenerationRunResult(
+    result = service.execute_turn(_make_request(deps, mgr, log_level="debug"))
+
+    assert result.generation_succeeded is True
+    assert callable(observed["heartbeat_logger"])
+
+
+def test_execute_turn_disables_heartbeat_for_debug_stream_to_console() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
             assistant_text="assistant reply",
             gen_tokens=64,
             turns_limit=12,
             last_err=None,
             succeeded=True,
             non_ctx_error=False,
-        )
+        ),
+    )
+    observed = _capture_generation_kwargs(deps)
+    request = TurnExecutionRequest(
+        **{
+            **_make_request(deps, mgr, log_level="debug").__dict__,
+            "stream_to_console": True,
+        }
+    )
 
-    deps["run_generation_with_adaptive_retry"] = run_generation_with_adaptive_retry
-
-    result = service.execute_turn(_make_request(deps, mgr, log_level="debug"))
+    result = service.execute_turn(request)
 
     assert result.generation_succeeded is True
-    assert callable(observed["heartbeat_logger"])
+    assert observed["heartbeat_logger"] is None
 
 
 def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:
