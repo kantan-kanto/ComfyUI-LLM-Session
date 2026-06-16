@@ -688,13 +688,15 @@ def _make_chat_handler_factory(handler_cls: type, extra_kwargs: dict[str, Any]) 
 
 def _is_mmproj_keyword_type_error(error: TypeError) -> bool:
     message = str(error).lower()
-    if "mmproj_path" not in message:
-        return False
-    return (
-        "unexpected keyword" in message
-        or "unexpected keyword argument" in message
-        or "unexpected keyword argument(s)" in message
-    )
+    if "mmproj_path" in message:
+        return (
+            "unexpected keyword" in message
+            or "unexpected keyword argument" in message
+            or "unexpected keyword argument(s)" in message
+        )
+    if "clip_model_path" in message:
+        return "missing" in message and "required" in message
+    return False
 
 
 def _instantiate_chat_handler(
