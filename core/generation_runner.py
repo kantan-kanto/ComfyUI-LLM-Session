@@ -69,6 +69,42 @@ def _false_interrupt_error(_err: Exception) -> bool:
     return False
 
 
+class _HeartbeatWatch:
+    def __init__(
+        self,
+        *,
+        heartbeat_logger: Optional[Callable[[float, int], None]],
+        attempt_no: int,
+        interval: float,
+    ) -> None:
+        self._heartbeat_logger = heartbeat_logger
+        self._attempt_no = int(attempt_no)
+        self._interval = max(0.01, float(interval))
+        self._started_at = time.perf_counter()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def __enter__(self) -> "_HeartbeatWatch":
+        if self._heartbeat_logger is None:
+            return self
+        self._thread = threading.Thread(target=self._watch, name="llm-session-heartbeat", daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def _watch(self) -> None:
+        while not self._stop_event.wait(self._interval):
+            try:
+                assert self._heartbeat_logger is not None
+                self._heartbeat_logger(time.perf_counter() - self._started_at, self._attempt_no)
+            except Exception:
+                continue
+
+
 def _finish_reason(resp: Any) -> str:
     if not isinstance(resp, dict):
         return ""
@@ -126,6 +162,9 @@ def _run_generation_once(
     extract_stream_content: Callable[[Any], str],
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
     repeat_last_n: int,
+    attempt_no: int,
+    heartbeat_logger: Optional[Callable[[float, int], None]] = None,
+    heartbeat_interval: float = 30.0,
     processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
     throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
 ) -> str:
@@ -149,51 +188,56 @@ def _run_generation_once(
         return create_chat_completion_robust(llm, messages, **active_kwargs)
 
     with suppress_backend_logs_ctx:
-        if stream_to_console:
-            pieces: List[str] = []
-            out = sys.__stdout__
+        with _HeartbeatWatch(
+            heartbeat_logger=heartbeat_logger,
+            attempt_no=int(attempt_no),
+            interval=float(heartbeat_interval),
+        ):
+            if stream_to_console:
+                pieces: List[str] = []
+                out = sys.__stdout__
+                with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
+                    stream_iter = run_with_typeerror_fallback(
+                        execute_with_kwargs=_stream_execute,
+                        completion_kwargs=completion_kwargs,
+                        retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
+                        repeat_last_n=int(repeat_last_n),
+                    )
+
+                    for chunk in stream_iter:
+                        throw_if_processing_interrupted()
+                        _raise_if_abort_detected(
+                            abort_requested=abort_watch.abort_requested,
+                            resp={"choices": [chunk.get("choices", [{}])[0]]} if isinstance(chunk, dict) else chunk,
+                            throw_if_processing_interrupted=throw_if_processing_interrupted,
+                        )
+                        token = extract_stream_content(chunk)
+                        if not token:
+                            continue
+                        pieces.append(token)
+                        try:
+                            out.write(token)
+                            out.flush()
+                        except Exception:
+                            pass
+                return "".join(pieces)
+
             with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
-                stream_iter = run_with_typeerror_fallback(
-                    execute_with_kwargs=_stream_execute,
+                resp = run_with_typeerror_fallback(
+                    execute_with_kwargs=_non_stream_execute,
                     completion_kwargs=completion_kwargs,
                     retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
                     repeat_last_n=int(repeat_last_n),
                 )
+                _raise_if_abort_detected(
+                    abort_requested=abort_watch.abort_requested,
+                    resp=resp,
+                    throw_if_processing_interrupted=throw_if_processing_interrupted,
+                )
 
-                for chunk in stream_iter:
-                    throw_if_processing_interrupted()
-                    _raise_if_abort_detected(
-                        abort_requested=abort_watch.abort_requested,
-                        resp={"choices": [chunk.get("choices", [{}])[0]]} if isinstance(chunk, dict) else chunk,
-                        throw_if_processing_interrupted=throw_if_processing_interrupted,
-                    )
-                    token = extract_stream_content(chunk)
-                    if not token:
-                        continue
-                    pieces.append(token)
-                    try:
-                        out.write(token)
-                        out.flush()
-                    except Exception:
-                        pass
-            return "".join(pieces)
-
-        with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
-            resp = run_with_typeerror_fallback(
-                execute_with_kwargs=_non_stream_execute,
-                completion_kwargs=completion_kwargs,
-                retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
-                repeat_last_n=int(repeat_last_n),
-            )
-            _raise_if_abort_detected(
-                abort_requested=abort_watch.abort_requested,
-                resp=resp,
-                throw_if_processing_interrupted=throw_if_processing_interrupted,
-            )
-
-        if text_chat_request is not None:
-            return resp["choices"][0]["text"] or ""
-        return resp["choices"][0]["message"]["content"] or ""
+            if text_chat_request is not None:
+                return resp["choices"][0]["text"] or ""
+            return resp["choices"][0]["message"]["content"] or ""
 
 
 def run_generation_with_adaptive_retry(
@@ -229,6 +273,8 @@ def run_generation_with_adaptive_retry(
     processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
     throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
     is_interrupt_error: Callable[[Exception], bool] = _false_interrupt_error,
+    heartbeat_logger: Optional[Callable[[float, int], None]] = None,
+    heartbeat_interval: float = 30.0,
 ) -> GenerationRunResult:
     assistant_text = ""
     gen_tokens = int(max_tokens)
@@ -268,6 +314,9 @@ def run_generation_with_adaptive_retry(
                 extract_stream_content=extract_stream_content,
                 retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
                 repeat_last_n=int(repeat_last_n),
+                attempt_no=int(attempt_no),
+                heartbeat_logger=heartbeat_logger,
+                heartbeat_interval=float(heartbeat_interval),
                 processing_interrupted=processing_interrupted,
                 throw_if_processing_interrupted=throw_if_processing_interrupted,
             )

@@ -10,8 +10,10 @@ try:
     from ..core.logging_utils import (
         log_error_safely,
         get_module_logger,
+        set_module_log_level,
         LOG_LEVEL_MINIMAL,
         LOG_LEVEL_TIMING,
+        LOG_LEVEL_DEBUG,
     )
     from .generation_execution_service import GenerationExecutionService
     from .kv_state_service import KvStateService
@@ -20,8 +22,10 @@ except Exception:
     from core.logging_utils import (
         log_error_safely,
         get_module_logger,
+        set_module_log_level,
         LOG_LEVEL_MINIMAL,
         LOG_LEVEL_TIMING,
+        LOG_LEVEL_DEBUG,
     )
     from services.generation_execution_service import GenerationExecutionService
     from services.kv_state_service import KvStateService
@@ -450,7 +454,12 @@ class TurnExecutionService:
         model_path: str,
         mmproj_path: Optional[str],
         hist_path: str,
+        debug_timings: Optional[Dict[str, float]] = None,
     ) -> tuple[Optional[Any], Optional[TurnExecutionResult]]:
+        def _record(name: str, started_at: float) -> None:
+            if debug_timings is not None:
+                debug_timings[name] = time.perf_counter() - started_at
+
         session_cache_root = self._dep(deps, "session_cache_root")
         try:
             mgr.cache_dir_override = session_cache_root(request.session_id, request.history_dir or None)
@@ -472,6 +481,7 @@ class TurnExecutionService:
         vision_required = request.image is not None or explicit_mmproj_selected
 
         try:
+            t_load_model = time.perf_counter()
             llm = mgr.load_model(
                 model_path=model_path,
                 mmproj_path=mmproj_path,
@@ -482,6 +492,7 @@ class TurnExecutionService:
                 vision_required=vision_required,
                 verbose=False,
             )
+            _record("model_load", t_load_model)
         except Exception as err:
             return (
                 None,
@@ -494,6 +505,7 @@ class TurnExecutionService:
             )
 
         try:
+            t_cache_config = time.perf_counter()
             mgr.configure_cache(
                 llm,
                 model_path=model_path,
@@ -504,6 +516,7 @@ class TurnExecutionService:
                 persistent_cache=request.persistent_cache,
                 runtime_cache=request.runtime_cache,
             )
+            _record("cache_config", t_cache_config)
         except Exception:
             pass
 
@@ -610,7 +623,21 @@ class TurnExecutionService:
 
     def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
         deps = request.dependencies
+        set_module_log_level("TurnExecutionService", request.log_level)
         module_logger = get_module_logger("TurnExecutionService")
+        debug_timings: Optional[Dict[str, float]] = {} if request.log_level == "debug" else None
+        turn_started_at = time.perf_counter()
+
+        def _record_debug_timing(name: str, started_at: float) -> None:
+            if debug_timings is not None:
+                debug_timings[name] = time.perf_counter() - started_at
+
+        def _log_debug_timings(stage: str) -> None:
+            if debug_timings is None:
+                return
+            parts = [f"{name}={elapsed:.2f}s" for name, elapsed in debug_timings.items()]
+            parts.append(f"total={time.perf_counter() - turn_started_at:.2f}s")
+            module_logger(f"{request.log_prefix} Timing ({stage}): " + ", ".join(parts), LOG_LEVEL_DEBUG)
 
         mgr, early_result = self._preflight(request, deps)
         if early_result is not None:
@@ -629,9 +656,13 @@ class TurnExecutionService:
             n_gpu_layers=int(request.n_gpu_layers),
             tensor_split=request.tensor_split,
         )
+        t_history_load = time.perf_counter()
         history, hist_path = self._load_history(request=request, deps=deps, model_sig=model_sig)
+        _record_debug_timing("history_load", t_history_load)
+        t_reset_rewrite = time.perf_counter()
         clear_kv_state_for_session = self._reset_state_if_needed(request=request, deps=deps, mgr=mgr)
         user_text_for_model = self._rewrite_user_text(request=request, deps=deps, history=history)
+        _record_debug_timing("reset_rewrite", t_reset_rewrite)
 
         llm, early_result = self._load_model_with_cache(
             request=request,
@@ -640,6 +671,7 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
             hist_path=hist_path,
+            debug_timings=debug_timings,
         )
         if early_result is not None:
             return early_result
@@ -647,6 +679,7 @@ class TurnExecutionService:
 
         build_chat_messages = self._dep(deps, "build_chat_messages")
         build_text_chat_request = self._dep(deps, "build_text_chat_request")
+        t_prompt_build = time.perf_counter()
         messages, text_chat_request = self._build_generation_inputs(
             request=request,
             deps=deps,
@@ -655,6 +688,7 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
         )
+        _record_debug_timing("prompt_build", t_prompt_build)
 
         def _message_chars(msgs: Any) -> int:
             total = 0
@@ -691,6 +725,7 @@ class TurnExecutionService:
 
         _log_prompt_metrics("Prompt metrics (initial)", request.max_turns, messages, text_chat_request)
 
+        t_kv_restore = time.perf_counter()
         is_state_data_mismatch_error, kv_state_debug_info, get_context_turns = self._maybe_restore_kv_state(
             request=request,
             deps=deps,
@@ -701,6 +736,8 @@ class TurnExecutionService:
             mmproj_path=mmproj_path,
             clear_kv_state_for_session=clear_kv_state_for_session,
         )
+        _record_debug_timing("kv_restore", t_kv_restore)
+        _log_debug_timings("before generation")
 
         maybe_compact_summary = self._dep(deps, "maybe_compact_summary")
 
@@ -752,6 +789,7 @@ class TurnExecutionService:
             _log_prompt_metrics("Prompt metrics (retry rebuild)", new_turns_limit, rebuilt_messages, rebuilt_text_chat_request)
             return rebuilt_messages, rebuilt_text_chat_request
 
+        t_generation = time.perf_counter()
         generation_outcome = self._generation_execution_service.execute(
             request=request,
             deps=deps,
@@ -763,8 +801,10 @@ class TurnExecutionService:
             on_compact_summary=_on_compact_summary,
             rebuild_messages_for_turns_limit=_rebuild_messages_for_turns_limit,
         )
+        _record_debug_timing("generation", t_generation)
 
         if generation_outcome.failed:
+            _log_debug_timings("failed")
             return TurnExecutionResult(
                 assistant_text="",
                 history_path=hist_path,
@@ -774,6 +814,7 @@ class TurnExecutionService:
 
         assistant_text = generation_outcome.assistant_text
 
+        t_persist = time.perf_counter()
         persistence_result = self._persist_history_and_summary(
             request=request,
             deps=deps,
@@ -785,7 +826,9 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
         )
+        _record_debug_timing("persist", t_persist)
         history = persistence_result.history
+        t_kv_save = time.perf_counter()
         self._maybe_save_kv_state(
             request=request,
             deps=deps,
@@ -796,6 +839,8 @@ class TurnExecutionService:
             kv_state_debug_info=kv_state_debug_info,
             get_context_turns=get_context_turns,
         )
+        _record_debug_timing("kv_save", t_kv_save)
+        _log_debug_timings("complete")
 
         return TurnExecutionResult(
             assistant_text=assistant_text,

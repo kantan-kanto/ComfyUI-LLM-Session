@@ -84,7 +84,7 @@ def _base_deps(history_ref, *, run_generation_result: GenerationRunResult):
     return deps, writes
 
 
-def _make_request(deps, mgr: DummyManager) -> TurnExecutionRequest:
+def _make_request(deps, mgr: DummyManager, *, log_level: str = "timing") -> TurnExecutionRequest:
     return TurnExecutionRequest(
         user_text="hello",
         session_id="sid",
@@ -97,6 +97,7 @@ def _make_request(deps, mgr: DummyManager) -> TurnExecutionRequest:
         n_gpu_layers=0,
         n_ctx=1024,
         runtime_cache="off",
+        log_level=log_level,
         model_manager=mgr,
         dependencies=deps,
     )
@@ -124,6 +125,78 @@ def test_execute_turn_success_updates_history_and_writes_file() -> None:
     assert result.assistant_text == "assistant reply"
     assert len(history["turns"]) == 1
     assert writes and writes[0][0] == "hist.json"
+
+
+def test_execute_turn_does_not_enable_heartbeat_for_timing_log_level() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    observed: dict[str, object] = {}
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+
+    def run_generation_with_adaptive_retry(**kwargs):
+        observed.update(kwargs)
+        return GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        )
+
+    deps["run_generation_with_adaptive_retry"] = run_generation_with_adaptive_retry
+
+    result = service.execute_turn(_make_request(deps, mgr, log_level="timing"))
+
+    assert result.generation_succeeded is True
+    assert observed["heartbeat_logger"] is None
+
+
+def test_execute_turn_enables_heartbeat_for_debug_log_level() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    observed: dict[str, object] = {}
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+
+    def run_generation_with_adaptive_retry(**kwargs):
+        observed.update(kwargs)
+        return GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        )
+
+    deps["run_generation_with_adaptive_retry"] = run_generation_with_adaptive_retry
+
+    result = service.execute_turn(_make_request(deps, mgr, log_level="debug"))
+
+    assert result.generation_succeeded is True
+    assert callable(observed["heartbeat_logger"])
 
 
 def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:

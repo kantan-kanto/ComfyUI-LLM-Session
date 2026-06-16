@@ -7,6 +7,11 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
+try:
+    from ..core.logging_utils import get_module_logger, LOG_LEVEL_DEBUG
+except Exception:
+    from core.logging_utils import get_module_logger, LOG_LEVEL_DEBUG
+
 
 @dataclass(frozen=True)
 class GenerationExecutionOutcome:
@@ -81,6 +86,20 @@ class GenerationExecutionService:
 
         return _retry_error_logger
 
+    def _build_heartbeat_logger(self, request: Any) -> Optional[Callable[[float, int], None]]:
+        if request.log_level != "debug":
+            return None
+        module_logger = get_module_logger("TurnExecutionService")
+
+        def _heartbeat_logger(elapsed: float, attempt_no: int) -> None:
+            module_logger(
+                f"{request.log_prefix} Generation still running... "
+                f"elapsed={elapsed:.1f}s (attempt={int(attempt_no)})",
+                LOG_LEVEL_DEBUG,
+            )
+
+        return _heartbeat_logger
+
     def execute(
         self,
         *,
@@ -97,6 +116,16 @@ class GenerationExecutionService:
         run_generation_with_adaptive_retry = self._dep(deps, "run_generation_with_adaptive_retry")
         make_suppress_backend_logs = self._dep(deps, "make_suppress_backend_logs")
         attempt_logger = self._build_attempt_logger(request)
+        heartbeat_logger = self._build_heartbeat_logger(request)
+        if request.log_level == "debug":
+            module_logger = get_module_logger("TurnExecutionService")
+            module_logger(
+                f"{request.log_prefix} Generation started: "
+                f"stream_to_console={bool(request.stream_to_console)}, "
+                f"max_tokens={int(request.max_tokens)}, "
+                f"turns_limit={(int(request.max_turns) if request.max_turns is not None else None)}",
+                LOG_LEVEL_DEBUG,
+            )
 
         generation_result = run_generation_with_adaptive_retry(
             llm=llm,
@@ -132,6 +161,8 @@ class GenerationExecutionService:
             processing_interrupted=deps.get("processing_interrupted", lambda: False),
             throw_if_processing_interrupted=deps.get("throw_if_processing_interrupted", lambda: None),
             is_interrupt_error=deps.get("is_interrupt_error", lambda _err: False),
+            heartbeat_logger=heartbeat_logger,
+            heartbeat_interval=30.0,
         )
 
         assistant_text = generation_result.assistant_text
