@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.turn_types import GenerationRunResult
+from services.generation_execution_service import GenerationExecutionService
 from services.turn_execution_service import (
     SessionChatNodeExecutionDependencies,
     SessionChatNodeExecutionRequest,
@@ -31,6 +32,11 @@ class DummyManager:
 
     def invalidate_cache(self, *_args, **_kwargs):
         return None
+
+
+class DummyLogRequest:
+    enable_attempt_logging = True
+    log_prefix = "[Test]"
 
 
 def _base_deps(history_ref, *, run_generation_result: GenerationRunResult):
@@ -218,6 +224,31 @@ def test_execute_turn_disables_heartbeat_for_debug_stream_to_console() -> None:
 
     assert result.generation_succeeded is True
     assert observed["heartbeat_logger"] is None
+
+
+def test_attempt_logger_reports_token_limit_and_exact_completion_tokens(capsys) -> None:
+    logger = GenerationExecutionService()._build_attempt_logger(DummyLogRequest())
+    assert logger is not None
+
+    logger(True, 1, 2.0, 64, 12, None, 10, False)
+
+    out = capsys.readouterr().out
+    assert "max_tokens=" not in out
+    assert "token_limit=64" in out
+    assert "completion_tokens=10" in out
+    assert "tokens_per_second=5.00" in out
+    assert "turns_limit=12" in out
+
+
+def test_attempt_logger_reports_estimated_completion_tokens(capsys) -> None:
+    logger = GenerationExecutionService()._build_attempt_logger(DummyLogRequest())
+    assert logger is not None
+
+    logger(True, 1, 4.0, 64, 12, None, 10, True)
+
+    out = capsys.readouterr().out
+    assert "completion_tokens_est=10" in out
+    assert "tokens_per_second_est=2.50" in out
 
 
 def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:

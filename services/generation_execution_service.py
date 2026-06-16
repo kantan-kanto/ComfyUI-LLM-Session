@@ -42,23 +42,50 @@ class GenerationExecutionService:
         if not request.enable_attempt_logging:
             return None
 
+        def _attempt_details(
+            *,
+            token_limit: int,
+            turns: Optional[int],
+            elapsed: float,
+            completion_tokens: Optional[int] = None,
+            completion_tokens_estimated: bool = False,
+        ) -> str:
+            parts = [f"token_limit={int(token_limit)}"]
+            if completion_tokens is not None:
+                token_label = "completion_tokens_est" if completion_tokens_estimated else "completion_tokens"
+                tps_label = "tokens_per_second_est" if completion_tokens_estimated else "tokens_per_second"
+                parts.append(f"{token_label}={int(completion_tokens)}")
+                if elapsed > 0:
+                    parts.append(f"{tps_label}={float(completion_tokens) / float(elapsed):.2f}")
+            parts.append(f"turns_limit={turns}")
+            return ", ".join(parts)
+
         def _attempt_logger(
             ok: bool,
             attempt_no: int,
             elapsed: float,
-            gen_tok: int,
+            token_limit: int,
             turns: Optional[int],
             err: Optional[Exception],
+            completion_tokens: Optional[int] = None,
+            completion_tokens_estimated: bool = False,
         ) -> None:
+            details = _attempt_details(
+                token_limit=int(token_limit),
+                turns=turns,
+                elapsed=float(elapsed),
+                completion_tokens=completion_tokens,
+                completion_tokens_estimated=completion_tokens_estimated,
+            )
             if ok:
                 print(
                     f"{request.log_prefix} Generation attempt {attempt_no} succeeded in {elapsed:.2f} seconds "
-                    f"(max_tokens={int(gen_tok)}, turns_limit={turns})"
+                    f"({details})"
                 )
                 return
             print(
                 f"{request.log_prefix} Generation attempt {attempt_no} failed in {elapsed:.2f} seconds "
-                f"(max_tokens={int(gen_tok)}, turns_limit={turns}): {err}"
+                f"({details}): {err}"
             )
 
         return _attempt_logger

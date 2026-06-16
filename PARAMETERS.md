@@ -216,6 +216,12 @@ Controls verbosity of internal logs.
 for troubleshooting, including per-turn phase timings, generation start
 settings, and heartbeat messages while long generation calls are still running.
 
+Generation attempt logs report `token_limit`, which is the maximum number of
+new tokens allowed for that attempt. When available, they also report
+`completion_tokens` and `tokens_per_second`. If the backend does not return an
+exact token count, the node may report estimated values as
+`completion_tokens_est` and `tokens_per_second_est`.
+
 ---
 
 ### suppress_backend_logs

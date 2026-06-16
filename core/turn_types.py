@@ -20,3 +20,5 @@ class GenerationRunResult:
     last_err: Optional[Exception]
     succeeded: bool
     non_ctx_error: bool = False
+    completion_tokens: Optional[int] = None
+    completion_tokens_estimated: bool = False
