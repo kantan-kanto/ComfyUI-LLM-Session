@@ -147,6 +147,43 @@ def test_dialogue_cycle_model_manager_reuse_in_runtime_container(monkeypatch):
     assert set(container.dialogue_model_managers.keys()) == {"A", "B"}
 
 
+def test_chat_one_turn_forwards_dialogue_log_prefix_override(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+    captured: dict[str, object] = {}
+
+    class DummyManager:
+        pass
+
+    def _execute_dialogue_cycle_turn(**kwargs):
+        captured.update(kwargs)
+        return module.TurnExecutionResult(
+            assistant_text="ok",
+            generation_succeeded=True,
+        )
+
+    monkeypatch.setattr(module, "_require_llama_cpp_available", lambda: None)
+    monkeypatch.setattr(module, "_get_or_create_model_manager", lambda _manager=None: DummyManager())
+    monkeypatch.setattr(module, "_execute_dialogue_cycle_turn", _execute_dialogue_cycle_turn)
+
+    result = module._chat_one_turn(
+        user_text="hello",
+        session_id="sid_A",
+        model="model.gguf",
+        mmproj="(Auto detect)",
+        system_prompt="sys",
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        n_gpu_layers=0,
+        tensor_split=None,
+        n_ctx=1024,
+        log_prefix_override="[LLM Dialogue Cycle A/1]",
+    )
+
+    assert result == "ok"
+    assert captured["log_prefix_override"] == "[LLM Dialogue Cycle A/1]"
+
+
 def test_unload_node_unloads_dialogue_cycle_managers(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 
