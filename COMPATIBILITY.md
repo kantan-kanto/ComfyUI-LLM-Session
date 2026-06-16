@@ -98,6 +98,12 @@ For newer Vision model families, please follow the build and installation inform
 
 `0.3.33+` (JamePeng fork) works for `Qwen3.5` Vision in my environment. Earlier `0.3.30+` builds added support for `Qwen3.5`, but Vision mode was not yet working reliably for me at that stage.
 
+Recent JamePeng MTMD chat handlers use `mmproj_path` as the projector argument.
+Older handlers used `clip_model_path`. The node runtime prefers `mmproj_path`
+and falls back to `clip_model_path` only when the installed handler rejects the
+new keyword, so Vision handler loading remains compatible across these backend
+API stages.
+
 **Source:** https://github.com/JamePeng/llama-cpp-python
 
 ## Disclaimer

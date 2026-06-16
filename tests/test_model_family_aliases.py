@@ -100,6 +100,61 @@ def test_detect_model_family_minicpm_v46_aliases(monkeypatch):
     assert module.CHAT_HANDLER_KWARGS_MAP["minicpm-v-4.6"]["enable_thinking"] is False
 
 
+def test_chat_handler_instantiation_prefers_mmproj_path(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class NewHandler:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    handler = module._instantiate_chat_handler(
+        NewHandler,
+        "C:/models/mmproj-gemma4.gguf",
+        {"enable_thinking": False},
+    )
+
+    assert handler.kwargs == {
+        "mmproj_path": "C:/models/mmproj-gemma4.gguf",
+        "enable_thinking": False,
+    }
+
+
+def test_chat_handler_instantiation_falls_back_to_clip_model_path(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class OldHandler:
+        def __init__(self, **kwargs):
+            if "mmproj_path" in kwargs:
+                raise TypeError("got an unexpected keyword argument 'mmproj_path'")
+            self.kwargs = kwargs
+
+    handler = module._instantiate_chat_handler(
+        OldHandler,
+        "C:/models/mmproj-gemma4.gguf",
+        {"enable_thinking": False},
+    )
+
+    assert handler.kwargs == {
+        "clip_model_path": "C:/models/mmproj-gemma4.gguf",
+        "enable_thinking": False,
+    }
+
+
+def test_chat_handler_instantiation_preserves_unrelated_type_errors(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class BadKwargHandler:
+        def __init__(self, **_kwargs):
+            raise TypeError("got an unexpected keyword argument 'bad_kwarg'")
+
+    with pytest.raises(TypeError, match="bad_kwarg"):
+        module._instantiate_chat_handler(
+            BadKwargHandler,
+            "C:/models/mmproj-gemma4.gguf",
+            {"bad_kwarg": True},
+        )
+
+
 def _prepare_vision_manager_test(module, monkeypatch, handler_cls):
     class DummyLlama:
         calls = []
@@ -113,6 +168,33 @@ def _prepare_vision_manager_test(module, monkeypatch, handler_cls):
     monkeypatch.setattr(module, "chat_handler_map", {"gemma4": "Gemma4ChatHandler"})
     monkeypatch.setattr(module, "chat_handler_class_registry", {"Gemma4ChatHandler": handler_cls})
     return DummyLlama
+
+
+def test_model_manager_uses_mmproj_path_for_new_chat_handlers(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class NewHandler:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.calls.append(kwargs)
+
+    dummy_llama = _prepare_vision_manager_test(module, monkeypatch, NewHandler)
+    manager = module.GGUFModelManager()
+
+    manager.load_model(
+        model_path="C:/models/Gemma-4-test.gguf",
+        mmproj_path="C:/models/mmproj-gemma4.gguf",
+        n_ctx=1024,
+        n_gpu_layers=0,
+        vision_required=True,
+    )
+
+    assert NewHandler.calls
+    assert NewHandler.calls[0]["mmproj_path"].replace("\\", "/") == "C:/models/mmproj-gemma4.gguf"
+    assert "clip_model_path" not in NewHandler.calls[0]
+    assert dummy_llama.calls
+    assert "chat_handler" in dummy_llama.calls[0]
 
 
 def test_model_manager_keeps_text_fallback_when_vision_is_not_required(monkeypatch):

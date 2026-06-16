@@ -76,14 +76,20 @@ Flow:
    `CHAT_HANDLER_KWARGS_MAP[model_family]`.
 5. If `chat_handler_overrides` contains the same model family, those values are
    merged on top.
-6. The selected chat handler is instantiated with:
+6. The selected chat handler is instantiated through the compatibility helper:
 
 ```python
-handler_cls(
-    clip_model_path=mmproj_path,
-    **active_chat_handler_kwargs,
+_instantiate_chat_handler(
+    handler_cls,
+    mmproj_path,
+    active_chat_handler_kwargs,
 )
 ```
+
+The helper prefers `mmproj_path`, which is the current MTMD argument name in
+recent JamePeng `llama-cpp-python` builds. If the installed handler stack rejects
+that keyword with an mmproj-specific unexpected-keyword `TypeError`, the helper
+falls back to the older `clip_model_path` keyword.
 
 For Qwen3.5 vision/chat-handler mode, this is where `enable_thinking` and
 `image_min_tokens` are consumed.

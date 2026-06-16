@@ -16,6 +16,10 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Added a frontend workflow migration that maps legacy `image` inputs and links to `media` when old workflows are loaded.
   - Kept a backend compatibility shim so legacy `image` kwargs are treated as `media` if they still reach execution.
 
+- Backend compatibility
+  - Prefer `mmproj_path` when initializing multimodal chat handlers and fall back to the older `clip_model_path` keyword only when the installed handler rejects the new name.
+  - Documented the JamePeng `llama-cpp-python` MTMD projector keyword compatibility path.
+  
 ---
 
 ## [1.2.3] - 2026-06-12

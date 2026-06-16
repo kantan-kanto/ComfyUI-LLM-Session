@@ -682,9 +682,33 @@ def _group_formats_by_handler(handler_map: dict[str, str]) -> dict[str, list[str
 
 def _make_chat_handler_factory(handler_cls: type, extra_kwargs: dict[str, Any]) -> Callable[[str], Any]:
     def factory(mmproj_path: str) -> Any:
-        return handler_cls(clip_model_path=mmproj_path, **extra_kwargs)
+        return _instantiate_chat_handler(handler_cls, mmproj_path, extra_kwargs)
 
     return factory
+
+
+def _is_mmproj_keyword_type_error(error: TypeError) -> bool:
+    message = str(error).lower()
+    if "mmproj_path" not in message:
+        return False
+    return (
+        "unexpected keyword" in message
+        or "unexpected keyword argument" in message
+        or "unexpected keyword argument(s)" in message
+    )
+
+
+def _instantiate_chat_handler(
+    handler_cls: type,
+    mmproj_path: str,
+    extra_kwargs: dict[str, Any],
+) -> Any:
+    try:
+        return handler_cls(mmproj_path=mmproj_path, **extra_kwargs)
+    except TypeError as e:
+        if not _is_mmproj_keyword_type_error(e):
+            raise
+        return handler_cls(clip_model_path=mmproj_path, **extra_kwargs)
 
 
 def _get_chat_handler_kwargs(
@@ -2285,9 +2309,10 @@ class GGUFModelManager:
                             model_family,
                             active_chat_handler_kwargs,
                         )
-                        chat_handler = handler_cls(
-                            clip_model_path=mmproj_path,
-                            **active_chat_handler_kwargs,
+                        chat_handler = _instantiate_chat_handler(
+                            handler_cls,
+                            mmproj_path,
+                            active_chat_handler_kwargs,
                         )
                         chat_format = model_family
                         use_vision = True
