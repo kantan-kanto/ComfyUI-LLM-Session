@@ -675,8 +675,28 @@ def test_execute_dialogue_cycle_turn_sets_profile_flags() -> None:
     assert captured["kv_log_saved_when_not_minimal"] is True
     assert captured["kv_log_unsupported_when_not_minimal"] is True
     assert captured["include_error_in_invalidate_message"] is True
-    assert captured["enable_attempt_logging"] is False
+    assert captured["enable_attempt_logging"] is True
     assert captured["log_prefix"] == "[LLM Dialogue Cycle]"
+
+
+def test_execute_dialogue_cycle_turn_accepts_log_prefix_override() -> None:
+    service = TurnExecutionService()
+    captured: dict[str, object] = {}
+
+    def _spy_execute_from_node_inputs(**kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    service.execute_from_node_inputs = _spy_execute_from_node_inputs  # type: ignore[method-assign]
+    result = service.execute_dialogue_cycle_turn(
+        user_text="hello",
+        log_prefix_override="[LLM Dialogue Cycle A/1]",
+    )
+
+    assert result == "ok"
+    assert captured["enable_attempt_logging"] is True
+    assert captured["log_prefix"] == "[LLM Dialogue Cycle A/1]"
+    assert "log_prefix_override" not in captured
 
 
 

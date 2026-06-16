@@ -321,14 +321,15 @@ class TurnExecutionService:
         )
 
     def execute_dialogue_cycle_turn(self, **kwargs: Any) -> TurnExecutionResult:
+        log_prefix = str(kwargs.pop("log_prefix_override", "[LLM Dialogue Cycle]") or "[LLM Dialogue Cycle]")
         return self.execute_from_node_inputs(
             strip_assistant_before_reasoning_filter=True,
             include_image_and_stream_in_turn_params=False,
             kv_log_saved_when_not_minimal=True,
             kv_log_unsupported_when_not_minimal=True,
             include_error_in_invalidate_message=True,
-            enable_attempt_logging=False,
-            log_prefix="[LLM Dialogue Cycle]",
+            enable_attempt_logging=True,
+            log_prefix=log_prefix,
             **kwargs,
         )
 

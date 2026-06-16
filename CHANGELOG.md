@@ -9,6 +9,7 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 - Runtime diagnostics
   - Added `log_level: debug` phase timing diagnostics and long-generation heartbeat logs without changing the default `timing` log output.
   - Changed generation attempt logs to report `token_limit` instead of `max_tokens`, and added completion token / tokens-per-second diagnostics when available.
+  - Labeled `LLM Dialogue Cycle` turn logs by role and cycle number, and enabled generation attempt diagnostics for Dialogue Cycle turns.
 
 - Backend compatibility
   - Prefer `mmproj_path` when initializing multimodal chat handlers and fall back to the older `clip_model_path` keyword only when the installed handler rejects the new name.

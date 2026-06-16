@@ -222,6 +222,9 @@ new tokens allowed for that attempt. When available, they also report
 exact token count, the node may report estimated values as
 `completion_tokens_est` and `tokens_per_second_est`.
 
+For `LLM Dialogue Cycle`, per-turn logs are labeled by role and cycle number,
+for example `[LLM Dialogue Cycle A/1]` and `[LLM Dialogue Cycle B/1]`.
+
 ---
 
 ### suppress_backend_logs
