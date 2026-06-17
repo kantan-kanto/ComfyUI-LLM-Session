@@ -3759,6 +3759,7 @@ def _execute_dialogue_cycle_turn(
     stream_to_console: bool,
     model_manager: Optional[Any],
     runtime_container: Optional[RuntimeContainer] = None,
+    log_prefix_override: Optional[str] = None,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
@@ -3801,6 +3802,7 @@ def _execute_dialogue_cycle_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        log_prefix_override=log_prefix_override,
         dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
     )
 
@@ -4028,6 +4030,7 @@ def _chat_one_turn(
     reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
     stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
     model_manager: Optional[GGUFModelManager] = None,
+    log_prefix_override: Optional[str] = None,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
@@ -4075,6 +4078,7 @@ def _chat_one_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        log_prefix_override=log_prefix_override,
     )
     if not result.generation_succeeded:
         if log_level == "debug" and result.error is not None:

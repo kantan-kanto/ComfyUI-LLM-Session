@@ -212,7 +212,7 @@ class ChatTurnService:
             transcript_lines.append(line0)
 
             msg = first
-            for _ in range(int(max(1, cycles))):
+            for cycle_index in range(1, int(max(1, cycles)) + 1):
                 sysA = (system_prompt_A or "").strip() or (system_prompt or "")
                 lastA = chat_one_turn(
                     user_text=msg,
@@ -222,6 +222,7 @@ class ChatTurnService:
                     reset_session=reset,
                     stream_to_console=bool(stream_to_console),
                     model_manager=managerA,
+                    log_prefix_override=f"[LLM Dialogue Cycle A/{cycle_index}]",
                     **turn_kwargs_A,
                 )
                 lineA = f"[{now_iso()}] A: {lastA}"
@@ -245,6 +246,7 @@ class ChatTurnService:
                     reset_session=reset_for_b,
                     stream_to_console=bool(stream_to_console),
                     model_manager=managerB,
+                    log_prefix_override=f"[LLM Dialogue Cycle B/{cycle_index}]",
                     **turn_kwargs_B,
                 )
                 lineB = f"[{now_iso()}] B: {lastB}"
@@ -268,7 +270,6 @@ class ChatTurnService:
                     pass
 
         return "\n".join(transcript_lines)
-
 
 
 

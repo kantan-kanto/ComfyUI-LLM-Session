@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 try:
@@ -13,6 +14,13 @@ except Exception:
 
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class _GenerationOnceResult:
+    assistant_text: str
+    completion_tokens: Optional[int] = None
+    completion_tokens_estimated: bool = False
 
 
 class _AbortWatch:
@@ -69,6 +77,42 @@ def _false_interrupt_error(_err: Exception) -> bool:
     return False
 
 
+class _HeartbeatWatch:
+    def __init__(
+        self,
+        *,
+        heartbeat_logger: Optional[Callable[[float, int], None]],
+        attempt_no: int,
+        interval: float,
+    ) -> None:
+        self._heartbeat_logger = heartbeat_logger
+        self._attempt_no = int(attempt_no)
+        self._interval = max(0.01, float(interval))
+        self._started_at = time.perf_counter()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def __enter__(self) -> "_HeartbeatWatch":
+        if self._heartbeat_logger is None:
+            return self
+        self._thread = threading.Thread(target=self._watch, name="llm-session-heartbeat", daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def _watch(self) -> None:
+        while not self._stop_event.wait(self._interval):
+            try:
+                assert self._heartbeat_logger is not None
+                self._heartbeat_logger(time.perf_counter() - self._started_at, self._attempt_no)
+            except Exception:
+                continue
+
+
 def _finish_reason(resp: Any) -> str:
     if not isinstance(resp, dict):
         return ""
@@ -91,6 +135,44 @@ def _raise_if_abort_detected(
         return
     throw_if_processing_interrupted()
     raise RuntimeError("Generation aborted")
+
+
+def _usage_completion_tokens(resp: Any) -> Optional[int]:
+    if not isinstance(resp, dict):
+        return None
+    usage = resp.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    value = usage.get("completion_tokens")
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0, int(value))
+    except Exception:
+        return None
+
+
+def _estimate_completion_tokens(llm: Any, text: str) -> Optional[int]:
+    if not text:
+        return 0
+    tokenize = getattr(llm, "tokenize", None)
+    if not callable(tokenize):
+        return None
+    data = text.encode("utf-8")
+    try:
+        return len(tokenize(data, add_bos=False))
+    except TypeError:
+        try:
+            return len(tokenize(data))
+        except TypeError:
+            try:
+                return len(tokenize(text))
+            except Exception:
+                return None
+        except Exception:
+            return None
+    except Exception:
+        return None
 
 
 def run_with_typeerror_fallback(
@@ -126,9 +208,12 @@ def _run_generation_once(
     extract_stream_content: Callable[[Any], str],
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
     repeat_last_n: int,
+    attempt_no: int,
+    heartbeat_logger: Optional[Callable[[float, int], None]] = None,
+    heartbeat_interval: float = 30.0,
     processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
     throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
-) -> str:
+) -> _GenerationOnceResult:
     def _stream_execute(active_kwargs: Dict[str, Any]):
         if text_chat_request is not None:
             return llm.create_completion(
@@ -149,51 +234,76 @@ def _run_generation_once(
         return create_chat_completion_robust(llm, messages, **active_kwargs)
 
     with suppress_backend_logs_ctx:
-        if stream_to_console:
-            pieces: List[str] = []
-            out = sys.__stdout__
+        with _HeartbeatWatch(
+            heartbeat_logger=heartbeat_logger,
+            attempt_no=int(attempt_no),
+            interval=float(heartbeat_interval),
+        ):
+            if stream_to_console:
+                pieces: List[str] = []
+                out = sys.__stdout__
+                with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
+                    stream_iter = run_with_typeerror_fallback(
+                        execute_with_kwargs=_stream_execute,
+                        completion_kwargs=completion_kwargs,
+                        retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
+                        repeat_last_n=int(repeat_last_n),
+                    )
+
+                    for chunk in stream_iter:
+                        throw_if_processing_interrupted()
+                        _raise_if_abort_detected(
+                            abort_requested=abort_watch.abort_requested,
+                            resp={"choices": [chunk.get("choices", [{}])[0]]} if isinstance(chunk, dict) else chunk,
+                            throw_if_processing_interrupted=throw_if_processing_interrupted,
+                        )
+                        token = extract_stream_content(chunk)
+                        if not token:
+                            continue
+                        pieces.append(token)
+                        try:
+                            out.write(token)
+                            out.flush()
+                        except Exception:
+                            pass
+                assistant_text = "".join(pieces)
+                completion_tokens = _estimate_completion_tokens(llm, assistant_text)
+                return _GenerationOnceResult(
+                    assistant_text=assistant_text,
+                    completion_tokens=completion_tokens,
+                    completion_tokens_estimated=(completion_tokens is not None),
+                )
+
             with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
-                stream_iter = run_with_typeerror_fallback(
-                    execute_with_kwargs=_stream_execute,
+                resp = run_with_typeerror_fallback(
+                    execute_with_kwargs=_non_stream_execute,
                     completion_kwargs=completion_kwargs,
                     retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
                     repeat_last_n=int(repeat_last_n),
                 )
+                _raise_if_abort_detected(
+                    abort_requested=abort_watch.abort_requested,
+                    resp=resp,
+                    throw_if_processing_interrupted=throw_if_processing_interrupted,
+                )
 
-                for chunk in stream_iter:
-                    throw_if_processing_interrupted()
-                    _raise_if_abort_detected(
-                        abort_requested=abort_watch.abort_requested,
-                        resp={"choices": [chunk.get("choices", [{}])[0]]} if isinstance(chunk, dict) else chunk,
-                        throw_if_processing_interrupted=throw_if_processing_interrupted,
-                    )
-                    token = extract_stream_content(chunk)
-                    if not token:
-                        continue
-                    pieces.append(token)
-                    try:
-                        out.write(token)
-                        out.flush()
-                    except Exception:
-                        pass
-            return "".join(pieces)
-
-        with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
-            resp = run_with_typeerror_fallback(
-                execute_with_kwargs=_non_stream_execute,
-                completion_kwargs=completion_kwargs,
-                retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
-                repeat_last_n=int(repeat_last_n),
+            if text_chat_request is not None:
+                assistant_text = resp["choices"][0]["text"] or ""
+            else:
+                assistant_text = resp["choices"][0]["message"]["content"] or ""
+            completion_tokens = _usage_completion_tokens(resp)
+            if completion_tokens is not None:
+                return _GenerationOnceResult(
+                    assistant_text=assistant_text,
+                    completion_tokens=completion_tokens,
+                    completion_tokens_estimated=False,
+                )
+            completion_tokens = _estimate_completion_tokens(llm, assistant_text)
+            return _GenerationOnceResult(
+                assistant_text=assistant_text,
+                completion_tokens=completion_tokens,
+                completion_tokens_estimated=(completion_tokens is not None),
             )
-            _raise_if_abort_detected(
-                abort_requested=abort_watch.abort_requested,
-                resp=resp,
-                throw_if_processing_interrupted=throw_if_processing_interrupted,
-            )
-
-        if text_chat_request is not None:
-            return resp["choices"][0]["text"] or ""
-        return resp["choices"][0]["message"]["content"] or ""
 
 
 def run_generation_with_adaptive_retry(
@@ -217,7 +327,7 @@ def run_generation_with_adaptive_retry(
     on_state_cache_mismatch: Callable[[Exception], None],
     on_compact_summary: Callable[[], None],
     rebuild_messages_for_turns_limit: Callable[[Optional[int]], Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]],
-    attempt_logger: Optional[Callable[[bool, int, float, int, Optional[int], Optional[Exception]], None]],
+    attempt_logger: Optional[Callable[..., None]],
     debug_traceback: bool,
     traceback_print_exc: Callable[[], None],
     suppress_backend_logs_ctx_factory: Callable[[], Any],
@@ -229,6 +339,8 @@ def run_generation_with_adaptive_retry(
     processing_interrupted: Callable[[], bool] = _noop_processing_interrupted,
     throw_if_processing_interrupted: Callable[[], None] = _noop_throw_if_processing_interrupted,
     is_interrupt_error: Callable[[Exception], bool] = _false_interrupt_error,
+    heartbeat_logger: Optional[Callable[[float, int], None]] = None,
+    heartbeat_interval: float = 30.0,
 ) -> GenerationRunResult:
     assistant_text = ""
     gen_tokens = int(max_tokens)
@@ -256,7 +368,7 @@ def run_generation_with_adaptive_retry(
             if isinstance(advanced_generation_kwargs, dict):
                 completion_kwargs.update(advanced_generation_kwargs)
 
-            assistant_text = _run_generation_once(
+            once_result = _run_generation_once(
                 llm=llm,
                 messages=messages,
                 text_chat_request=text_chat_request,
@@ -268,12 +380,25 @@ def run_generation_with_adaptive_retry(
                 extract_stream_content=extract_stream_content,
                 retry_kwargs_with_repeat_last_n_fallback=retry_kwargs_with_repeat_last_n_fallback,
                 repeat_last_n=int(repeat_last_n),
+                attempt_no=int(attempt_no),
+                heartbeat_logger=heartbeat_logger,
+                heartbeat_interval=float(heartbeat_interval),
                 processing_interrupted=processing_interrupted,
                 throw_if_processing_interrupted=throw_if_processing_interrupted,
             )
+            assistant_text = once_result.assistant_text
 
             if attempt_logger is not None:
-                attempt_logger(True, attempt_no, time.perf_counter() - t_start, int(gen_tokens), turns_limit, None)
+                attempt_logger(
+                    True,
+                    attempt_no,
+                    time.perf_counter() - t_start,
+                    int(gen_tokens),
+                    turns_limit,
+                    None,
+                    once_result.completion_tokens,
+                    once_result.completion_tokens_estimated,
+                )
 
             return GenerationRunResult(
                 assistant_text=assistant_text,
@@ -282,13 +407,24 @@ def run_generation_with_adaptive_retry(
                 last_err=last_err,
                 succeeded=True,
                 non_ctx_error=False,
+                completion_tokens=once_result.completion_tokens,
+                completion_tokens_estimated=once_result.completion_tokens_estimated,
             )
         except Exception as err:
             if is_interrupt_error(err):
                 raise
             last_err = err
             if attempt_logger is not None:
-                attempt_logger(False, attempt_no, time.perf_counter() - t_start, int(gen_tokens), turns_limit, err)
+                attempt_logger(
+                    False,
+                    attempt_no,
+                    time.perf_counter() - t_start,
+                    int(gen_tokens),
+                    turns_limit,
+                    err,
+                    None,
+                    False,
+                )
             if debug_traceback:
                 traceback_print_exc()
 
@@ -318,6 +454,8 @@ def run_generation_with_adaptive_retry(
                 last_err=last_err,
                 succeeded=False,
                 non_ctx_error=True,
+                completion_tokens=None,
+                completion_tokens_estimated=False,
             )
 
     return GenerationRunResult(
@@ -327,4 +465,6 @@ def run_generation_with_adaptive_retry(
         last_err=last_err,
         succeeded=bool(assistant_text),
         non_ctx_error=False,
+        completion_tokens=None,
+        completion_tokens_estimated=False,
     )

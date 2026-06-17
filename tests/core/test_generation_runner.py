@@ -35,7 +35,10 @@ def test_generation_success_first_attempt() -> None:
 
     def create_chat_completion_robust(_llm, _messages, **_kwargs):
         observed_kwargs.update(_kwargs)
-        return {"choices": [{"message": {"content": "ok"}}]}
+        return {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"completion_tokens": 7},
+        }
 
     result = run_generation_with_adaptive_retry(
         llm=object(),
@@ -71,7 +74,93 @@ def test_generation_success_first_attempt() -> None:
     assert result.succeeded is True
     assert result.assistant_text == "ok"
     assert result.non_ctx_error is False
+    assert result.completion_tokens == 7
+    assert result.completion_tokens_estimated is False
     assert observed_kwargs["seed"] == 123
+
+
+def test_generation_estimates_completion_tokens_when_usage_is_missing() -> None:
+    class FakeLlama:
+        def tokenize(self, data, add_bos=False):
+            assert add_bos is False
+            assert data == b"ok"
+            return [1, 2]
+
+    def create_chat_completion_robust(_llm, _messages, **_kwargs):
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    result = run_generation_with_adaptive_retry(
+        llm=FakeLlama(),
+        messages=[{"role": "user", "content": "hello"}],
+        text_chat_request=None,
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        repeat_last_n=64,
+        dynamic_max_tokens=False,
+        min_generation_tokens=32,
+        safety_margin_tokens=8,
+        initial_turns_limit=5,
+        stream_to_console=False,
+        max_attempts=3,
+        is_ctx_error=lambda _e: False,
+        is_state_data_mismatch_error=lambda _e: False,
+        on_state_cache_mismatch=lambda _e: None,
+        on_compact_summary=lambda: None,
+        rebuild_messages_for_turns_limit=lambda _t: ([{"role": "user", "content": "hello"}], None),
+        attempt_logger=None,
+        debug_traceback=False,
+        traceback_print_exc=lambda: None,
+        suppress_backend_logs_ctx_factory=contextlib.nullcontext,
+        iter_chat_completion_robust=lambda *_a, **_k: iter(()),
+        create_chat_completion_robust=create_chat_completion_robust,
+        extract_stream_content=lambda _chunk: "",
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+    )
+
+    assert result.succeeded is True
+    assert result.completion_tokens == 2
+    assert result.completion_tokens_estimated is True
+
+
+def test_generation_succeeds_without_completion_tokens_when_tokenize_is_missing() -> None:
+    def create_chat_completion_robust(_llm, _messages, **_kwargs):
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    result = run_generation_with_adaptive_retry(
+        llm=object(),
+        messages=[{"role": "user", "content": "hello"}],
+        text_chat_request=None,
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        repeat_last_n=64,
+        dynamic_max_tokens=False,
+        min_generation_tokens=32,
+        safety_margin_tokens=8,
+        initial_turns_limit=5,
+        stream_to_console=False,
+        max_attempts=3,
+        is_ctx_error=lambda _e: False,
+        is_state_data_mismatch_error=lambda _e: False,
+        on_state_cache_mismatch=lambda _e: None,
+        on_compact_summary=lambda: None,
+        rebuild_messages_for_turns_limit=lambda _t: ([{"role": "user", "content": "hello"}], None),
+        attempt_logger=None,
+        debug_traceback=False,
+        traceback_print_exc=lambda: None,
+        suppress_backend_logs_ctx_factory=contextlib.nullcontext,
+        iter_chat_completion_robust=lambda *_a, **_k: iter(()),
+        create_chat_completion_robust=create_chat_completion_robust,
+        extract_stream_content=lambda _chunk: "",
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+    )
+
+    assert result.succeeded is True
+    assert result.completion_tokens is None
+    assert result.completion_tokens_estimated is False
 
 
 def test_generation_retries_on_ctx_error_with_reduced_tokens() -> None:
@@ -271,3 +360,98 @@ def test_generation_abort_watcher_calls_llm_abort_and_reraises_interrupt() -> No
         assert llm.abort_called is True
     else:
         raise AssertionError("Interrupt error should be re-raised")
+
+
+def test_generation_heartbeat_runs_while_non_stream_generation_is_blocked() -> None:
+    heartbeat_seen = threading.Event()
+
+    def heartbeat_logger(_elapsed: float, attempt_no: int) -> None:
+        assert attempt_no == 1
+        heartbeat_seen.set()
+
+    def create_chat_completion_robust(_llm, _messages, **_kwargs):
+        assert heartbeat_seen.wait(timeout=2.0)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    result = run_generation_with_adaptive_retry(
+        llm=object(),
+        messages=[{"role": "user", "content": "hello"}],
+        text_chat_request=None,
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        repeat_last_n=64,
+        dynamic_max_tokens=True,
+        min_generation_tokens=32,
+        safety_margin_tokens=8,
+        initial_turns_limit=6,
+        stream_to_console=False,
+        max_attempts=4,
+        is_ctx_error=lambda _e: False,
+        is_state_data_mismatch_error=lambda _e: False,
+        on_state_cache_mismatch=lambda _e: None,
+        on_compact_summary=lambda: None,
+        rebuild_messages_for_turns_limit=lambda _turns: ([{"role": "user", "content": "hello"}], None),
+        attempt_logger=None,
+        debug_traceback=False,
+        traceback_print_exc=lambda: None,
+        suppress_backend_logs_ctx_factory=contextlib.nullcontext,
+        iter_chat_completion_robust=lambda *_a, **_k: iter(()),
+        create_chat_completion_robust=create_chat_completion_robust,
+        extract_stream_content=lambda _chunk: "",
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+        heartbeat_logger=heartbeat_logger,
+        heartbeat_interval=0.01,
+    )
+
+    assert result.succeeded is True
+    assert result.assistant_text == "ok"
+    assert heartbeat_seen.is_set()
+
+
+def test_generation_heartbeat_logger_errors_do_not_fail_generation() -> None:
+    heartbeat_seen = threading.Event()
+
+    def heartbeat_logger(_elapsed: float, _attempt_no: int) -> None:
+        heartbeat_seen.set()
+        raise RuntimeError("heartbeat failed")
+
+    def create_chat_completion_robust(_llm, _messages, **_kwargs):
+        assert heartbeat_seen.wait(timeout=2.0)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    result = run_generation_with_adaptive_retry(
+        llm=object(),
+        messages=[{"role": "user", "content": "hello"}],
+        text_chat_request=None,
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        repeat_last_n=64,
+        dynamic_max_tokens=True,
+        min_generation_tokens=32,
+        safety_margin_tokens=8,
+        initial_turns_limit=6,
+        stream_to_console=False,
+        max_attempts=4,
+        is_ctx_error=lambda _e: False,
+        is_state_data_mismatch_error=lambda _e: False,
+        on_state_cache_mismatch=lambda _e: None,
+        on_compact_summary=lambda: None,
+        rebuild_messages_for_turns_limit=lambda _turns: ([{"role": "user", "content": "hello"}], None),
+        attempt_logger=None,
+        debug_traceback=False,
+        traceback_print_exc=lambda: None,
+        suppress_backend_logs_ctx_factory=contextlib.nullcontext,
+        iter_chat_completion_robust=lambda *_a, **_k: iter(()),
+        create_chat_completion_robust=create_chat_completion_robust,
+        extract_stream_content=lambda _chunk: "",
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+        heartbeat_logger=heartbeat_logger,
+        heartbeat_interval=0.01,
+    )
+
+    assert result.succeeded is True
+    assert result.assistant_text == "ok"

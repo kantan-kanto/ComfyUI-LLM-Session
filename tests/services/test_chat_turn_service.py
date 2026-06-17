@@ -69,6 +69,7 @@ def test_run_dialogue_cycle_writes_transcript_and_unloads_non_kv_cache() -> None
 def test_run_dialogue_cycle_reset_session_applies_only_first_round() -> None:
     service = ChatTurnService()
     reset_flags: list[bool] = []
+    log_prefixes: list[str] = []
 
     managers = [DummyManager("A"), DummyManager("B")]
 
@@ -77,6 +78,7 @@ def test_run_dialogue_cycle_reset_session_applies_only_first_round() -> None:
 
     def _chat_one_turn(**kwargs):
         reset_flags.append(bool(kwargs["reset_session"]))
+        log_prefixes.append(str(kwargs["log_prefix_override"]))
         return "ok"
 
     service.run_dialogue_cycle(
@@ -102,6 +104,12 @@ def test_run_dialogue_cycle_reset_session_applies_only_first_round() -> None:
     )
 
     assert reset_flags == [True, True, False, False]
+    assert log_prefixes == [
+        "[LLM Dialogue Cycle A/1]",
+        "[LLM Dialogue Cycle B/1]",
+        "[LLM Dialogue Cycle A/2]",
+        "[LLM Dialogue Cycle B/2]",
+    ]
 
 
 def test_run_dialogue_cycle_kv_cache_skips_in_loop_unload() -> None:

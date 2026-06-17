@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.turn_types import GenerationRunResult
+from services.generation_execution_service import GenerationExecutionService
 from services.turn_execution_service import (
     SessionChatNodeExecutionDependencies,
     SessionChatNodeExecutionRequest,
@@ -31,6 +32,11 @@ class DummyManager:
 
     def invalidate_cache(self, *_args, **_kwargs):
         return None
+
+
+class DummyLogRequest:
+    enable_attempt_logging = True
+    log_prefix = "[Test]"
 
 
 def _base_deps(history_ref, *, run_generation_result: GenerationRunResult):
@@ -85,7 +91,7 @@ def _base_deps(history_ref, *, run_generation_result: GenerationRunResult):
     return deps, writes
 
 
-def _make_request(deps, mgr: DummyManager) -> TurnExecutionRequest:
+def _make_request(deps, mgr: DummyManager, *, log_level: str = "timing") -> TurnExecutionRequest:
     return TurnExecutionRequest(
         user_text="hello",
         session_id="sid",
@@ -98,9 +104,28 @@ def _make_request(deps, mgr: DummyManager) -> TurnExecutionRequest:
         n_gpu_layers=0,
         n_ctx=1024,
         runtime_cache="off",
+        log_level=log_level,
         model_manager=mgr,
         dependencies=deps,
     )
+
+
+def _capture_generation_kwargs(deps):
+    observed: dict[str, object] = {}
+
+    def run_generation_with_adaptive_retry(**kwargs):
+        observed.update(kwargs)
+        return GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        )
+
+    deps["run_generation_with_adaptive_retry"] = run_generation_with_adaptive_retry
+    return observed
 
 
 def test_execute_turn_success_updates_history_and_writes_file() -> None:
@@ -125,6 +150,106 @@ def test_execute_turn_success_updates_history_and_writes_file() -> None:
     assert result.assistant_text == "assistant reply"
     assert len(history["turns"]) == 1
     assert writes and writes[0][0] == "hist.json"
+
+
+def test_execute_turn_does_not_enable_heartbeat_for_timing_log_level() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    observed = _capture_generation_kwargs(deps)
+
+    result = service.execute_turn(_make_request(deps, mgr, log_level="timing"))
+
+    assert result.generation_succeeded is True
+    assert observed["heartbeat_logger"] is None
+
+
+def test_execute_turn_enables_heartbeat_for_debug_log_level() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    observed = _capture_generation_kwargs(deps)
+
+    result = service.execute_turn(_make_request(deps, mgr, log_level="debug"))
+
+    assert result.generation_succeeded is True
+    assert callable(observed["heartbeat_logger"])
+
+
+def test_execute_turn_disables_heartbeat_for_debug_stream_to_console() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    observed = _capture_generation_kwargs(deps)
+    request = TurnExecutionRequest(
+        **{
+            **_make_request(deps, mgr, log_level="debug").__dict__,
+            "stream_to_console": True,
+        }
+    )
+
+    result = service.execute_turn(request)
+
+    assert result.generation_succeeded is True
+    assert observed["heartbeat_logger"] is None
+
+
+def test_attempt_logger_reports_token_limit_and_exact_completion_tokens(capsys) -> None:
+    logger = GenerationExecutionService()._build_attempt_logger(DummyLogRequest())
+    assert logger is not None
+
+    logger(True, 1, 2.0, 64, 12, None, 10, False)
+
+    out = capsys.readouterr().out
+    assert "max_tokens=" not in out
+    assert "token_limit=64" in out
+    assert "completion_tokens=10" in out
+    assert "tokens_per_second=5.00" in out
+    assert "turns_limit=12" in out
+
+
+def test_attempt_logger_reports_estimated_completion_tokens(capsys) -> None:
+    logger = GenerationExecutionService()._build_attempt_logger(DummyLogRequest())
+    assert logger is not None
+
+    logger(True, 1, 4.0, 64, 12, None, 10, True)
+
+    out = capsys.readouterr().out
+    assert "completion_tokens_est=10" in out
+    assert "tokens_per_second_est=2.50" in out
 
 
 def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:
@@ -671,8 +796,28 @@ def test_execute_dialogue_cycle_turn_sets_profile_flags() -> None:
     assert captured["kv_log_saved_when_not_minimal"] is True
     assert captured["kv_log_unsupported_when_not_minimal"] is True
     assert captured["include_error_in_invalidate_message"] is True
-    assert captured["enable_attempt_logging"] is False
+    assert captured["enable_attempt_logging"] is True
     assert captured["log_prefix"] == "[LLM Dialogue Cycle]"
+
+
+def test_execute_dialogue_cycle_turn_accepts_log_prefix_override() -> None:
+    service = TurnExecutionService()
+    captured: dict[str, object] = {}
+
+    def _spy_execute_from_node_inputs(**kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    service.execute_from_node_inputs = _spy_execute_from_node_inputs  # type: ignore[method-assign]
+    result = service.execute_dialogue_cycle_turn(
+        user_text="hello",
+        log_prefix_override="[LLM Dialogue Cycle A/1]",
+    )
+
+    assert result == "ok"
+    assert captured["enable_attempt_logging"] is True
+    assert captured["log_prefix"] == "[LLM Dialogue Cycle A/1]"
+    assert "log_prefix_override" not in captured
 
 
 
