@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import threading
 
+import core.generation_runner as generation_runner
 from core.generation_runner import run_generation_with_adaptive_retry, run_with_typeerror_fallback
 
 
@@ -161,6 +163,94 @@ def test_generation_succeeds_without_completion_tokens_when_tokenize_is_missing(
     assert result.succeeded is True
     assert result.completion_tokens is None
     assert result.completion_tokens_estimated is False
+
+
+def test_stream_to_console_adds_separator_newline_after_unterminated_output(monkeypatch) -> None:
+    output = io.StringIO()
+    monkeypatch.setattr(generation_runner.sys, "__stdout__", output)
+
+    result = run_generation_with_adaptive_retry(
+        llm=object(),
+        messages=[{"role": "user", "content": "hello"}],
+        text_chat_request=None,
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        repeat_last_n=64,
+        dynamic_max_tokens=False,
+        min_generation_tokens=32,
+        safety_margin_tokens=8,
+        initial_turns_limit=5,
+        stream_to_console=True,
+        max_attempts=3,
+        is_ctx_error=lambda _e: False,
+        is_state_data_mismatch_error=lambda _e: False,
+        on_state_cache_mismatch=lambda _e: None,
+        on_compact_summary=lambda: None,
+        rebuild_messages_for_turns_limit=lambda _t: ([{"role": "user", "content": "hello"}], None),
+        attempt_logger=None,
+        debug_traceback=False,
+        traceback_print_exc=lambda: None,
+        suppress_backend_logs_ctx_factory=contextlib.nullcontext,
+        iter_chat_completion_robust=lambda *_a, **_k: iter(
+            [
+                {"choices": [{"delta": {"content": "hello"}}]},
+                {"choices": [{"delta": {"content": " world"}}]},
+            ]
+        ),
+        create_chat_completion_robust=lambda *_a, **_k: {"choices": [{"message": {"content": "unused"}}]},
+        extract_stream_content=lambda chunk: chunk["choices"][0]["delta"]["content"],
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+    )
+
+    assert result.succeeded is True
+    assert result.assistant_text == "hello world"
+    assert output.getvalue() == "hello world\n"
+
+
+def test_stream_to_console_does_not_add_extra_newline_after_terminated_output(monkeypatch) -> None:
+    output = io.StringIO()
+    monkeypatch.setattr(generation_runner.sys, "__stdout__", output)
+
+    result = run_generation_with_adaptive_retry(
+        llm=object(),
+        messages=[{"role": "user", "content": "hello"}],
+        text_chat_request=None,
+        max_tokens=64,
+        temperature=0.7,
+        top_p=0.9,
+        repeat_penalty=1.1,
+        repeat_last_n=64,
+        dynamic_max_tokens=False,
+        min_generation_tokens=32,
+        safety_margin_tokens=8,
+        initial_turns_limit=5,
+        stream_to_console=True,
+        max_attempts=3,
+        is_ctx_error=lambda _e: False,
+        is_state_data_mismatch_error=lambda _e: False,
+        on_state_cache_mismatch=lambda _e: None,
+        on_compact_summary=lambda: None,
+        rebuild_messages_for_turns_limit=lambda _t: ([{"role": "user", "content": "hello"}], None),
+        attempt_logger=None,
+        debug_traceback=False,
+        traceback_print_exc=lambda: None,
+        suppress_backend_logs_ctx_factory=contextlib.nullcontext,
+        iter_chat_completion_robust=lambda *_a, **_k: iter(
+            [
+                {"choices": [{"delta": {"content": "hello"}}]},
+                {"choices": [{"delta": {"content": "\n"}}]},
+            ]
+        ),
+        create_chat_completion_robust=lambda *_a, **_k: {"choices": [{"message": {"content": "unused"}}]},
+        extract_stream_content=lambda chunk: chunk["choices"][0]["delta"]["content"],
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+    )
+
+    assert result.succeeded is True
+    assert result.assistant_text == "hello\n"
+    assert output.getvalue() == "hello\n"
 
 
 def test_generation_retries_on_ctx_error_with_reduced_tokens() -> None:

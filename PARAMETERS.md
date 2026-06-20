@@ -289,6 +289,11 @@ This clearly signals the start of the assistant response and reduces echo.
 
 Streams the LLM output to the console in real time.
 
+When streamed output does not end with a newline, the runtime adds one before
+printing follow-up status logs so generated text and diagnostics stay on
+separate console lines. This display separator does not change the returned
+assistant text or saved history.
+
 ### Additional Helpful Settings
 
 - temperature = 0.7–0.9

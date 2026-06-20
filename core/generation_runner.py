@@ -242,6 +242,8 @@ def _run_generation_once(
             if stream_to_console:
                 pieces: List[str] = []
                 out = sys.__stdout__
+                last_token = ""
+                wrote_token = False
                 with _AbortWatch(llm=llm, processing_interrupted=processing_interrupted) as abort_watch:
                     stream_iter = run_with_typeerror_fallback(
                         execute_with_kwargs=_stream_execute,
@@ -264,8 +266,16 @@ def _run_generation_once(
                         try:
                             out.write(token)
                             out.flush()
+                            last_token = token
+                            wrote_token = True
                         except Exception:
                             pass
+                if wrote_token and not last_token.endswith(("\n", "\r")):
+                    try:
+                        out.write("\n")
+                        out.flush()
+                    except Exception:
+                        pass
                 assistant_text = "".join(pieces)
                 completion_tokens = _estimate_completion_tokens(llm, assistant_text)
                 return _GenerationOnceResult(
