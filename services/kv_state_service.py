@@ -35,7 +35,7 @@ class KvStateService:
         kv_state_debug_info = self._dep(deps, "kv_state_debug_info")
         get_context_turns = self._dep(deps, "get_context_turns")
 
-        if (request.runtime_cache or "off") == "KV_cache" and request.image is None:
+        if (request.runtime_cache or "off") == "KV_cache" and request.media is None:
             try:
                 kv_sig = build_kv_state_signature(
                     history=history,
@@ -87,7 +87,7 @@ class KvStateService:
         kv_state_debug_info: Any,
         get_context_turns: Any,
     ) -> None:
-        if (request.runtime_cache or "off") != "KV_cache" or request.image is not None:
+        if (request.runtime_cache or "off") != "KV_cache" or request.media is not None:
             return
 
         try:

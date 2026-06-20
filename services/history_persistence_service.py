@@ -23,6 +23,48 @@ class HistoryPersistenceService:
             raise KeyError(f"Missing dependency: {key}")
         return deps[key]
 
+    def _describe_media_inputs(self, media: Any) -> Dict[str, Any]:
+        if media is None:
+            return {
+                "image_used": False,
+                "image_count": 0,
+                "audio_used": False,
+                "audio_format": "",
+            }
+        if isinstance(media, dict) and "waveform" in media and "sample_rate" in media:
+            return {
+                "image_used": False,
+                "image_count": 0,
+                "audio_used": True,
+                "audio_format": "wav",
+            }
+        shape = getattr(media, "shape", None)
+        try:
+            shape_tuple = tuple(int(x) for x in shape) if shape is not None else ()
+        except Exception:
+            shape_tuple = ()
+        if len(shape_tuple) == 4 and shape_tuple[-1] in {1, 3, 4}:
+            image_count = int(shape_tuple[0])
+            return {
+                "image_used": image_count > 0,
+                "image_count": image_count,
+                "audio_used": False,
+                "audio_format": "",
+            }
+        if len(shape_tuple) == 3 and shape_tuple[-1] in {1, 3, 4}:
+            return {
+                "image_used": True,
+                "image_count": 1,
+                "audio_used": False,
+                "audio_format": "",
+            }
+        return {
+            "image_used": False,
+            "image_count": 0,
+            "audio_used": False,
+            "audio_format": "",
+        }
+
     def persist_history_and_summary(
         self,
         *,
@@ -49,8 +91,8 @@ class HistoryPersistenceService:
             "max_tokens_used": int(generation_result.gen_tokens),
             "turns_limit_used": int(generation_result.turns_limit) if generation_result.turns_limit is not None else None,
         }
-        if request.include_image_and_stream_in_turn_params:
-            turn_params["image_used"] = request.image is not None
+        if request.include_media_and_stream_in_turn_params:
+            turn_params.update(self._describe_media_inputs(request.media))
             turn_params["streamed"] = bool(request.stream_to_console)
         if isinstance(request.advanced_generation_kwargs, dict) and request.advanced_generation_kwargs:
             turn_params["advanced_generation_kwargs"] = dict(request.advanced_generation_kwargs)
@@ -64,6 +106,7 @@ class HistoryPersistenceService:
                 "user": {
                     "text": request.user_text or "",
                     "image_note": "",
+                    "audio_note": "",
                 },
                 "assistant": {
                     "text": assistant_text or "",

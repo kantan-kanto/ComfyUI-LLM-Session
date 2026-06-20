@@ -10,6 +10,7 @@ import io
 import sys
 import contextlib
 import base64
+import wave
 import numpy as np
 from PIL import Image
 from typing import Optional, List, Dict, Any
@@ -1126,6 +1127,130 @@ def tensor2pil(image_tensor) -> List[Image.Image]:
     np_image = np.clip(255.0 * image_tensor.cpu().numpy().squeeze(), 0, 255).astype(np.uint8)
     return [Image.fromarray(np_image)]
 
+
+def _shape_tuple(value: Any) -> tuple:
+    shape = getattr(value, "shape", None)
+    if shape is None:
+        return ()
+    try:
+        return tuple(int(x) for x in shape)
+    except Exception:
+        return tuple(shape)
+
+
+def _looks_like_image_tensor(value: Any) -> bool:
+    shape = _shape_tuple(value)
+    return len(shape) in {3, 4} and shape[-1] in {1, 3, 4} and hasattr(value, "cpu")
+
+
+def _looks_like_audio_dict(value: Any) -> bool:
+    return isinstance(value, dict) and "waveform" in value and "sample_rate" in value
+
+
+def _to_numpy_array(value: Any) -> np.ndarray:
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value)
+
+
+def _audio_dict_to_pcm16_and_rate(audio: Dict[str, Any]) -> tuple[np.ndarray, int]:
+    sample_rate = int(audio.get("sample_rate") or 0)
+    if sample_rate <= 0:
+        raise ValueError("AUDIO media must include a positive sample_rate.")
+
+    waveform = _to_numpy_array(audio.get("waveform"))
+    if waveform.size == 0:
+        raise ValueError("AUDIO media waveform is empty.")
+
+    if waveform.ndim == 3:
+        if waveform.shape[0] != 1:
+            raise ValueError("AUDIO media batches are not supported; provide one audio item.")
+        waveform = waveform[0]
+    if waveform.ndim == 1:
+        samples_by_channel = waveform.reshape(-1, 1)
+    elif waveform.ndim == 2:
+        # ComfyUI AUDIO normally uses (channels, samples). Keep a fallback for
+        # already-transposed arrays to make tests and third-party nodes tolerant.
+        if waveform.shape[0] <= 8:
+            samples_by_channel = waveform.T
+        elif waveform.shape[1] <= 8:
+            samples_by_channel = waveform
+        else:
+            raise ValueError("AUDIO media must be mono/stereo or a small channel-count waveform.")
+    else:
+        raise ValueError("AUDIO media waveform must have 1, 2, or 3 dimensions.")
+
+    pcm = np.clip(samples_by_channel.astype(np.float32), -1.0, 1.0)
+    pcm16 = (pcm * 32767.0).astype("<i2", copy=False)
+    channels = int(pcm16.shape[1])
+    if channels <= 0:
+        raise ValueError("AUDIO media must contain at least one channel.")
+    return pcm16, sample_rate
+
+
+def _encode_audio_dict_as_wav_base64(audio: Dict[str, Any]) -> str:
+    pcm16, sample_rate = _audio_dict_to_pcm16_and_rate(audio)
+    channels = int(pcm16.shape[1])
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm16.tobytes())
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[str, Any]]]:
+    if _looks_like_image_tensor(media):
+        pil_list = tensor2pil(media)
+        if not pil_list:
+            raise ValueError("IMAGE media batch is empty.")
+        parts: List[Dict[str, Any]] = []
+        for pil_image in pil_list:
+            img_b64 = encode_image_base64(pil_image)
+            parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+        media_type = "image_batch" if len(parts) > 1 else "image"
+        return media_type, parts
+
+    if _looks_like_audio_dict(media):
+        model_family = _detect_model_family(model_path)
+        if model_family != "gemma4":
+            raise ValueError("AUDIO media is currently supported only for Gemma 4 models.")
+        audio_b64 = _encode_audio_dict_as_wav_base64(media)
+        return "audio", [{"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}]
+
+    raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
+
+
+def validate_chat_media(media: Any = None, model_path: str = "") -> None:
+    if media is None:
+        return
+
+    if _looks_like_image_tensor(media):
+        shape = _shape_tuple(media)
+        if len(shape) == 4 and shape[0] <= 0:
+            raise ValueError("IMAGE media batch is empty.")
+        return
+
+    if _looks_like_audio_dict(media):
+        model_family = _detect_model_family(model_path)
+        if model_family != "gemma4":
+            raise ValueError("AUDIO media is currently supported only for Gemma 4 models.")
+        _audio_dict_to_pcm16_and_rate(media)
+        return
+
+    raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
+
+
+def _resolve_legacy_image_media(media: Any, image: Any) -> Any:
+    return image if media is None and image is not None else media
+
+
 def detect_language(text: str) -> str:
     """
     Detect language from text (simple)
@@ -1270,11 +1395,12 @@ def _coerce_int(v, default: int) -> int:
 
 def build_chat_messages(history: Dict[str, Any],
                         user_text: str,
-                        image_tensor=None,
+                        media=None,
+                        model_path: str = "",
                         max_turns: Optional[int] = None,
                         summarize_old_history: bool = True,
                         system_prompt: str = "") -> List[Dict[str, Any]]:
-    """Build chat-completion messages. Image is included only for this turn."""
+    """Build chat-completion messages. Media is included only for this turn."""
     sys = (system_prompt or "").strip() or (history.get("system_prompt") or "").strip()
     summary = ""
     if summarize_old_history:
@@ -1302,23 +1428,16 @@ def build_chat_messages(history: Dict[str, Any],
             messages.append({"role": "assistant", "content": a})
 
     # Current turn
-    if image_tensor is not None:
-        try:
-            pil_list = tensor2pil(image_tensor)
-            if pil_list:
-                # Use first image in batch for this turn (keeps it simple in phase 1)
-                img_b64 = encode_image_base64(pil_list[0])
-                messages.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
-                        {"type": "text", "text": user_text or ""}
-                    ]
-                })
-                return messages
-        except Exception:
-            # fall through to text-only
-            pass
+    if media is not None:
+        media_type, media_parts = _media_to_chat_parts(media, model_path)
+        text_part = {"type": "text", "text": user_text or ""}
+        content = (
+            [text_part] + media_parts
+            if media_type == "audio"
+            else media_parts + [text_part]
+        )
+        messages.append({"role": "user", "content": content})
+        return messages
 
     messages.append({"role": "user", "content": user_text or ""})
     return messages
@@ -2826,7 +2945,7 @@ def _input_types_session_chat_simple() -> dict:
             "history_dir": ("STRING", {"default": "", "tooltip": "Optional directory for history/caches. Empty uses output/llm_session_sessions/."}),
         },
         "optional": {
-            "image": ("IMAGE", {"tooltip": "Optional image input for this turn only (never saved to history)"}),
+            "media": ("*", {"tooltip": "Optional IMAGE tensor/batch or AUDIO input for this turn only (never saved to history)"}),
             "config_path": ("STRING", {"default": "", "tooltip": "Optional override path to simple_defaults.json (advanced)."}),
         },
     }
@@ -2948,8 +3067,8 @@ def _input_types_session_chat() -> dict:
             ),
         },
         "optional": {
-            "image": ("IMAGE", {
-                "tooltip": "Optional image input for this turn only (never saved to history)"
+            "media": ("*", {
+                "tooltip": "Optional IMAGE tensor/batch or AUDIO input for this turn only (never saved to history)"
             }),
             "persistent_cache": (_PERSISTENT_CACHE_OPTIONS, {
                 "default": str(session_chat_defaults["persistent_cache"]),
@@ -3134,6 +3253,7 @@ def _build_turn_execution_dependencies(
         "rewrite_continue_prompt": rewrite_continue_prompt,
         "detect_history_language": _detect_history_language,
         "session_cache_root": _session_cache_root,
+        "validate_chat_media": validate_chat_media,
         "build_chat_messages": build_chat_messages,
         "build_text_chat_request": _build_text_chat_request,
         "build_kv_state_signature": build_kv_state_signature,
@@ -3310,7 +3430,7 @@ def _build_session_chat_turn_kwargs(
     n_gpu_layers: int,
     tensor_split: Optional[List[float]],
     n_ctx: int,
-    image: Any,
+    media: Any,
     max_turns: int,
     summarize_old_history: bool,
     summary_chunk_turns: int,
@@ -3347,7 +3467,7 @@ def _build_session_chat_turn_kwargs(
         "n_gpu_layers": n_gpu_layers,
         "tensor_split": tensor_split,
         "n_ctx": n_ctx,
-        "image": image,
+        "media": media,
         "max_turns": max_turns,
         "summarize_old_history": summarize_old_history,
         "summary_chunk_turns": summary_chunk_turns,
@@ -3436,7 +3556,7 @@ def _build_session_chat_node_execution_request(
     n_gpu_layers: int,
     tensor_split: Optional[List[float]],
     n_ctx: int,
-    image: Any,
+    media: Any,
     max_turns: int,
     summarize_old_history: bool,
     summary_chunk_turns: int,
@@ -3474,7 +3594,7 @@ def _build_session_chat_node_execution_request(
             n_gpu_layers=n_gpu_layers,
             tensor_split=tensor_split,
             n_ctx=n_ctx,
-            image=image,
+            media=media,
             max_turns=max_turns,
             summarize_old_history=summarize_old_history,
             summary_chunk_turns=summary_chunk_turns,
@@ -3539,7 +3659,7 @@ def _execute_session_chat_turn(
     n_gpu_layers: int,
     tensor_split: Optional[List[float]],
     n_ctx: int,
-    image: Any,
+    media: Any,
     max_turns: Optional[int],
     summarize_old_history: bool,
     summary_chunk_turns: int,
@@ -3578,7 +3698,7 @@ def _execute_session_chat_turn(
         n_gpu_layers=n_gpu_layers,
         tensor_split=tensor_split,
         n_ctx=n_ctx,
-        image=image,
+        media=media,
         max_turns=max_turns,
         summarize_old_history=summarize_old_history,
         summary_chunk_turns=summary_chunk_turns,
@@ -3658,7 +3778,7 @@ def _execute_dialogue_cycle_turn(
         n_gpu_layers=n_gpu_layers,
         tensor_split=tensor_split,
         n_ctx=n_ctx,
-        image=None,
+        media=None,
         max_turns=max_turns,
         summarize_old_history=summarize_old_history,
         summary_chunk_turns=summary_chunk_turns,
@@ -3700,7 +3820,7 @@ def _run_session_chat_from_inputs(
     n_gpu_layers: int,
     tensor_split: Optional[List[float]],
     n_ctx: int,
-    image: Any,
+    media: Any,
     max_turns: int,
     summarize_old_history: bool,
     summary_chunk_turns: int,
@@ -3736,7 +3856,7 @@ def _run_session_chat_from_inputs(
         n_gpu_layers=n_gpu_layers,
         tensor_split=tensor_split,
         n_ctx=n_ctx,
-        image=image,
+        media=media,
         max_turns=max_turns,
         summarize_old_history=summarize_old_history,
         summary_chunk_turns=summary_chunk_turns,
@@ -3776,7 +3896,7 @@ class LLMSessionChatNode:
     Phase 1 design:
     - History is stored/updated as a JSON file under output/llm_session_sessions/
     - History is NOT shown in ComfyUI UI (only assistant response is returned)
-    - Images are used ONLY for the current turn and never persisted
+    - Media inputs are used only for the current turn and never persisted
     - Supports max_turns / summarize_old_history / system_prompt
     """
 
@@ -3801,7 +3921,7 @@ class LLMSessionChatNode:
              top_p: float,
              n_gpu_layers: int,
              n_ctx: int,
-             image=None,
+             media=None,
              max_turns: int = _FULL_UI_SESSION_CHAT_DEFAULTS["max_turns"],
              summarize_old_history: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["summarize_old_history"],
              summary_chunk_turns: int = _FULL_UI_SESSION_CHAT_DEFAULTS["summary_chunk_turns"],
@@ -3825,7 +3945,9 @@ class LLMSessionChatNode:
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
-             advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None) -> tuple:
+             advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+             image=None) -> tuple:
+        media = _resolve_legacy_image_media(media, image)
         chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
             chat_handler_overrides,
             enable_thinking,
@@ -3846,7 +3968,7 @@ class LLMSessionChatNode:
             n_gpu_layers=n_gpu_layers,
             tensor_split=tensor_split,
             n_ctx=n_ctx,
-            image=image,
+            media=media,
             max_turns=max_turns,
             summarize_old_history=summarize_old_history,
             summary_chunk_turns=summary_chunk_turns,
@@ -4295,10 +4417,12 @@ class LLMSessionChatSimpleNode:
         model: str,
         mmproj: str,
         history_dir: str,
-        image=None,
+        media=None,
         config_path: str = _SIMPLE_WRAPPER_DEFAULTS["config_path"],
         stream_to_console: bool = _SIMPLE_WRAPPER_DEFAULTS["stream_to_console"],
+        image=None,
     ) -> tuple:
+        media = _resolve_legacy_image_media(media, image)
         defaults, chat_handler_overrides, text_chat_builder_overrides = _load_simple_defaults_bundle(
             config_path=config_path
         )
@@ -4316,7 +4440,7 @@ class LLMSessionChatSimpleNode:
             session_id=session_id,
             model=model,
             mmproj=mmproj,
-            image=image,
+            media=media,
             **chat_kwargs,
         )
 

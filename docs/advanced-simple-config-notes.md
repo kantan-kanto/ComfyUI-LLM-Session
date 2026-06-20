@@ -96,7 +96,7 @@ Implemented behavior:
 - Applied advanced kwargs are recorded in each turn's history `params`.
 - For strict reproducibility with `advanced_generation_kwargs.seed`, use
   `runtime_cache: "off"`. Real-machine testing showed that `LlamaTrieCache` can
-  change deterministic output even when the same seed, prompt, model, and image
+  change deterministic output even when the same seed, prompt, model, and media
   are used. Keeping the loaded model instance is not the issue by itself; the
   runtime cache mode is the relevant difference.
 - Unsupported backend-kwarg fallback is not implemented for the seed-only path.
