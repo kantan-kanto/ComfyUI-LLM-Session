@@ -85,6 +85,10 @@ should not be compared directly with the GGUF rows above.
 
 - These are single-machine local measurements, not a controlled benchmark
   suite.
+- These runs used `reset_session=false`, so each model received a different
+  history context in addition to the shared image input and text prompt. The
+  `Prompt time` for `gemma-4-26B-A4B` also includes summarization. This is not a
+  clean benchmark protocol.
 - `Predicted tok/s` is calculated only for dense models from the approximation
   `tok/s = 7.24 / size`, which was derived from the measured dense-model
   results.
