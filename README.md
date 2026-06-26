@@ -270,6 +270,9 @@ builds for the required chat handlers.
 - Performance strongly depends on model size and quantization
 - Large models may be extremely slow on CPU
 - Long sessions benefit from summarization and history management
+- For informal local image-input speed results, see
+  [BENCHMARKS.md](BENCHMARKS.md). These results are hardware-dependent and
+  intended only as rough guidance.
 
 ---
 
