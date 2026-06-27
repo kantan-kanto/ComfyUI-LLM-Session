@@ -1312,7 +1312,7 @@ def build_chat_messages(history: Dict[str, Any],
                 messages.append({
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
                         {"type": "text", "text": user_text or ""}
                     ]
                 })
