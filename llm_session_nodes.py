@@ -520,7 +520,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-4.5": {},
     "minicpm-v-4.6": {"enable_thinking": False},
     "gemma3": {},
-    "gemma4": {"enable_thinking": False},
+    "gemma4": {"enable_thinking": False, "image_min_tokens": 448, "image_max_tokens": 448},
     "glm4.1v": {},
     "glm4.6v": {},
     "granite-docling": {},
@@ -1076,13 +1076,13 @@ def _resolve_model_and_mmproj(roots: list[str], model: str, mmproj: str) -> tupl
 # Image + Language Utilities
 # ============================================================================
 
-def encode_image_base64(pil_image: Image.Image, max_pixels: int = 262144) -> str:
+def encode_image_base64(pil_image: Image.Image, max_pixels: int = 0) -> str:
     """
     Convert PIL image to base64 encoded string
     
     Args:
         pil_image: PIL Image object
-        max_pixels: Maximum pixels for token saving
+        max_pixels: Maximum pixels for token saving. 0 disables resizing.
     
     Returns:
         Base64 encoded image string
@@ -1091,15 +1091,16 @@ def encode_image_base64(pil_image: Image.Image, max_pixels: int = 262144) -> str
     width, height = pil_image.size
     total_pixels = width * height
     
-    if total_pixels > max_pixels:
+    if max_pixels > 0 and total_pixels > max_pixels:
         scale = (max_pixels / total_pixels) ** 0.5
         new_width = int(width * scale)
         new_height = int(height * scale)
         pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
     
-    # JPEG compress and base64 encode
+    # PNG encode and base64 encode.
+    # Experimental: preserve original resolution/detail for OCR/layout-style tasks.
     buffered = io.BytesIO()
-    pil_image.save(buffered, format="JPEG", optimize=True, quality=85)
+    pil_image.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     
     return img_str
@@ -1311,7 +1312,7 @@ def build_chat_messages(history: Dict[str, Any],
                 messages.append({
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
                         {"type": "text", "text": user_text or ""}
                     ]
                 })
