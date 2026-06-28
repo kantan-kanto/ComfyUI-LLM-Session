@@ -520,7 +520,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-4.5": {},
     "minicpm-v-4.6": {"enable_thinking": False},
     "gemma3": {},
-    "gemma4": {"enable_thinking": False},
+    "gemma4": {"enable_thinking": False, "image_min_tokens": 448, "image_max_tokens": 448},
     "glm4.1v": {},
     "glm4.6v": {},
     "granite-docling": {},
