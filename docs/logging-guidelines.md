@@ -1,6 +1,16 @@
 # Logging Guidelines
 
+- Status: Canonical
+- Last reviewed: 2026-07-05
+- Update when: Logging utilities, exception-handling policy, or silent-handler criteria change.
+
 This document describes the logging conventions and best practices for ComfyUI-LLM-Session.
+
+This is the canonical policy for current logging, exception-handling, and
+silent-handler decisions. Historical audit records such as
+[`error-handling-audit.md`](error-handling-audit.md) and
+[`acceptable-silent-errors.md`](acceptable-silent-errors.md) preserve past
+review context, but should not override the rules in this document.
 
 ## Log Levels
 
@@ -135,11 +145,26 @@ def cleanup_temp_file(path: str) -> None:
         pass  # Acceptable: temp file cleanup is best-effort
 ```
 
-**Note:** Silent errors (Pattern 3) should only be used when:
-1. The operation is truly optional
-2. Failure has no impact on user experience
-3. Logging would add noise without value
-4. The error is documented in `error-handling-audit.md`
+### When Silence Is Acceptable
+
+Silent errors (Pattern 3) should only be used when all of the following are
+true:
+
+1. Fallback behavior exists.
+2. Failure does not risk data corruption or data loss.
+3. Core functionality continues to work.
+4. Logging would add noise because the error is expected in normal operation.
+5. The issue can still be diagnosed through another path when needed.
+
+Silent handlers should be reviewed when:
+
+1. Users report issues that may be related to these code paths.
+2. Debugging becomes difficult due to lack of visibility.
+3. Fallback behavior changes.
+4. The error becomes more frequent due to external changes.
+
+When a silent handler remains intentional, keep the rationale documented in the
+nearest relevant policy, audit, or code comment.
 
 ## Best Practices
 
@@ -227,4 +252,5 @@ Log levels follow this hierarchy (most verbose to least verbose):
 
 - `core/logging_utils.py` - Logging utility implementations
 - `docs/logging-guidelines.md` - This document
-- `docs/error-handling-audit.md` - Audit of all error handling locations
+- `docs/error-handling-audit.md` - Historical 2026-03-22 audit of error handling locations
+- `docs/acceptable-silent-errors.md` - Historical 2026-03-22 silent-error allowlist

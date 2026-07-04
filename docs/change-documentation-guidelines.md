@@ -1,9 +1,64 @@
 # Change Documentation Guidelines
 
+- Status: Canonical
+- Last reviewed: 2026-07-05
+- Update when: Documentation roles, release-note rules, or docs metadata policy changes.
+
 This document defines how to document and describe changes in this repository.
 Use it when adding features, changing behavior, updating compatibility notes,
 writing commit messages, preparing changelog entries, or drafting GitHub release
 notes.
+
+## Docs Metadata
+
+Every Markdown file under `docs/` should start with a short metadata block
+immediately after the H1 title:
+
+```md
+# Document Title
+
+- Status: Canonical | Historical | Working note
+- Last reviewed: YYYY-MM-DD
+- Update when: <short trigger for future updates>
+```
+
+Use exactly one `Status` value:
+
+- `Canonical`: current guidance that contributors should follow when changing
+  code, tests, documentation, or release notes.
+- `Historical`: audit reports, completed investigation notes, or records kept
+  mainly for context. Update only to correct stale cross-references, clarify
+  status, or add a clear supersession note.
+- `Working note`: design notes, unresolved proposals, or decision records that
+  are still useful but not the source of truth.
+
+`Last reviewed` should be the date when the document was last checked against
+the repository's current behavior or current documentation policy. Use
+`YYYY-MM-DD`.
+
+`Update when` should name the concrete trigger that makes the document relevant
+again, for example:
+
+- `Update when module boundaries or dependency direction change.`
+- `Update when a listed issue changes status or a new issue is added.`
+- `Update when advanced Simple config behavior changes.`
+
+## Docs File Naming
+
+Do not rename existing documentation files only to match naming conventions.
+Preserving Git history and stable links is more important than cosmetic naming.
+
+For new files under `docs/`, prefer these suffixes:
+
+- `*-guidelines.md`: canonical process or implementation guidance
+- `*-rules.md`: canonical decision rules or constraints
+- `*-flow.md`: canonical runtime/data flow explanations
+- `*-notes.md`: working notes or design notes
+- `*-audit.md`: historical audit records
+- `*-history.md`: historical milestone or completed-project records
+
+Existing files may keep older names when renaming would make history or links
+harder to follow.
 
 ## Document Roles
 
@@ -305,6 +360,9 @@ guide, the assistant should complete the following checklist.
   or documentation cleanup.
 - Determine which documents are canonical for the change using the document
   roles and placement rules above.
+- Check the affected `docs/` metadata block. Update `Last reviewed` when the
+  document was checked, and update `Status` or `Update when` if the document's
+  role has changed.
 - Check whether English and Japanese README content should be kept in sync.
 - Avoid editing unrelated sections only for style preferences.
 

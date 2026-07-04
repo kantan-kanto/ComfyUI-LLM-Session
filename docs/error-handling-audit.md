@@ -1,5 +1,15 @@
 # Error Handling Audit Report
 
+- Status: Historical
+- Last reviewed: 2026-07-05
+- Update when: Clarifying historical status, fixing stale cross-references, or adding supersession notes.
+
+Historical note: This document is the error-handling audit record from
+2026-03-22. It is not the current logging or exception-handling policy. For the
+current logging rules, see [`logging-guidelines.md`](logging-guidelines.md).
+Line-number references in this document refer to the code layout at the time of
+the audit and may not match current source files.
+
 **Date**: 2026-03-22
 **Scope**: `except Exception:` error handling usage
 **Total Count**: 57 occurrences

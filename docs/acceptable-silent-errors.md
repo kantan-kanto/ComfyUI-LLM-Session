@@ -1,21 +1,21 @@
 # Acceptable Silent Errors
 
+- Status: Historical
+- Last reviewed: 2026-07-05
+- Update when: Clarifying historical status, fixing stale cross-references, or adding supersession notes.
+
+Historical note: This document is the silent-error allowlist from the 2026-03-22
+audit. Line-number references below refer to the code layout at the time of that
+audit and may not match current source files.
+
 **Date**: 2026-03-22  
 **Purpose**: Document `except Exception: pass` patterns that are intentionally kept silent
 
-This document lists error handling locations where silent failure is acceptable and intentional. These patterns should NOT be modified to add logging unless there is a specific bug report or user impact.
+This document lists error handling locations where silent failure was considered
+acceptable and intentional during the 2026-03-22 audit.
 
----
-
-## Criteria for Acceptable Silent Errors
-
-An error handler can be kept silent when ALL of the following conditions are met:
-
-1. **Fallback behavior exists**: The code has a safe default or fallback
-2. **No data loss risk**: Failure does not cause data corruption or loss
-3. **No functional impact**: Core functionality continues to work
-4. **Logging would add noise**: The error is expected in normal operation
-5. **Debug information available**: If needed, the issue can be diagnosed through other means
+For the current policy on when a silent handler is acceptable, see
+[`logging-guidelines.md`](logging-guidelines.md#when-silence-is-acceptable).
 
 ---
 
@@ -83,25 +83,7 @@ An error handler can be kept silent when ALL of the following conditions are met
 | Debug Information Retrieval | 8 | `llm_session_nodes.py` |
 | **Total** | **16** | 2 files |
 
----
-
-## Review Guidelines
-
-These silent error handlers should be reviewed if:
-
-1. **User reports issues** that may be related to these code paths
-2. **Debugging becomes difficult** due to lack of visibility
-3. **The fallback behavior changes** (e.g., defaults are removed)
-4. **The error becomes more frequent** due to external changes
-
-When reviewing, consider:
-- Can we add conditional logging (only in debug mode)?
-- Can we add metrics/telemetry without affecting performance?
-- Is the fallback still appropriate?
-
----
-
 ## Related Documents
 
 - [`error-handling-audit.md`](error-handling-audit.md) - Full audit of all `except Exception:` occurrences
-- [`logging-guidelines.md`](logging-guidelines.md) - Logging utility usage guidelines
+- [`logging-guidelines.md`](logging-guidelines.md#when-silence-is-acceptable) - Current silent-handler policy and review triggers

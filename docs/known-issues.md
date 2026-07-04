@@ -1,5 +1,27 @@
 # Known Issues
 
+- Status: Canonical
+- Last reviewed: 2026-07-05
+- Update when: A listed issue changes status or a new issue is added.
+
+This file keeps both open and resolved issue records in place so history and
+regression context remain easy to follow. To find active work, check the
+`Open Issues` index or search for `Status: Open`.
+
+## Open Issues
+
+- [KV_cache load fails after llama-cpp-python update](#kv_cache-load-fails-after-llama-cpp-python-update)
+- [Summary updated_at can be newer than history meta saved_at](#summary-updated_at-can-be-newer-than-history-meta-saved_at)
+- [Gemma4 text-only output can enter channel/thought token sequences](#gemma4-text-only-output-can-enter-channelthought-token-sequences)
+
+## Status Legend
+
+- `Open`: unresolved and still eligible for implementation or verification work.
+- `Resolved`: fixed or otherwise closed; kept here for history and regression context.
+- `Tracking`: observation or refactoring candidate, not a confirmed defect.
+
+## Issue Records
+
 ## dynamic_max_tokens does not retry on some n_ctx overflow errors
 - Status: Resolved (2026-03-22)
 - First recorded: 2026-03-21
