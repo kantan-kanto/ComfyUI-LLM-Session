@@ -16,6 +16,11 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Added a frontend workflow migration that maps legacy `image` inputs and links to `media` when old workflows are loaded.
   - Kept a backend compatibility shim so legacy `image` kwargs are treated as `media` if they still reach execution.
 
+- Documentation
+  - Added `BENCHMARKS.md` with informal local image-input speed results,
+    including dense-equivalent model sizes and rough tok/s predictions.
+  - Linked the benchmark notes from the README performance notes.
+
 - Runtime diagnostics
   - Added `log_level: debug` phase timing diagnostics and long-generation heartbeat logs without changing the default `timing` log output.
   - Changed generation attempt logs to report `token_limit` instead of `max_tokens`, and added completion token / tokens-per-second diagnostics when available.
