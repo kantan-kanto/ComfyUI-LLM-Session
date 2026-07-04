@@ -256,6 +256,15 @@ for example `[LLM Dialogue Cycle A/1]` and `[LLM Dialogue Cycle B/1]`.
 
 ---
 
+### mmprojA / mmprojB (Dialogue Cycle)
+Selects the projector file for each dialogue role when preparing
+image-capable dialogue workflows.
+
+Current Dialogue Cycle inputs are text-only. For ordinary text dialogue, choose
+`(Not required)` to avoid mmproj auto-detection.
+
+---
+
 ### suppress_backend_logs
 Suppresses verbose llama.cpp backend logs.
 
@@ -277,11 +286,9 @@ If the config is missing or invalid, built-in safe defaults are used.
 ---
 
 ### force_text_only (Dialogue Cycle Simple)
-Forces pure text-only execution.
+Disables mmproj auto-detection for both dialogue roles.
 
-- Disables vision pathways
-- Ignores mmproj auto-detection
-- Improves reproducibility across environments
+For current text-only dialogue, use `True`.
 
 ---
 

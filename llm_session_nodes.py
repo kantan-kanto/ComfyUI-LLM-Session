@@ -3072,7 +3072,7 @@ def _input_types_dialogue_cycle_simple() -> dict:
             }),
             "force_text_only": ("BOOLEAN", {
                 "default": False,
-                "tooltip": "Force text-only mode for both models (disables mmproj auto-detect)."
+                "tooltip": "Disables mmproj auto-detect. For current text-only dialogue, use True."
             }),
             "reset_session": ("BOOLEAN", {
                 "default": False,
@@ -3249,10 +3249,16 @@ def _input_types_dialogue_cycle() -> dict:
             "cycles": ("INT", {"default": int(dialogue_cycle_defaults["cycles"]), "min": 1, "max": 50, "step": 1, "tooltip": "Number of round trips. 1 = A then B."}),
 
             "modelA": _ui_model_input(available_models, "GGUF model for role A"),
-            "mmprojA": _ui_mmproj_input(mmproj_options, "mmproj for modelA"),
+            "mmprojA": _ui_mmproj_input(
+                mmproj_options,
+                "Projector reserved for image-capable dialogue workflows. For current text-only dialogue, use (Not required).",
+            ),
 
             "modelB": _ui_model_input(available_models, "GGUF model for role B"),
-            "mmprojB": _ui_mmproj_input(mmproj_options, "mmproj for modelB"),
+            "mmprojB": _ui_mmproj_input(
+                mmproj_options,
+                "Projector reserved for image-capable dialogue workflows. For current text-only dialogue, use (Not required).",
+            ),
 
             "system_prompt": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt"]), "tooltip": "Shared system prompt for both roles"}),
             "system_prompt_A": ("STRING", {"multiline": True, "default": str(dialogue_cycle_defaults["system_prompt_A"]), "tooltip": "Role-specific system prompt for model A (overrides shared prompt if set)"}),

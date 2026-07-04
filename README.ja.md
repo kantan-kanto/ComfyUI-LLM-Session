@@ -44,6 +44,9 @@ AUDIO は Gemma 4 モデルの場合だけ許可され、WAV として backend �
 ### LLM Dialogue Cycle
 モデル同士を対話させるためのノードです。
 通常のノード接続では循環グラフになりやすい処理を、1 つのノード内で実行できます。
+現在の Dialogue Cycle はテキスト入力のみです。`mmprojA` / `mmprojB` は
+画像対応 Dialogue ワークフロー向けに残してあり、通常のテキスト対話では
+`(Not required)` を選べます。
 
 ### LLM Dialogue Cycle (Simple)
 LLM Dialogue Cycle からパラメータ設定の UI 項目を減らした簡易ノードです。
@@ -102,7 +105,8 @@ Simple ノードのデフォルト値は `config/simple_defaults.json` で定義
 
 - **history_dir**：同じディレクトリを使う限り、会話が継続されます
 - **config_path**：`config/simple_defaults.json` を直接編集せずに Simple ノードのデフォルト値を上書きできます
-- **force_text_only**（Dialogue Cycle Simple）：Vision 経路を無効化し、再現性を高めます
+- **force_text_only**（Dialogue Cycle Simple）：mmproj の自動検出を無効化します。
+  現在のテキストのみの Dialogue では `True` を使います
 
 主要なパラメータの説明は **[PARAMETERS.md](PARAMETERS.md)** を参照してください。
 Simple ノードの advanced JSON 設定については

@@ -72,6 +72,9 @@ the backend. Media is not saved in the session history.
 A node for running dialogue between models.
 It runs inside a single node so workflows do not need to rely on cyclic graph
 connections.
+Dialogue Cycle is currently text-only; `mmprojA` / `mmprojB` are kept for
+image-capable dialogue workflows and can be set to `(Not required)` for normal
+text dialogue.
 
 ### LLM Dialogue Cycle (Simple)
 A simplified node with fewer parameter controls in the UI than
@@ -160,7 +163,8 @@ file elsewhere and select it with `config_path`.
 - **history_dir**: Conversations persist as long as the same directory is used.
 - **config_path**: Optional JSON file used to override Simple-node defaults
   without directly editing `config/simple_defaults.json`.
-- **force_text_only** (Dialogue Cycle Simple): Forces pure text mode to avoid mmproj / vision handler differences and improve reproducibility.
+- **force_text_only** (Dialogue Cycle Simple): Disables mmproj auto-detection.
+  For current text-only dialogue, use `True`.
 - **reset_session** (Dialogue Cycle Simple): Overwrites the history and summary files associated with the session name, and resets per-session KV state. The session's disk cache is kept.
 
 For the main parameter reference, see [PARAMETERS.md](PARAMETERS.md).
