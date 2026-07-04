@@ -69,7 +69,8 @@ Flow:
 
 1. `CHAT_HANDLER_KWARGS_MAP` defines built-in kwargs for each chat format.
 2. `_load_available_chat_handlers()` builds handler factories from that map at
-   module import time.
+   module import time, then applies compatibility aliases only for handler
+   classes that are missing from the installed backend.
 3. `GGUFModelManager.load_model()` detects the model family from the model file
    name.
 4. `_get_chat_handler_kwargs()` starts with
@@ -91,8 +92,62 @@ recent JamePeng `llama-cpp-python` builds. If the installed handler stack reject
 that keyword with an mmproj-specific unexpected-keyword `TypeError`, the helper
 falls back to the older `clip_model_path` keyword.
 
+Compatibility aliases preserve the detected model family while adapting to
+backend handler availability. For example, `gemma3` still declares
+`Gemma3ChatHandler`; if that handler is unavailable but `Gemma4ChatHandler` is
+available, the runtime uses `Gemma4ChatHandler` for Gemma 3 Vision compatibility.
+When `Gemma3ChatHandler` is present, it remains the preferred handler.
+
+Some backend builds expose a chat handler but do not accept every optional
+model-family kwarg. When a handler rejects a known optional kwarg such as
+`enable_thinking` or `image_min_tokens` with an unexpected-keyword `TypeError`,
+the helper logs a warning, removes only that kwarg, and retries. Unrelated
+`TypeError` failures are still propagated.
+
 For Qwen3.5 vision/chat-handler mode, this is where `enable_thinking` and
 `image_min_tokens` are consumed.
+
+## Backend Compatibility Layer
+
+The backend compatibility layer exists to absorb small differences between
+installed `llama-cpp-python` builds without changing model-family detection or
+public node inputs. Use it when a backend exposes enough capability to run a
+model family, but its handler class names or optional constructor kwargs differ
+from the preferred implementation.
+
+Rules:
+
+1. Keep the declared mapping canonical. `chat_handler_map` should name the
+   preferred handler for the model family, usually the handler provided by the
+   most complete backend support path.
+2. Preserve the detected model family. Do not map a `gemma3` model to `gemma4`
+   just to reuse a handler; instead, keep `model_family == "gemma3"` and adapt
+   only the resolved handler class.
+3. Prefer dedicated handlers. A compatibility alias must apply only when the
+   declared handler is unavailable and the fallback handler is available.
+4. Keep compatibility aliases explicit in `CHAT_HANDLER_COMPAT_ALIASES`. Do not
+   infer aliases from similar model names or broad string matching.
+5. Keep optional kwarg fallbacks explicit in `OPTIONAL_CHAT_HANDLER_KWARGS`.
+   Retry without a kwarg only when the installed handler rejects that exact
+   known optional kwarg with an unexpected-keyword `TypeError`.
+6. Do not hide unrelated failures. Constructor errors that are not recognized
+   compatibility cases must continue to propagate.
+7. Log compatibility fallbacks. Users should be able to see when a different
+   handler was used or when an optional kwarg was removed.
+
+Checklist for adding a backend compatibility rule:
+
+1. Confirm the preferred handler path still works and remains preferred when it
+   is available.
+2. Confirm the fallback path is narrower than the model-family detection path.
+   The fallback should change handler resolution only, not prompt building,
+   model-family-specific defaults, or text-only behavior.
+3. Add focused tests for preferred-handler availability, fallback-handler
+   availability, and fallback absence.
+4. Add or update tests that prove unrelated `TypeError` failures are not
+   swallowed when constructor kwargs are involved.
+5. Document user-visible compatibility behavior in `COMPATIBILITY.md` when the
+   fallback affects which backend builds can run a model.
 
 ## Text Chat Builder Path
 

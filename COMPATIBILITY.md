@@ -19,7 +19,7 @@ This document summarizes empirical compatibility results obtained during develop
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B)*
+- Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B)
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
@@ -37,7 +37,7 @@ This document summarizes empirical compatibility results obtained during develop
 - Qwen3.5 (9B / 27B / 35B-A3B)*
 - Qwen3.6 (27B / 35B-A3B)*
 
-**Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
+**Note:** Entries marked with `*` either do not work on PyPI `llama-cpp-python` or have not been tested on it.
 
 ---
 
@@ -86,14 +86,19 @@ initialization.
 
 **Important:** Model compatibility varies by llama-cpp-python version. Based on my testing environment:
 
-| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> (Vision) | Qwen3-VL <br> Qwen3.5/3.6 <br> Gemma 3/4 <br> GLM-4.6V <br> MiniCPM-V 4.6 <br> (Vision) |
-|---------|-------------------|-------------------|-------------------|
-| 0.3.16 (official) | ✅* | ✅ | ❌ |
-| 0.3.40+ (JamePeng fork) | ✅ | ✅ | ✅ |
+| Version | confirmed <br> models <br> (Text)| Qwen2.5-VL <br> LLaVA <br> Llama-3.1 <br> MiniCPM-V 2.6 <br> Gemma 3/4 <br> (Vision) | Qwen3-VL <br> Qwen3.5/3.6 <br> GLM-4.6V <br> MiniCPM-V 4.6 <br> (Vision) | Gemma 4 <br> (Audio)|
+|---------|-------------------|-------------------|-------------------|-------------------|
+| 0.3.32+ (PyPI) | ✅* | ✅ | ❌ | ❌ |
+| 0.3.40+ (JamePeng fork) | ✅ | ✅ | ✅ | ✅ |
 
-**Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
+**Note:** Entries marked with `*` either do not work on PyPI `llama-cpp-python` or have not been tested on it.
 
-**Recommended Backend Notes:**  
+Backend behavior differs between PyPI `llama-cpp-python` and JamePeng builds;
+Vision handler compatibility fallbacks are applied only in narrow cases.
+
+<details>
+<summary>Handler Fallback Details</summary>
+
 For newer Vision model families, please follow the build and installation information provided by the upstream JamePeng llama-cpp-python project and choose a build appropriate for your OS, Python version, and acceleration backend.
 
 `0.3.33+` (JamePeng fork) works for `Qwen3.5` Vision in my environment. Earlier `0.3.30+` builds added support for `Qwen3.5`, but Vision mode was not yet working reliably for me at that stage.
@@ -104,7 +109,28 @@ and falls back to `clip_model_path` only when the installed handler rejects the
 new keyword, so Vision handler loading remains compatible across these backend
 API stages.
 
+Some PyPI `llama-cpp-python` handlers accept newer model families while omitting
+JamePeng-specific optional kwargs. If a Vision chat handler rejects known
+optional kwargs such as Gemma 4 `enable_thinking` or Qwen2.5-VL
+`image_min_tokens`, the node runtime logs a warning, removes the rejected kwarg,
+and retries handler initialization.
+
+Some PyPI `llama-cpp-python` builds do not provide `Gemma3ChatHandler` even
+though `Gemma4ChatHandler` can accept Gemma 3 image input. In that environment,
+Gemma 3 Vision loading falls back to `Gemma4ChatHandler`. JamePeng builds that
+provide a dedicated `Gemma3ChatHandler` continue to use the dedicated handler.
+
+These fallbacks are intentionally narrow:
+
+- Model-family detection is preserved. A Gemma 3 model is still treated as
+  `gemma3` even when `Gemma4ChatHandler` is used as the Vision handler.
+- Dedicated handlers are preferred whenever the installed backend provides them.
+- Only known optional handler kwargs are removed on retry; unrelated handler
+  initialization errors are still reported.
+
 **Source:** https://github.com/JamePeng/llama-cpp-python
+
+</details>
 
 ## Disclaimer
 

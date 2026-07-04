@@ -507,6 +507,9 @@ chat_handler_map = {
     "step3-vl": "Step3VLChatHandler",
 }
 DECLARED_CHAT_HANDLER_MAP = dict(chat_handler_map)
+CHAT_HANDLER_COMPAT_ALIASES = {
+    "gemma3": ["Gemma4ChatHandler"],
+}
 JAMEPENG_LLAMA_CPP_URL = "https://github.com/JamePeng/llama-cpp-python"
 
 # chat_format ごとの追加 kwargs
@@ -532,6 +535,10 @@ CHAT_HANDLER_KWARGS_MAP = {
     "qwen3-vl": {"image_min_tokens": 1024},
     "qwen3.5": {"enable_thinking": False, "image_min_tokens": 1024},
     "step3-vl": {},
+}
+OPTIONAL_CHAT_HANDLER_KWARGS = {
+    "enable_thinking",
+    "image_min_tokens",
 }
 
 TEXT_CHAT_BUILDER_CONFIG_MAP = {
@@ -687,6 +694,27 @@ def _make_chat_handler_factory(handler_cls: type, extra_kwargs: dict[str, Any]) 
     return factory
 
 
+def _apply_chat_handler_compat_aliases(
+    available_handler_map: dict[str, str],
+    available_factory_map: dict[str, Callable[[str], Any]],
+    available_class_registry: dict[str, Any],
+    handler_kwargs_map: dict[str, dict[str, Any]],
+) -> None:
+    for chat_format, fallback_handler_names in CHAT_HANDLER_COMPAT_ALIASES.items():
+        if chat_format in available_handler_map:
+            continue
+        for fallback_handler_name in fallback_handler_names:
+            handler_cls = available_class_registry.get(fallback_handler_name)
+            if handler_cls is None:
+                continue
+            available_handler_map[chat_format] = fallback_handler_name
+            available_factory_map[chat_format] = _make_chat_handler_factory(
+                handler_cls,
+                handler_kwargs_map.get(chat_format, {}),
+            )
+            break
+
+
 def _is_mmproj_keyword_type_error(error: TypeError) -> bool:
     message = str(error).lower()
     if "mmproj_path" in message:
@@ -700,17 +728,47 @@ def _is_mmproj_keyword_type_error(error: TypeError) -> bool:
     return False
 
 
+def _get_unsupported_optional_chat_handler_kwarg(
+    error: TypeError,
+    extra_kwargs: dict[str, Any],
+) -> Optional[str]:
+    message = str(error).lower()
+    if "unexpected keyword" not in message:
+        return None
+    for key in extra_kwargs:
+        if key in OPTIONAL_CHAT_HANDLER_KWARGS and key.lower() in message:
+            return key
+    return None
+
+
 def _instantiate_chat_handler(
     handler_cls: type,
     mmproj_path: str,
     extra_kwargs: dict[str, Any],
 ) -> Any:
-    try:
-        return handler_cls(mmproj_path=mmproj_path, **extra_kwargs)
-    except TypeError as e:
-        if not _is_mmproj_keyword_type_error(e):
+    active_kwargs = dict(extra_kwargs)
+    use_mmproj_path = True
+    while True:
+        try:
+            if use_mmproj_path:
+                return handler_cls(mmproj_path=mmproj_path, **active_kwargs)
+            return handler_cls(clip_model_path=mmproj_path, **active_kwargs)
+        except TypeError as e:
+            unsupported_kwarg = _get_unsupported_optional_chat_handler_kwarg(
+                e,
+                active_kwargs,
+            )
+            if unsupported_kwarg is not None:
+                active_kwargs.pop(unsupported_kwarg, None)
+                print(
+                    "[GGUFModelManager] Warning: Installed chat handler rejected "
+                    f"optional argument '{unsupported_kwarg}'; retrying without it."
+                )
+                continue
+            if use_mmproj_path and _is_mmproj_keyword_type_error(e):
+                use_mmproj_path = False
+                continue
             raise
-        return handler_cls(clip_model_path=mmproj_path, **extra_kwargs)
 
 
 def _get_chat_handler_kwargs(
@@ -834,6 +892,13 @@ def _load_available_chat_handlers(
                 handler_cls,
                 extra_kwargs,
             )
+
+    _apply_chat_handler_compat_aliases(
+        available_handler_map,
+        available_factory_map,
+        available_class_registry,
+        handler_kwargs_map,
+    )
 
     return available_handler_map, available_factory_map, available_class_registry
 
@@ -2292,6 +2357,7 @@ class GGUFModelManager:
                 if mmproj_path is not None:
                     print(f"[GGUFModelManager] Using mmproj: {mmproj_path}")
                     try:
+                        declared_handler_name = DECLARED_CHAT_HANDLER_MAP.get(model_family)
                         handler_name = chat_handler_map.get(model_family)
                         handler_cls = chat_handler_class_registry.get(handler_name) if handler_name else None
                         if handler_cls is None:
@@ -2299,8 +2365,14 @@ class GGUFModelManager:
                                 _format_multimodal_handler_unavailable_error(
                                     model_path=model_path,
                                     model_family=model_family,
-                                    required_handler=DECLARED_CHAT_HANDLER_MAP.get(model_family),
+                                    required_handler=declared_handler_name,
                                 )
+                            )
+                        if declared_handler_name and handler_name != declared_handler_name:
+                            print(
+                                "[GGUFModelManager] Warning: "
+                                f"{declared_handler_name} is unavailable; using "
+                                f"{handler_name} for {model_family} Vision compatibility."
                             )
                         active_chat_handler_kwargs = _get_chat_handler_kwargs(
                             model_family,

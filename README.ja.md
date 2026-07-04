@@ -75,7 +75,7 @@ llama-cpp-python のビルド内容によって、対応モデルや Vision 機�
 
 - 新しい Vision / multimodal モデルを使う場合は、OS、Python バージョン、アクセラレーション backend に合う最新の JamePeng llama-cpp-python build を確認してください:
   https://github.com/JamePeng/llama-cpp-python
-- 公式 PyPI release は多くの text-only 用途で利用できますが、新しい multimodal chat handler には対応していない場合があります。
+- PyPI で配布されている release は多くの text-only 用途で利用できますが、新しい multimodal chat handler には対応していない場合があります。
 
 詳細は **[COMPATIBILITY.md](COMPATIBILITY.md)** を参照してください。
 

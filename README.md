@@ -110,7 +110,7 @@ Vision support varies significantly by backend and environment.
   llama-cpp-python build that matches your OS, Python version, and
   acceleration backend:
   https://github.com/JamePeng/llama-cpp-python
-- Official PyPI releases work for many text-only workflows, but may not support
+- PyPI releases work for many text-only workflows, but may not support
   newer multimodal chat handlers.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for detailed environment test results.
@@ -238,7 +238,7 @@ builds for the required chat handlers.
 - DeepSeek
 - Gemma 2 Instruct (2B / 9B)
 - Gemma 3 Instruct (4B / 12B)
-- Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B)*
+- Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B)
 - GLM-4.6V Flash*
 - gpt-oss
 - Llama 3.1 Instruct (8B / 70B)
@@ -256,7 +256,7 @@ builds for the required chat handlers.
 - Qwen3.5 (9B / 27B / 35B-A3B)*
 - Qwen3.6 (27B / 35B-A3B)*
 
-**Note:** Entries marked with `*` either do not work on official llama-cpp-python 0.3.16 or have not been tested on it.
+**Note:** Entries marked with `*` either do not work on PyPI `llama-cpp-python` or have not been tested on it.
 
 ### MoE Models
 

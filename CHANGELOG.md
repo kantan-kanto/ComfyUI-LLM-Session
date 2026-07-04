@@ -29,6 +29,8 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 - Backend compatibility
   - Prefer `mmproj_path` when initializing multimodal chat handlers and fall back to the older `clip_model_path` keyword only when the installed handler rejects the new name.
+  - Use `Gemma4ChatHandler` as a Gemma 3 Vision compatibility fallback when PyPI `llama-cpp-python` does not provide `Gemma3ChatHandler`, while preserving the dedicated handler on JamePeng builds.
+  - Retry Vision chat handler initialization without known optional kwargs such as Gemma 4 `enable_thinking` and Qwen2.5-VL `image_min_tokens` when the installed `llama-cpp-python` handler rejects them.
   - Documented the JamePeng `llama-cpp-python` MTMD projector keyword compatibility path.
   
 ---

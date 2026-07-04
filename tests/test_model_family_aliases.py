@@ -100,6 +100,74 @@ def test_detect_model_family_minicpm_v46_aliases(monkeypatch):
     assert module.CHAT_HANDLER_KWARGS_MAP["minicpm-v-4.6"]["enable_thinking"] is False
 
 
+def test_chat_handler_loading_prefers_declared_gemma3_handler(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class Gemma3ChatHandler:
+        pass
+
+    class Gemma4ChatHandler:
+        pass
+
+    handler_module = types.SimpleNamespace(
+        Gemma3ChatHandler=Gemma3ChatHandler,
+        Gemma4ChatHandler=Gemma4ChatHandler,
+    )
+
+    handler_map, factory_map, registry = module._load_available_chat_handlers(
+        {
+            "gemma3": "Gemma3ChatHandler",
+            "gemma4": "Gemma4ChatHandler",
+        },
+        module.CHAT_HANDLER_KWARGS_MAP,
+        handler_module,
+    )
+
+    assert handler_map["gemma3"] == "Gemma3ChatHandler"
+    assert "gemma3" in factory_map
+    assert registry["Gemma3ChatHandler"] is Gemma3ChatHandler
+
+
+def test_chat_handler_loading_falls_back_to_gemma4_for_pypi_gemma3(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    class Gemma4ChatHandler:
+        pass
+
+    handler_module = types.SimpleNamespace(Gemma4ChatHandler=Gemma4ChatHandler)
+
+    handler_map, factory_map, registry = module._load_available_chat_handlers(
+        {
+            "gemma3": "Gemma3ChatHandler",
+            "gemma4": "Gemma4ChatHandler",
+        },
+        module.CHAT_HANDLER_KWARGS_MAP,
+        handler_module,
+    )
+
+    assert handler_map["gemma3"] == "Gemma4ChatHandler"
+    assert handler_map["gemma4"] == "Gemma4ChatHandler"
+    assert "gemma3" in factory_map
+    assert registry["Gemma4ChatHandler"] is Gemma4ChatHandler
+
+
+def test_chat_handler_loading_does_not_fallback_without_compat_handler(monkeypatch):
+    module = _load_nodes_module(monkeypatch)
+
+    handler_map, factory_map, registry = module._load_available_chat_handlers(
+        {
+            "gemma3": "Gemma3ChatHandler",
+            "gemma4": "Gemma4ChatHandler",
+        },
+        module.CHAT_HANDLER_KWARGS_MAP,
+        types.SimpleNamespace(),
+    )
+
+    assert "gemma3" not in handler_map
+    assert "gemma3" not in factory_map
+    assert registry == {}
+
+
 def test_chat_handler_instantiation_prefers_mmproj_path(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 
@@ -158,6 +226,64 @@ def test_chat_handler_instantiation_falls_back_when_clip_model_path_is_required(
     assert handler.kwargs == {"enable_thinking": False}
 
 
+def test_chat_handler_instantiation_drops_unsupported_enable_thinking(monkeypatch, capsys):
+    module = _load_nodes_module(monkeypatch)
+
+    class PyPIStyleGemma4Handler:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if "enable_thinking" in kwargs:
+                raise TypeError("got an unexpected keyword argument 'enable_thinking'")
+            self.kwargs = kwargs
+
+    handler = module._instantiate_chat_handler(
+        PyPIStyleGemma4Handler,
+        "C:/models/mmproj-gemma4.gguf",
+        {"enable_thinking": False},
+    )
+
+    assert PyPIStyleGemma4Handler.calls == [
+        {
+            "mmproj_path": "C:/models/mmproj-gemma4.gguf",
+            "enable_thinking": False,
+        },
+        {"mmproj_path": "C:/models/mmproj-gemma4.gguf"},
+    ]
+    assert handler.kwargs == {"mmproj_path": "C:/models/mmproj-gemma4.gguf"}
+    assert "enable_thinking" in capsys.readouterr().out
+
+
+def test_chat_handler_instantiation_drops_unsupported_image_min_tokens(monkeypatch, capsys):
+    module = _load_nodes_module(monkeypatch)
+
+    class PyPIStyleQwen25VLHandler:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if "image_min_tokens" in kwargs:
+                raise TypeError("got an unexpected keyword argument 'image_min_tokens'")
+            self.kwargs = kwargs
+
+    handler = module._instantiate_chat_handler(
+        PyPIStyleQwen25VLHandler,
+        "C:/models/mmproj-qwen25vl.gguf",
+        {"image_min_tokens": 1024},
+    )
+
+    assert PyPIStyleQwen25VLHandler.calls == [
+        {
+            "mmproj_path": "C:/models/mmproj-qwen25vl.gguf",
+            "image_min_tokens": 1024,
+        },
+        {"mmproj_path": "C:/models/mmproj-qwen25vl.gguf"},
+    ]
+    assert handler.kwargs == {"mmproj_path": "C:/models/mmproj-qwen25vl.gguf"}
+    assert "image_min_tokens" in capsys.readouterr().out
+
+
 def test_chat_handler_instantiation_preserves_unrelated_type_errors(monkeypatch):
     module = _load_nodes_module(monkeypatch)
 
@@ -213,6 +339,48 @@ def test_model_manager_uses_mmproj_path_for_new_chat_handlers(monkeypatch):
     assert "clip_model_path" not in NewHandler.calls[0]
     assert dummy_llama.calls
     assert "chat_handler" in dummy_llama.calls[0]
+
+
+def test_model_manager_reports_gemma3_compat_handler_fallback(monkeypatch, capsys):
+    module = _load_nodes_module(monkeypatch)
+
+    class CompatGemma4Handler:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.calls.append(kwargs)
+
+    class DummyLlama:
+        calls = []
+
+        def __init__(self, **kwargs):
+            self.calls.append(kwargs)
+
+    monkeypatch.setattr(module, "LLAMA_CPP_AVAILABLE", True)
+    monkeypatch.setattr(module, "Llama", DummyLlama)
+    monkeypatch.setattr(module, "chat_handler_factory_map", {"gemma3": object()})
+    monkeypatch.setattr(module, "chat_handler_map", {"gemma3": "Gemma4ChatHandler"})
+    monkeypatch.setattr(
+        module,
+        "chat_handler_class_registry",
+        {"Gemma4ChatHandler": CompatGemma4Handler},
+    )
+    manager = module.GGUFModelManager()
+
+    manager.load_model(
+        model_path="C:/models/Gemma-3-test.gguf",
+        mmproj_path="C:/models/mmproj-gemma3.gguf",
+        n_ctx=1024,
+        n_gpu_layers=0,
+        vision_required=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "Gemma3ChatHandler is unavailable" in captured.out
+    assert "using Gemma4ChatHandler for gemma3 Vision compatibility" in captured.out
+    assert CompatGemma4Handler.calls
+    assert DummyLlama.calls
+    assert "chat_handler" in DummyLlama.calls[0]
 
 
 def test_model_manager_keeps_text_fallback_when_vision_is_not_required(monkeypatch):
