@@ -26,20 +26,23 @@ the final behavior validation for UI/runtime workflows.
   model-specific behavior, and regressions.
 - `docs/`: maintained project rules, architecture notes, and change guidance.
 
-## Required Reading
+## Required Reading And Outputs
 
-Before making changes, read `docs/index.md` and then follow the relevant routing
-below.
+Before answering, planning, editing, reviewing, or proposing commit/release text,
+read `docs/index.md` and then follow the relevant routing below. This routing
+applies even when the user asks for advice only and no files are edited.
 
-- General agent workflow: `docs/agent-development-plan.md`
-- Refactoring: `docs/refactoring-rules.md`
-- Tests or behavior verification: `docs/testing-rules.md`
-- Logging, exception handling, or silent fallbacks:
-  `docs/logging-guidelines.md`
-- Public behavior, parameters, README, changelog, or docs changes:
-  `docs/change-documentation-guidelines.md`
-- Service boundaries, dependency direction, or module placement:
-  `docs/architecture.md`
+| Task type | Required docs | Required output |
+| --- | --- | --- |
+| General coding task | `docs/agent-development-plan.md` | Implementation summary, tests run or skipped, docs impact, manual validation needs |
+| Refactoring | `docs/refactoring-rules.md` | Refactoring scope, behavior-preservation notes, focused tests |
+| Tests or behavior verification | `docs/testing-rules.md` | Focused/full pytest status, skipped checks with reasons |
+| Logging, exception handling, or silent fallbacks | `docs/logging-guidelines.md` | Logging/error-handling rationale and tests or skipped-test reason |
+| Public behavior, parameters, README, changelog, or docs changes | `docs/change-documentation-guidelines.md` | Docs impact summary and recommended commit message when requested or useful |
+| Release preparation, version changes, changelog updates, or GitHub release notes | `docs/change-documentation-guidelines.md` | Recommended release commit message and draft GitHub release notes |
+| Service boundaries, dependency direction, or module placement | `docs/architecture.md` | Placement/dependency rationale and affected services/modules |
+| Manual ComfyUI validation may be needed | `docs/manual-test-checklist.md` | Relevant checklist sections for the human to run |
+| Non-trivial verification planning | `docs/templates/verification-plan.md` | Verification plan or concise equivalent in the final response |
 
 Do not duplicate detailed policy here. Update the relevant document in `docs/`
 when a rule changes.
@@ -90,6 +93,9 @@ python -m pytest -q
 Use the repository's active Python environment when one is required by the local
 setup.
 
+When tests are not run, state why. For documentation-only changes, explicitly
+say that pytest was not run because runtime behavior was not changed.
+
 ## Documentation Expectations
 
 Check documentation impact before finishing. Depending on the change, update or
@@ -116,6 +122,13 @@ When proposing commit messages, follow the commit message rules in
 - Keep the subject concise, ideally around 72 characters or less.
 - Do not end the subject line with a period.
 - Add a short body only when it clarifies the grouped changes.
+
+When the user asks for release preparation, a version bump, changelog work, or
+release notes, always provide draft GitHub release notes unless the user
+explicitly asks not to. Use only the release-note sections that apply.
+
+When documentation files are added, removed, or their roles change, update
+`docs/index.md` in the same change.
 
 ## Manual ComfyUI Validation
 
@@ -145,4 +158,8 @@ A change is ready to report when:
 - Documentation impact was reviewed.
 - Manual ComfyUI validation needs are stated, including the relevant
   `docs/manual-test-checklist.md` sections when manual validation is needed.
+- Release-preparation tasks include a recommended release commit message and
+  draft GitHub release notes, unless the user explicitly asked not to include
+  them.
+- Commit message suggestions follow `docs/change-documentation-guidelines.md`.
 - Remaining limitations or risks are reported.

@@ -20,6 +20,28 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Added `BENCHMARKS.md` with informal local image-input speed results,
     including dense-equivalent model sizes and rough tok/s predictions.
   - Linked the benchmark notes from the README performance notes.
+  - Added `docs/testing-rules.md` and linked it from the documentation index to
+    define repository-wide test placement, fixture, parametrization, and
+    regression-test rules.
+  - Added `AGENTS.md` as the coding-agent entry point for repository rules,
+    required reading, verification expectations, and commit-message guidance.
+  - Clarified agent routing for commit-message suggestions, release preparation,
+    draft GitHub release notes, manual ComfyUI checklist sections, and skipped
+    test reporting.
+  - Added `docs/agent-development-plan.md`,
+    `docs/templates/verification-plan.md`, and
+    `docs/manual-test-checklist.md` to document agent workflow, verification
+    planning, and selective manual ComfyUI validation.
+
+- Tests
+  - Added direct service-layer tests for `HistoryPersistenceService` and
+    `KvStateService`.
+  - Centralized repeated `llm_session_nodes` import setup in a shared pytest
+    fixture.
+  - Split the large turn-execution service test module into focused service
+    test files with shared test helpers.
+  - Enabled strict pytest configuration checks and converted model-family alias
+    cases to parametrized tests.
 
 - Runtime diagnostics
   - Added `log_level: debug` phase timing diagnostics and long-generation heartbeat logs without changing the default `timing` log output.
