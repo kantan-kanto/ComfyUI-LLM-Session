@@ -23,8 +23,12 @@ truth before changing code or documentation.
 
 - [`advanced-simple-config-notes.md`](advanced-simple-config-notes.md) -
   Advanced Simple config behavior and implementation rules.
+- [`agent-development-plan.md`](agent-development-plan.md) - Agent-assisted
+  development workflow improvement plan and rollout order.
 - [`logging-guidelines.md`](logging-guidelines.md) - Current logging,
   exception-handling, and silent-handler policy.
+- [`manual-test-checklist.md`](manual-test-checklist.md) - Selective manual
+  ComfyUI validation checklist for runtime/UI-sensitive changes.
 - [`model-specific-parameter-flow.md`](model-specific-parameter-flow.md) -
   Model-family parameter precedence and update checklist.
 - [`testing-rules.md`](testing-rules.md) - Repository-wide test placement,
