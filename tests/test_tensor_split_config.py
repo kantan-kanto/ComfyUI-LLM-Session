@@ -1,25 +1,11 @@
 from __future__ import annotations
 
-import importlib
 import json
-import sys
-import types
 
 
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    return importlib.import_module("llm_session_nodes")
 
-
-def test_simple_defaults_accept_tensor_split(monkeypatch, tmp_path):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_accept_tensor_split(load_nodes_module, monkeypatch, tmp_path):
+    module = load_nodes_module()
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
@@ -37,8 +23,8 @@ def test_simple_defaults_accept_tensor_split(monkeypatch, tmp_path):
     assert defaults["tensor_split"] == [1.0, 0.0]
 
 
-def test_simple_defaults_ignore_invalid_tensor_split(monkeypatch, tmp_path):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_ignore_invalid_tensor_split(load_nodes_module, monkeypatch, tmp_path):
+    module = load_nodes_module()
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
@@ -55,8 +41,8 @@ def test_simple_defaults_ignore_invalid_tensor_split(monkeypatch, tmp_path):
     assert defaults["tensor_split"] is None
 
 
-def test_model_manager_passes_tensor_split_to_llama(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_model_manager_passes_tensor_split_to_llama(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     calls = []
 
     class DummyLlama:

@@ -1,24 +1,10 @@
 from __future__ import annotations
 
-import importlib
-import sys
-import types
 
 
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    return importlib.import_module("llm_session_nodes")
 
-
-def test_strip_reasoning_output_handles_gemma4_channel_delimiter(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_strip_reasoning_output_handles_gemma4_channel_delimiter(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     raw = (
         "<|channel>thought\n"
         "hogehoge\n"

@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-import importlib
-import sys
-import types
+
+class DummyManager:
+    pass
 
 
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    return importlib.import_module("llm_session_nodes")
+class UnloadTrackingManager:
+    def __init__(self) -> None:
+        self.unload_calls = 0
+        self.unloaded = False
+
+    def unload_model(self):
+        self.unload_calls += 1
+        self.unloaded = True
 
 
-def test_turn_execution_dependencies_use_injected_runtime_container(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+
+def test_turn_execution_dependencies_use_injected_runtime_container(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     container = module.RuntimeContainer(model_manager=None, mem_kv_state={"sid": {"k": "v"}})
 
     deps = module._build_turn_execution_dependencies(runtime_container=container)
@@ -28,11 +27,8 @@ def test_turn_execution_dependencies_use_injected_runtime_container(monkeypatch)
     assert "sid" not in container.mem_kv_state
 
 
-def test_session_chat_dependencies_reuse_injected_model_manager(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
-
-    class DummyManager:
-        pass
+def test_session_chat_dependencies_reuse_injected_model_manager(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
     manager = DummyManager()
     container = module.RuntimeContainer(model_manager=manager, mem_kv_state={})
@@ -42,17 +38,10 @@ def test_session_chat_dependencies_reuse_injected_model_manager(monkeypatch):
     assert deps.get_or_create_model_manager() is manager
 
 
-def test_cleanup_unloads_runtime_container_model_manager(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_cleanup_unloads_runtime_container_model_manager(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
-    class DummyManager:
-        def __init__(self) -> None:
-            self.unloaded = False
-
-        def unload_model(self):
-            self.unloaded = True
-
-    manager = DummyManager()
+    manager = UnloadTrackingManager()
     container = module.RuntimeContainer(model_manager=manager, mem_kv_state={})
     monkeypatch.setattr(module, "_runtime_container", container)
 
@@ -61,11 +50,8 @@ def test_cleanup_unloads_runtime_container_model_manager(monkeypatch):
     assert manager.unloaded is True
     assert container.model_manager is None
 
-def test_resolve_runtime_container_lazy_initializes_default(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
-
-    class DummyManager:
-        pass
+def test_resolve_runtime_container_lazy_initializes_default(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
     monkeypatch.setattr(module, "GGUFModelManager", DummyManager)
     monkeypatch.setattr(module, "_runtime_container", None)
@@ -76,25 +62,18 @@ def test_resolve_runtime_container_lazy_initializes_default(monkeypatch):
     assert module._runtime_container is container
 
 
-def test_cleanup_skips_when_default_runtime_container_not_initialized(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_cleanup_skips_when_default_runtime_container_not_initialized(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     monkeypatch.setattr(module, "_runtime_container", None)
 
     module.cleanup()
 
     assert module._runtime_container is None
 
-def test_unload_node_uses_runtime_container_manager(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_unload_node_uses_runtime_container_manager(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
-    class DummyManager:
-        def __init__(self) -> None:
-            self.unload_calls = 0
-
-        def unload_model(self):
-            self.unload_calls += 1
-
-    manager = DummyManager()
+    manager = UnloadTrackingManager()
     container = module.RuntimeContainer(model_manager=manager, mem_kv_state={})
     monkeypatch.setattr(module, "_runtime_container", container)
     node = module.UnloadLLMModelNode()
@@ -105,8 +84,8 @@ def test_unload_node_uses_runtime_container_manager(monkeypatch):
     assert manager.unload_calls == 1
 
 
-def test_unload_model_clears_runtime_container_mem_kv_state(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_unload_model_clears_runtime_container_mem_kv_state(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     manager = module.GGUFModelManager()
     manager.model = object()
     manager.chat_handler = object()
@@ -134,8 +113,8 @@ def test_unload_model_clears_runtime_container_mem_kv_state(monkeypatch):
     assert manager._signature is None
     assert container.mem_kv_state == {}
 
-def test_dialogue_cycle_model_manager_reuse_in_runtime_container(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_dialogue_cycle_model_manager_reuse_in_runtime_container(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     container = module.RuntimeContainer(model_manager=None, mem_kv_state={})
 
     manager_a_1 = module._get_or_create_dialogue_cycle_model_manager("A", runtime_container=container)
@@ -147,12 +126,9 @@ def test_dialogue_cycle_model_manager_reuse_in_runtime_container(monkeypatch):
     assert set(container.dialogue_model_managers.keys()) == {"A", "B"}
 
 
-def test_chat_one_turn_forwards_dialogue_log_prefix_override(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_chat_one_turn_forwards_dialogue_log_prefix_override(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
     captured: dict[str, object] = {}
-
-    class DummyManager:
-        pass
 
     def _execute_dialogue_cycle_turn(**kwargs):
         captured.update(kwargs)
@@ -184,19 +160,12 @@ def test_chat_one_turn_forwards_dialogue_log_prefix_override(monkeypatch):
     assert captured["log_prefix_override"] == "[LLM Dialogue Cycle A/1]"
 
 
-def test_unload_node_unloads_dialogue_cycle_managers(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_unload_node_unloads_dialogue_cycle_managers(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
-    class DummyManager:
-        def __init__(self) -> None:
-            self.unload_calls = 0
-
-        def unload_model(self):
-            self.unload_calls += 1
-
-    shared = DummyManager()
-    manager_a = DummyManager()
-    manager_b = DummyManager()
+    shared = UnloadTrackingManager()
+    manager_a = UnloadTrackingManager()
+    manager_b = UnloadTrackingManager()
     container = module.RuntimeContainer(
         model_manager=shared,
         mem_kv_state={},
@@ -214,19 +183,12 @@ def test_unload_node_unloads_dialogue_cycle_managers(monkeypatch):
     assert container.model_manager is None
     assert container.dialogue_model_managers == {}
 
-def test_cleanup_unloads_dialogue_cycle_managers(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_cleanup_unloads_dialogue_cycle_managers(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
-    class DummyManager:
-        def __init__(self) -> None:
-            self.unloaded = False
-
-        def unload_model(self):
-            self.unloaded = True
-
-    shared = DummyManager()
-    manager_a = DummyManager()
-    manager_b = DummyManager()
+    shared = UnloadTrackingManager()
+    manager_a = UnloadTrackingManager()
+    manager_b = UnloadTrackingManager()
     container = module.RuntimeContainer(
         model_manager=shared,
         mem_kv_state={},

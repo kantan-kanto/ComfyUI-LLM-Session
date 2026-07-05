@@ -1,25 +1,10 @@
 from __future__ import annotations
 
 import base64
-import importlib
 import inspect
-import sys
-import types
 
 import numpy as np
 import pytest
-
-
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    return importlib.import_module("llm_session_nodes")
 
 
 class FakeTensor:
@@ -40,8 +25,8 @@ class FakeTensor:
         return FakeTensor(self._array[index])
 
 
-def test_build_chat_messages_accepts_image_batch_media(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_build_chat_messages_accepts_image_batch_media(load_nodes_module):
+    module = load_nodes_module()
     image_batch = FakeTensor(np.zeros((2, 2, 2, 3), dtype=np.float32))
 
     messages = module.build_chat_messages(
@@ -57,8 +42,8 @@ def test_build_chat_messages_accepts_image_batch_media(monkeypatch):
     assert content[-1] == {"type": "text", "text": "describe"}
 
 
-def test_build_chat_messages_accepts_gemma4_audio_media(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_build_chat_messages_accepts_gemma4_audio_media(load_nodes_module):
+    module = load_nodes_module()
     audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
 
     messages = module.build_chat_messages(
@@ -76,8 +61,8 @@ def test_build_chat_messages_accepts_gemma4_audio_media(monkeypatch):
     assert base64.b64decode(audio_part["input_audio"]["data"]).startswith(b"RIFF")
 
 
-def test_build_chat_messages_rejects_audio_for_non_gemma4(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_build_chat_messages_rejects_audio_for_non_gemma4(load_nodes_module):
+    module = load_nodes_module()
     audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
 
     with pytest.raises(ValueError, match="Gemma 4"):
@@ -89,24 +74,24 @@ def test_build_chat_messages_rejects_audio_for_non_gemma4(monkeypatch):
         )
 
 
-def test_validate_chat_media_rejects_audio_for_non_gemma4_before_build(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_validate_chat_media_rejects_audio_for_non_gemma4_before_build(load_nodes_module):
+    module = load_nodes_module()
     audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
 
     with pytest.raises(ValueError, match="Gemma 4"):
         module.validate_chat_media(media=audio, model_path="C:/models/qwen3-vl.gguf")
 
 
-def test_validate_chat_media_rejects_invalid_audio_shape(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_validate_chat_media_rejects_invalid_audio_shape(load_nodes_module):
+    module = load_nodes_module()
     audio = {"waveform": np.zeros((2, 1, 160), dtype=np.float32), "sample_rate": 16000}
 
     with pytest.raises(ValueError, match="batches are not supported"):
         module.validate_chat_media(media=audio, model_path="C:/models/gemma-4-12B.gguf")
 
 
-def test_build_chat_messages_rejects_unsupported_media(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_build_chat_messages_rejects_unsupported_media(load_nodes_module):
+    module = load_nodes_module()
 
     with pytest.raises(ValueError, match="Unsupported media input"):
         module.build_chat_messages(
@@ -117,8 +102,8 @@ def test_build_chat_messages_rejects_unsupported_media(monkeypatch):
         )
 
 
-def test_legacy_image_media_shim_prefers_media_when_present(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_legacy_image_media_shim_prefers_media_when_present(load_nodes_module):
+    module = load_nodes_module()
     media = object()
     image = object()
 
@@ -126,8 +111,8 @@ def test_legacy_image_media_shim_prefers_media_when_present(monkeypatch):
     assert module._resolve_legacy_image_media(None, image) is image
 
 
-def test_session_chat_methods_still_accept_legacy_image_kwarg(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_session_chat_methods_still_accept_legacy_image_kwarg(load_nodes_module):
+    module = load_nodes_module()
 
     full_signature = inspect.signature(module.LLMSessionChatNode.chat_stream)
     simple_signature = inspect.signature(module.LLMSessionChatSimpleNode.chat_stream)

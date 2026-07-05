@@ -27,6 +27,8 @@ truth before changing code or documentation.
   exception-handling, and silent-handler policy.
 - [`model-specific-parameter-flow.md`](model-specific-parameter-flow.md) -
   Model-family parameter precedence and update checklist.
+- [`testing-rules.md`](testing-rules.md) - Repository-wide test placement,
+  fixture, parametrization, and regression-test rules.
 
 ## Historical Records
 
@@ -43,5 +45,5 @@ unless a canonical document explicitly says so.
 ## Maintenance Rule of Thumb
 
 When a change touches module boundaries, logging, model-specific parameters,
-history behavior, known issues, or release-facing behavior, check this index
-first and update the affected canonical document in the same change.
+history behavior, tests, known issues, or release-facing behavior, check this
+index first and update the affected canonical document in the same change.

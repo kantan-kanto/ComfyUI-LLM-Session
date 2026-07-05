@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-import importlib
 import inspect
-import sys
-import types
 
 from core.defaults import SIMPLE_WRAPPER_DEFAULTS
 
 
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    return importlib.import_module("llm_session_nodes")
 
-
-def test_simple_wrapper_signature_defaults(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_wrapper_signature_defaults(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
     chat_sig = inspect.signature(module.LLMSessionChatSimpleNode.chat_stream)
     cycle_sig = inspect.signature(module.LLMDialogueCycleSimpleNode.chat_cycle_simple)

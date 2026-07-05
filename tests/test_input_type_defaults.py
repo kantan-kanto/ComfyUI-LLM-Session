@@ -1,33 +1,12 @@
 from __future__ import annotations
 
-import importlib
 import json
-import sys
-import types
 
 from core.defaults import LOG_LEVEL_OPTIONS, PERSISTENT_CACHE_OPTIONS, RUNTIME_CACHE_OPTIONS
 
 
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    module = importlib.import_module("llm_session_nodes")
-    monkeypatch.setattr(
-        module,
-        "_get_available_models_and_mmprojs",
-        lambda: (["dummy.gguf"], [module._MMPROJ_AUTO, module._MMPROJ_NOT_REQUIRED]),
-    )
-    return module
-
-
-def test_session_chat_input_types_default_values(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_session_chat_input_types_default_values(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
 
     input_types = module._input_types_session_chat()
     required = input_types["required"]
@@ -49,8 +28,8 @@ def test_session_chat_input_types_default_values(monkeypatch):
     assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
 
 
-def test_dialogue_cycle_input_types_default_values(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_dialogue_cycle_input_types_default_values(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
 
     input_types = module._input_types_dialogue_cycle()
     required = input_types["required"]
@@ -70,8 +49,8 @@ def test_dialogue_cycle_input_types_default_values(monkeypatch):
     assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
 
 
-def test_session_chat_simple_uses_media_input(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_session_chat_simple_uses_media_input(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
 
     input_types = module._input_types_session_chat_simple()
     optional = input_types["optional"]
@@ -81,8 +60,8 @@ def test_session_chat_simple_uses_media_input(monkeypatch):
     assert optional["media"][0] == "*"
 
 
-def test_enable_thinking_overrides_supported_chat_formats(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_enable_thinking_overrides_supported_chat_formats(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
 
     chat_handler_overrides = module._merge_enable_thinking_chat_handler_overrides(
         {"qwen3.5": {"image_min_tokens": 2048}},
@@ -100,8 +79,8 @@ def test_enable_thinking_overrides_supported_chat_formats(monkeypatch):
     assert text_chat_builder_overrides["gemma4"]["enable_thinking"] is True
 
 
-def test_model_specific_config_override_wins_over_full_node_default(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_model_specific_config_override_wins_over_full_node_default(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
 
     chat_handler_overrides = module._merge_enable_thinking_chat_handler_overrides(
         {"gemma4": {"enable_thinking": True}},
@@ -116,8 +95,8 @@ def test_model_specific_config_override_wins_over_full_node_default(monkeypatch)
     assert text_chat_builder_overrides["gemma4"]["enable_thinking"] is True
 
 
-def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(monkeypatch, tmp_path):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(load_nodes_module, tmp_path):
+    module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
@@ -141,8 +120,8 @@ def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(monkey
     assert defaults["text_chat_builder_overrides"]["gemma4"]["enable_thinking"] is True
 
 
-def test_simple_defaults_reads_only_advanced_seed_kwargs(monkeypatch, tmp_path):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_reads_only_advanced_seed_kwargs(load_nodes_module, tmp_path):
+    module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
@@ -161,8 +140,8 @@ def test_simple_defaults_reads_only_advanced_seed_kwargs(monkeypatch, tmp_path):
     assert defaults["advanced_summary_generation_kwargs"] == {"seed": 456}
 
 
-def test_simple_defaults_warns_for_unsupported_advanced_keys(monkeypatch, tmp_path, capsys):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_warns_for_unsupported_advanced_keys(load_nodes_module, tmp_path, capsys):
+    module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
@@ -183,8 +162,10 @@ def test_simple_defaults_warns_for_unsupported_advanced_keys(monkeypatch, tmp_pa
     assert "Warning: Ignoring unsupported advanced_summary_generation_kwargs keys: temperature" in out
 
 
-def test_simple_defaults_suppresses_unsupported_advanced_key_warning_in_minimal_log(monkeypatch, tmp_path, capsys):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_suppresses_unsupported_advanced_key_warning_in_minimal_log(
+    load_nodes_module, tmp_path, capsys
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
@@ -202,8 +183,8 @@ def test_simple_defaults_suppresses_unsupported_advanced_key_warning_in_minimal_
     assert capsys.readouterr().out == ""
 
 
-def test_simple_defaults_omits_invalid_advanced_seed_kwargs(monkeypatch, tmp_path):
-    module = _load_nodes_module(monkeypatch)
+def test_simple_defaults_omits_invalid_advanced_seed_kwargs(load_nodes_module, tmp_path):
+    module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(

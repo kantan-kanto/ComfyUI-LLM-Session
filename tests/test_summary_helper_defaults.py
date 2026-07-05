@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-import importlib
 import inspect
-import sys
-import types
 
 from core.defaults import FULL_UI_DEFAULTS, SUMMARY_HELPER_DEFAULTS
 
 
-def _load_nodes_module(monkeypatch):
-    fake_folder_paths = types.SimpleNamespace(
-        models_dir="C:/models",
-        get_folder_paths=lambda _key: [],
-        get_filename_list=lambda _key: [],
-        get_output_directory=lambda: "C:/output",
-    )
-    monkeypatch.setitem(sys.modules, "folder_paths", fake_folder_paths)
-    sys.modules.pop("llm_session_nodes", None)
-    return importlib.import_module("llm_session_nodes")
 
-
-def test_summary_helper_function_defaults_are_centralized(monkeypatch):
-    module = _load_nodes_module(monkeypatch)
+def test_summary_helper_function_defaults_are_centralized(load_nodes_module, monkeypatch):
+    module = load_nodes_module()
 
     compact_sig = inspect.signature(module.maybe_compact_summary)
     summarize_sig = inspect.signature(module.maybe_summarize_history)
