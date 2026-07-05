@@ -6,6 +6,10 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [1.3.0] - 2026-07-05
+
 - Media input for Session Chat nodes
   - Renamed the optional `LLM Session Chat` and `LLM Session Chat (Simple)` input from `image` to `media`.
   - IMAGE tensors and IMAGE batches are accepted; batches are sent as multiple image message parts.

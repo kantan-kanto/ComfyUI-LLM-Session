@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.2.3
+**Version:** 1.3.0
 **License:** GPL-3.0
 
 A local LLM execution environment that runs entirely inside **ComfyUI**, 
@@ -18,7 +18,7 @@ for **observation, experimentation, and analysis**.
 <details>
 <summary><strong>Upgrade Notes for Existing Users</strong></summary>
 
-The following notes are intended for existing users upgrading to the `1.1.x` / `1.2.x` series.
+The following notes are intended for existing users upgrading to the `1.1.x` / `1.2.x` / `1.3.x` series.
 
 - Cache-related setting names have changed. The previous `prompt_cache_mode` / `kv_state_mode` options have been reorganized into `persistent_cache` / `runtime_cache`.
 - The cache storage directory name has changed from `prompt_cache/` to `cache/`. Existing cache data is not migrated automatically.
@@ -27,12 +27,14 @@ The following notes are intended for existing users upgrading to the `1.1.x` / `
 - When using Vision models, both mmproj auto-detection and handler selection logic have changed. Even combinations that worked before may need to be rechecked depending on backend behavior and filename conventions.
 - The optional `LLM Session Chat` / `LLM Session Chat (Simple)` media input is now named `media` instead of `image`.
 - Old workflows that still contain an `image` input are migrated in the ComfyUI UI when loaded. Save the workflow once after loading to persist the normalized `media` input in the workflow JSON.
+- IMAGE batches connected to `media` are now sent as multiple image message parts.
+- ComfyUI `AUDIO` media is accepted only for Gemma 4 models. Unsupported media inputs, including AUDIO for other model families, now fail with explicit errors before model loading.
 - `LLM Dialogue Cycle` now keeps model managers loaded when `runtime_cache` is `KV_cache` or `LlamaTrieCache`.
 - Added `Unload LLM Model` output node for explicit manual VRAM release after keep-loaded runs.
 - History loading now restores from `*.bak` when the primary history JSON is invalid or missing.
 - Adaptive retry now recognizes additional context-overflow error wording (`context window ... exceed ...`).
 
-For details, see the `1.1.x` and `1.2.x` sections in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
+For details, see the `1.1.x`, `1.2.x`, and `1.3.x` sections in [CHANGELOG.md](CHANGELOG.md). For Vision / backend-specific differences, see [COMPATIBILITY.md](COMPATIBILITY.md).
 
 </details>
 
@@ -338,12 +340,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.2.2 / 1.2.3
+### Current Version: 1.3.0
 
-- `1.2.3` is a Registry compatibility re-release of `1.2.2`.
-- Removed a plain URL comment from `requirements.txt` to avoid false-positive dependency flagging by the ComfyUI Registry scanner.
-- Improved Vision model diagnostics when a required multimodal chat handler is unavailable.
-- Added MiniCPM-V-4.6 aliases, chat-handler mapping, and Text-only prompt support.
-- Added advanced JSON-based parameter settings for Simple-node config files.
-- Added [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md) for advanced JSON settings and current limitations.
-- Kept the default `llama-cpp-python` dependency conservative while documenting backend compatibility notes for newer Vision models.
+- Renamed the optional `LLM Session Chat` / `LLM Session Chat (Simple)` input from `image` to `media`, with workflow migration and backend compatibility for old `image` inputs.
+- Added IMAGE batch handling and Gemma 4 AUDIO media support, with explicit errors for unsupported media combinations.
+- Improved multimodal handler compatibility across PyPI and JamePeng `llama-cpp-python` builds.
+- Added debug-level runtime diagnostics, generation heartbeat logs, and clearer Dialogue Cycle turn labels.
+- Added service-layer tests and maintainer documentation for agent workflow, verification, and release preparation.
