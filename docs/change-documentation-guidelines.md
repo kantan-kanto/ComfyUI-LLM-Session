@@ -378,12 +378,40 @@ guide, the assistant should complete the following checklist.
 
 ### 3. Verify the Result
 
+#### Mechanical Checks
+
+- Check local Markdown links when files were moved, renamed, or newly linked.
+- Check that every `docs/*.md` file has the required metadata block:
+  `Status`, `Last reviewed`, and `Update when`.
+- Check that prose headings still form a natural reading order. Ignore headings
+  inside fenced code examples when checking the document outline.
+- When `docs/architecture.md` changes, compare dependency-direction claims with
+  production imports. If new cross-layer exceptions appear, either document the
+  exception clearly or consider whether a lower-level `common/` layer is needed.
+- When code or docs are moved, check whether file/line references in historical
+  notes, audits, or issue records need clarification.
+
+#### Content Checks
+
 - Review the affected sections for stale wording, duplicated guidance, and
   inconsistent terminology.
-- Check that headings still form a natural reading order.
-- Check local Markdown links when files were moved, renamed, or newly linked.
+- Confirm canonical and historical documents are not mixed. Historical counts,
+  line numbers, and audit totals should be clearly marked as historical when
+  they do not describe the current repository state.
 - Confirm that README content remains concise and that detailed explanations
   live in the reference documents.
+- When first-use guidance changes, check whether `README.md` and
+  `README.ja.md` need matching updates.
+- When user-visible behavior, compatibility, or release-facing documentation
+  changes, check whether `CHANGELOG.md` or GitHub release notes need updates.
+- When issue status changes, check whether `docs/known-issues.md` needs a new
+  entry, a `Status` update, or a resolved-date note.
+
+#### Verification Notes
+
+- In the final response, state which checks were performed.
+- If tests were skipped because the change was documentation-only, say so.
+- If a check was intentionally skipped or left for follow-up, name it explicitly.
 
 ### 4. Output a Commit Message
 

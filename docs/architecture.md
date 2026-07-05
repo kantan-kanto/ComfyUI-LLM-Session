@@ -46,7 +46,11 @@ Allowed:
 - `services/` -> `core/`, `infra/` only through explicit helpers or injected
   callbacks/dependencies
 - `core/` -> standard library only
-- `infra/` -> standard library only
+- `infra/` -> standard library only, except `core.logging_utils` as the current
+  cross-cutting logging utility
+- If more cross-cutting utilities are needed by both `core/` and `infra/`,
+  consider introducing a lower-level `common/` layer instead of adding more
+  `infra/` -> `core/` exceptions.
 - `web/` -> browser/ComfyUI frontend APIs only
 - `tests/` -> production modules and test fixtures
 - `docs/`, `examples/`, `images/`, `.github/` -> no production runtime imports
@@ -55,7 +59,8 @@ Disallowed:
 
 - `core/` -> `services/`, `infra/`, node layer, ComfyUI APIs, or repository
   path layout
-- `infra/` -> `core/`, `services/`, node layer, or ComfyUI APIs
+- `infra/` -> `core/`, `services/`, node layer, or ComfyUI APIs, except
+  `core.logging_utils` as noted above
 - `services/` -> node layer or ComfyUI APIs unless passed in as callbacks from
   the composition root
 - production runtime layers (`llm_session_nodes.py`, `core/`, `services/`,

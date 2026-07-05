@@ -6,6 +6,8 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 Before proposing larger refactors or behavior changes, please review these documents:
 
+- [Documentation Index](docs/index.md)
+  - Entry point for current docs, canonical references, and historical records.
 - [Architecture Overview](docs/architecture.md)
   - Module layering and dependency direction.
 - [Refactoring Rules](docs/refactoring-rules.md)

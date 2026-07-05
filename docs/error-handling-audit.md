@@ -13,6 +13,8 @@ the audit and may not match current source files.
 **Date**: 2026-03-22
 **Scope**: `except Exception:` error handling usage
 **Total Count**: 57 occurrences
+**Count note**: This is the historical audit count from 2026-03-22, not the
+current repository count.
 **Status**: P0/P1 improvements completed (2026-03-22)
 
 ---
