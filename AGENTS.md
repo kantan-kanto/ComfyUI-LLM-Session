@@ -1,165 +1,80 @@
 # AGENTS.md
 
-This file is the required entry point for coding agents working on
-ComfyUI-LLM-Session. Keep it short: detailed policy belongs in `docs/`.
+This is the required entry point for coding agents working on
+ComfyUI-LLM-Session. It routes agents to the repository's canonical guidance;
+detailed policy belongs in `docs/`.
 
 ## Purpose
 
 ComfyUI-LLM-Session is a ComfyUI custom node project for local LLM session
-workflows. Agent-assisted changes should be small, tested, and consistent with
-the repository's existing service/module boundaries.
+workflows. Keep changes scoped, preserve established service and module
+boundaries, and use pytest as the automated guardrail. Manual ComfyUI checks
+remain the final behavior validation for UI and runtime workflows.
 
-Agents are expected to improve the repository without replacing human ComfyUI
-validation. Treat pytest as the automated guardrail and manual ComfyUI checks as
-the final behavior validation for UI/runtime workflows.
-
-## Repository Overview
+## Repository Map
 
 - `llm_session_nodes.py`: ComfyUI node definitions and compatibility-facing
   behavior.
-- `core/`: shared defaults, runtime container, generation helpers, KV-state
-  helpers, logging utilities, and turn types.
-- `services/`: orchestration services for chat turns, generation execution,
-  history persistence, KV-state handling, and node execution flows.
-- `infra/`: persistence/storage helpers.
-- `tests/`: pytest coverage for core helpers, services, contracts, defaults,
-  model-specific behavior, and regressions.
-- `docs/`: maintained project rules, architecture notes, and change guidance.
+- `core/`: shared runtime, generation, state, logging, and turn helpers.
+- `services/`: chat-turn, generation, history, state, and node orchestration.
+- `infra/`: persistence and storage helpers.
+- `tests/`: pytest coverage for behavior, contracts, and regressions.
+- `docs/`: canonical project rules, architecture notes, and change guidance.
 
-## Required Reading And Outputs
+## Required Reading and Routing
 
-Before answering, planning, editing, reviewing, or proposing commit/release text,
-read `docs/index.md` and then follow the relevant routing below. This routing
-applies even when the user asks for advice only and no files are edited.
+Before repository-specific analysis, planning, editing, review, or release
+work, read `docs/index.md`, then apply every row below that matches the task.
+Required outputs are cumulative unless a specialized document defines a more
+specific format.
 
-| Task type | Required docs | Required output |
+| Task type | Required document | Required output |
 | --- | --- | --- |
-| General coding task | `docs/agent-development-plan.md` | Implementation summary, tests run or skipped, docs impact, manual validation needs |
-| Refactoring | `docs/refactoring-rules.md` | Refactoring scope, behavior-preservation notes, focused tests |
-| Tests or behavior verification | `docs/testing-rules.md` | Focused/full pytest status, skipped checks with reasons |
-| Logging, exception handling, or silent fallbacks | `docs/logging-guidelines.md` | Logging/error-handling rationale and tests or skipped-test reason |
-| Public behavior, parameters, README, changelog, or docs changes | `docs/change-documentation-guidelines.md` | Docs impact summary and recommended commit message when requested or useful |
-| Release preparation, version changes, changelog updates, or GitHub release notes | `docs/change-documentation-guidelines.md` | Recommended release commit message and draft GitHub release notes |
-| Service boundaries, dependency direction, or module placement | `docs/architecture.md` | Placement/dependency rationale and affected services/modules |
-| Manual ComfyUI validation may be needed | `docs/manual-test-checklist.md` | Relevant checklist sections for the human to run |
-| Non-trivial verification planning | `docs/templates/verification-plan.md` | Verification plan or concise equivalent in the final response |
+| Any repository code change | `docs/agent-development-plan.md` | Implementation summary, checks run or skipped, docs impact, and manual validation needs |
+| Refactoring | `docs/refactoring-rules.md` | Scope, behavior-preservation notes, and focused tests |
+| Tests or behavior verification | `docs/testing-rules.md` | Focused/full pytest status and reasons for skipped checks |
+| Logging, exceptions, or silent fallbacks | `docs/logging-guidelines.md` | Error-handling rationale and test status |
+| Public behavior, parameters, docs, changelog, commit text, or releases | `docs/change-documentation-guidelines.md` | The documentation and final-response outputs required there |
+| Service boundaries, dependency direction, or module placement | `docs/architecture.md` | Placement rationale and affected modules or services |
+| Manual ComfyUI validation may be needed | `docs/manual-test-checklist.md` | Relevant checklist sections for a human to run |
+| Non-trivial verification planning | `docs/templates/verification-plan.md` | A verification plan or concise equivalent |
 
-Do not duplicate detailed policy here. Update the relevant document in `docs/`
-when a rule changes.
+Before acting, extract the applicable requirements from the routed documents.
+For non-trivial work, record them in a short working checklist. Before the
+final response, verify all required outputs, formats, prohibitions, and skipped-
+check explanations.
 
-## Working Rules
+## Cross-Cutting Rules
 
-- Prefer existing patterns, helpers, and service boundaries.
-- Keep edits scoped to the requested behavior.
-- Avoid broad refactors unless the task explicitly asks for them.
-- Preserve public node interfaces unless the change intentionally updates them.
-- Add or update tests for behavior changes whenever pytest can express the
-  expected behavior.
-- Do not claim manual ComfyUI validation was performed unless it actually was.
-- Report skipped checks, manual validation needs, and residual risks clearly.
+- Prefer existing patterns, helpers, service boundaries, and dependency
+  direction.
+- Keep edits scoped to the requested behavior; avoid unrelated refactoring.
+- Preserve public node interfaces unless the task intentionally changes them.
+- Add or update tests when changed behavior can be expressed with pytest.
+- Follow `docs/testing-rules.md` for focused and full-suite test decisions, and
+  report every skipped check with its reason.
+- Determine documentation impact through `docs/index.md` and
+  `docs/change-documentation-guidelines.md`.
+- When documentation files are added, removed, or change roles, update
+  `docs/index.md` in the same change.
+- Do not claim manual ComfyUI validation was performed unless a human actually
+  performed it. Identify the relevant sections of
+  `docs/manual-test-checklist.md` when manual validation is needed.
+- Report remaining limitations and risks clearly.
 
-## Implementation Planning
-
-For small fixes, a short implementation note is enough. For non-trivial changes,
-identify:
-
-- Goal
-- Files or modules likely to change
-- Expected behavior impact
-- Test plan
-- Documentation impact
-- Manual ComfyUI validation needs
-
-Use `docs/agent-development-plan.md` as the source for the longer-term agent
-workflow plan.
-
-## Testing Expectations
-
-- Run focused tests for the changed area.
-- Run the full pytest suite when practical.
-- Add regression tests for bug fixes when the behavior can be reproduced without
-  launching ComfyUI.
-- Add contract tests when node interfaces, defaults, mappings, or service
-  request/response shapes change.
-- Keep the current test layout unless a separate change explicitly introduces a
-  new structure.
-
-Current preferred full-suite command:
-
-```powershell
-python -m pytest -q
-```
-
-Use the repository's active Python environment when one is required by the local
-setup.
-
-When tests are not run, state why. For documentation-only changes, explicitly
-say that pytest was not run because runtime behavior was not changed.
-
-## Documentation Expectations
-
-Check documentation impact before finishing. Depending on the change, update or
-explicitly leave unchanged:
-
-- `README.md`
-- `README.ja.md`
-- `CHANGELOG.md`
-- `docs/architecture.md`
-- `docs/testing-rules.md`
-- `docs/refactoring-rules.md`
-- `docs/logging-guidelines.md`
-- `docs/change-documentation-guidelines.md`
-
-Follow `docs/change-documentation-guidelines.md` for public-facing behavior and
-release-note decisions.
-
-When proposing commit messages, follow the commit message rules in
-`docs/change-documentation-guidelines.md`:
-
-- Prefer `area: Imperative summary`.
-- Use one of the documented areas such as `docs`, `compat`, `runtime`, `ui`,
-  `tests`, or `release` when it adds useful context.
-- Keep the subject concise, ideally around 72 characters or less.
-- Do not end the subject line with a period.
-- Add a short body only when it clarifies the grouped changes.
-
-When the user asks for release preparation, a version bump, changelog work, or
-release notes, always provide draft GitHub release notes unless the user
-explicitly asks not to. Use only the release-note sections that apply.
-
-When documentation files are added, removed, or their roles change, update
-`docs/index.md` in the same change.
-
-## Manual ComfyUI Validation
-
-Some behavior cannot be fully validated by pytest. Call this out when relevant,
-especially for:
-
-- Node appearance and UI wiring.
-- Real ComfyUI graph execution.
-- GPU/backend-specific llama.cpp behavior.
-- Image-capable model paths.
-- User-visible error presentation.
-- End-to-end session, continue, summary, or KV-cache workflows.
-
-When manual validation is needed, tell the human which sections of
-`docs/manual-test-checklist.md` to run. Do not mark those checks as passed unless
-a human actually performed them.
+Do not copy detailed policy into this file. When a rule changes, update its
+canonical document in `docs/`; change this file only when routing or a genuinely
+cross-cutting rule changes.
 
 ## Definition of Done
 
 A change is ready to report when:
 
-- The implementation is complete and scoped.
-- Relevant tests were added or updated, or the reason for not doing so is clear.
-- Focused pytest checks pass.
-- The full pytest suite was run when practical, or the reason it was skipped is
-  stated.
-- Documentation impact was reviewed.
-- Manual ComfyUI validation needs are stated, including the relevant
-  `docs/manual-test-checklist.md` sections when manual validation is needed.
-- Release-preparation tasks include a recommended release commit message and
-  draft GitHub release notes, unless the user explicitly asked not to include
-  them.
-- Commit message suggestions follow `docs/change-documentation-guidelines.md`.
-- Remaining limitations or risks are reported.
+- The requested work is complete and scoped.
+- Applicable automated checks pass, or skipped checks and their reasons are
+  reported.
+- Documentation impact has been reviewed.
+- Required human validation is identified and is not reported as completed
+  unless it was actually performed.
+- All routed-document output requirements are satisfied.
+- Remaining limitations or risks are stated.

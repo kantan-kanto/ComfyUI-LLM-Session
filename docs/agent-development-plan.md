@@ -1,6 +1,7 @@
 # Agent Development Plan
 
 - Status: Proposed
+- Last reviewed: 2026-07-11
 - Source: Adapted from `experiments/plan.md`
 - Scope: Codex Extension and similar coding agents working on this repository.
 - Update when: Agent workflow, testing policy, documentation routing, or release verification expectations change.

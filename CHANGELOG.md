@@ -6,6 +6,18 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [Unreleased]
 
+- Documentation
+  - Refined the English and Japanese project introductions and package metadata
+    to clarify in-ComfyUI GGUF execution, multimodal support, supported model
+    families, and model-to-model dialogue use cases.
+  - Clarified that agents must extract applicable requirements from canonical
+    docs before acting, instead of relying on `AGENTS.md` to duplicate every
+    detailed rule.
+  - Clarified release-note guidance so draft GitHub release notes are provided
+    in the final response unless a separate file is explicitly requested.
+  - Standardized commit-message suggestions as one-line summaries covering all
+    changes since the previous commit unless a narrower scope is requested.
+
 ---
 
 ## [1.3.0] - 2026-07-05

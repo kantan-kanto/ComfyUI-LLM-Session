@@ -1,6 +1,8 @@
 # Manual ComfyUI Test Checklist
 
 - Status: Canonical
+- Last reviewed: 2026-07-11
+- Update when: Manual ComfyUI validation scope, triage, or checklist steps change.
 - Use when: A change may affect ComfyUI UI wiring, real graph execution, model
   loading, backend behavior, or user-visible runtime behavior.
 - Do not use when: The change is documentation-only, test-only, or fully covered

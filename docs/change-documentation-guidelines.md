@@ -1,8 +1,8 @@
 # Change Documentation Guidelines
 
 - Status: Canonical
-- Last reviewed: 2026-07-05
-- Update when: Documentation roles, release-note rules, or docs metadata policy changes.
+- Last reviewed: 2026-07-11
+- Update when: Documentation roles, commit-message rules, release-note rules, or docs metadata policy changes.
 
 This document defines how to document and describe changes in this repository.
 Use it when adding features, changing behavior, updating compatibility notes,
@@ -152,7 +152,10 @@ document when needed.
 
 ## Commit Message Guidelines
 
-Use commit messages as short, precise records of individual changes.
+Use commit messages as short, precise one-sentence summaries. Unless the user
+specifies a narrower scope, base the message on every change since the previous
+commit. Provide only the one-line version; do not add a body or detailed version
+unless the user explicitly requests one.
 
 ### Format
 
@@ -178,10 +181,9 @@ or obvious changes, a plain imperative summary is acceptable.
 
 - Use imperative mood: `Add`, `Fix`, `Update`, `Clarify`, `Refine`,
   `Prepare`.
-- Keep the first line concise, ideally around 72 characters or less.
+- Keep the message concise, ideally around 72 characters or less.
 - Do not end the subject line with a period.
 - Mention the user-visible behavior when possible.
-- Keep unrelated changes in separate commits when practical.
 
 ### Suggested Areas
 
@@ -196,6 +198,9 @@ or obvious changes, a plain imperative summary is acceptable.
 
 GitHub release notes should be easier to read than the changelog. They should
 highlight what users need to know first, then group details by category.
+
+Unless the user explicitly asks for a file, draft GitHub release notes should be
+provided in the final response rather than written to a separate Markdown file.
 
 ### Release Title
 
@@ -415,8 +420,10 @@ guide, the assistant should complete the following checklist.
 
 ### 4. Output a Commit Message
 
-After updating the documentation, provide one recommended commit message using
-the commit message guidelines above.
+After updating the documentation, provide one recommended one-line commit
+message using the commit message guidelines above. Unless the user specifies a
+narrower scope, review and summarize every change since the previous commit.
+Do not provide a body or detailed version unless explicitly requested.
 
 Prefer this format:
 
@@ -440,6 +447,10 @@ release: Prepare vX.Y.Z
 
 Provide draft GitHub release notes using the release guidelines above. Include
 only sections that apply.
+
+Also provide a release title in the `vX.Y.Z – Short Theme` format. Do not write
+release notes to a separate Markdown file unless the user explicitly requests a
+file.
 
 For documentation-only work, this compact form is usually enough:
 
