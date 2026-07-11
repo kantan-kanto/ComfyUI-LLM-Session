@@ -4,14 +4,11 @@
 **Version:** 1.3.0
 **License:** GPL-3.0
 
-A local LLM execution environment that runs entirely inside **ComfyUI**, 
-without external runtimes such as Ollama.
+A local LLM execution environment that runs GGUF models via llama.cpp entirely inside **ComfyUI**, without external runtimes such as Ollama.
 
-Supports GGUF models via llama.cpp, including many popular open-weight LLMs
-such as Llama, Mistral, Qwen, DeepSeek, GLM, Gemma, LLaVA and gpt-oss.
+Supports text chat, image analysis, and Gemma 4 audio input on compatible backends across many popular open-weight model families such as Llama, Mistral, Qwen, DeepSeek, GLM, Gemma, Phi, LLaVA, and gpt-oss.
 
-In addition to user–model chat, it also supports model-to-model dialogue
-for **observation, experimentation, and analysis**.
+In addition to user–model chat, it also supports model-to-model dialogue where different models or roles can build on, critique, and revise each other's responses, or simulate conversations to test whether prompts and role settings behave as intended.
 
 ---
 

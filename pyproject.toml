@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-llm-session"
-description = "Local LLM session nodes for ComfyUI using GGUF and llama.cpp, supporting Llama, Mistral, Qwen, DeepSeek, GLM, Gemma, Phi, LLaVA and gpt-oss, with multimodal image input, Gemma 4 audio input, and model-to-model dialogue without external runtimes like Ollama."
+description = "Local LLM session nodes for ComfyUI that run GGUF models with llama.cpp without external runtimes like Ollama. Supports image analysis, audio analysis, user-model chat, and model-to-model dialogue across Llama, Mistral, Qwen, DeepSeek, GLM, Gemma, Phi, LLaVA, and gpt-oss with compatible backends."
 version = "1.3.0"
 license = {file = "LICENSE"} 
 # classifiers = [

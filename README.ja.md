@@ -6,13 +6,15 @@
 **Version:** 1.3.0
 **License:** GPL-3.0
 
-**ComfyUI 上だけで動作するローカル LLM 実行環境**です。  
+**ComfyUI 上だけで GGUF モデルを llama.cpp 経由で実行するローカル LLM 実行環境**です。  
 Ollama などの外部ランタイムを必要とせず、ComfyUI のノードとして完結します。
 
-llama.cpp を通じて GGUF モデルをサポートしており、Qwen、Llama、Mistral NeMo、Gemma、Phi-3 Mini など、主要なオープン LLM を利用できます。
+テキストチャット、画像解析、対応 backend での Gemma 4 音声入力に対応します。
+Llama、Mistral、Qwen、DeepSeek、GLM、Gemma、Phi、LLaVA、gpt-oss など、
+主要なオープンモデル系を利用できます。
 
 ユーザーとモデルの対話だけでなく、**モデル同士の対話**にも対応しており、
-**観察・実験・分析**用途を主眼に設計されています。
+異なるモデルや役割設定が互いの応答をもとに、内容を発展させたり、批評・修正したりする用途や、実際のユーザー会話に近い形でプロンプトやロール設定が意図どおりに働くかを試す用途に使えます。
 
 ---
 
