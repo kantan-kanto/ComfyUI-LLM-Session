@@ -14,6 +14,15 @@ import pytest
         ("C:/models/LLM/MiniCPM-V-4.6.gguf", "minicpm-v-4.6"),
         ("C:/models/LLM/MiniCPM-V-4_6.gguf", "minicpm-v-4.6"),
         ("C:/models/LLM/MiniCPMV46.gguf", "minicpm-v-4.6"),
+        ("C:/models/LLM/Qwen-3.5-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen-3_5-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen-3.6-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen-3_6-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen3.8-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen3_8-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen38-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen-3.8-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen-3_8-27B-Q4_K_M.gguf", "qwen3.5"),
     ],
 )
 def test_detect_model_family_aliases(load_nodes_module, model_path, expected_family):
@@ -43,6 +52,43 @@ def test_minicpm_v46_declares_handler_and_generation_defaults(load_nodes_module)
 
     assert module.DECLARED_CHAT_HANDLER_MAP["minicpm-v-4.6"] == "MiniCPMV46ChatHandler"
     assert module.CHAT_HANDLER_KWARGS_MAP["minicpm-v-4.6"]["enable_thinking"] is False
+
+
+def test_qwen38_reuses_qwen35_handler_and_generation_defaults(load_nodes_module):
+    module = load_nodes_module()
+
+    assert module._detect_model_family("C:/models/Qwen3.8-27B.gguf") == "qwen3.5"
+    assert module.DECLARED_CHAT_HANDLER_MAP["qwen3.5"] == "Qwen35ChatHandler"
+    assert module.CHAT_HANDLER_KWARGS_MAP["qwen3.5"] == {
+        "enable_thinking": False,
+        "image_min_tokens": 1024,
+    }
+
+
+@pytest.mark.parametrize(
+    ("model_name", "mmproj_name"),
+    [
+        ("Qwen-3.5-27B-Q4_K_M.gguf", "mmproj-Qwen-3.5-27B-f16.gguf"),
+        ("Qwen-3.6-27B-Q4_K_M.gguf", "mmproj-Qwen-3_6-27B-f16.gguf"),
+        ("Qwen3.8-27B-Q4_K_M.gguf", "mmproj-Qwen3.8-27B-f16.gguf"),
+    ],
+)
+def test_qwen3x_mmproj_auto_detection_uses_family_aliases(
+    load_nodes_module,
+    tmp_path,
+    model_name,
+    mmproj_name,
+):
+    module = load_nodes_module()
+    model_path = tmp_path / model_name
+    mmproj_path = tmp_path / mmproj_name
+    model_path.write_text("model", encoding="utf-8")
+    mmproj_path.write_text("projector", encoding="utf-8")
+
+    manager = module.GGUFModelManager()
+    detected = manager._auto_detect_mmproj(str(model_path), "qwen3.5")
+
+    assert detected == manager._normalize_path(str(mmproj_path))
 
 
 

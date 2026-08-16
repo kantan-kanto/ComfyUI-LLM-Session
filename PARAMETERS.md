@@ -127,7 +127,7 @@ Default:
 - `false`
 
 Currently supported formats:
-- Qwen3.5 / Qwen3.6 compatibility path
+- Qwen3.5 / Qwen3.6 / Qwen3.8 compatibility path
 - Gemma 4
 - MiniCPM-V 4.6
 

@@ -6,6 +6,16 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [Unreleased]
 
+- Compatibility
+  - Added Qwen3.8 model-name aliases and routed them through the existing
+    Qwen3.5 text, Vision, mmproj, and thinking on/off compatibility path.
+  - Added matching hyphenated Qwen3.5 and Qwen3.6 filename aliases for
+    consistent model-family and mmproj discovery.
+  - Added regression coverage for Qwen3.8 family detection, handler defaults,
+    mmproj discovery, text prompt construction, and summary thinking override.
+  - Documented that Qwen3.8 `reasoning_effort`, `preserve_thinking`, video input,
+    and actual GGUF runtime validation remain outside the first-stage support.
+
 - Documentation
   - Refined the English and Japanese project introductions and package metadata
     to clarify in-ComfyUI GGUF execution, multimodal support, supported model

@@ -1,6 +1,68 @@
 from __future__ import annotations
 
 
+def test_qwen38_text_builder_consumes_enable_thinking_false(load_nodes_module):
+    module = load_nodes_module()
+    messages = [
+        {"role": "system", "content": "System rules."},
+        {"role": "user", "content": "Hello"},
+    ]
+
+    request = module._build_text_chat_request(
+        model_path="C:/models/LLM/Qwen3.8-27B-Q4_K_M.gguf",
+        mmproj_path=module._MMPROJ_NOT_REQUIRED,
+        messages=messages,
+        text_chat_builder_overrides={"qwen3.5": {"enable_thinking": False}},
+    )
+
+    assert request is not None
+    assert request["model_family"] == "qwen3.5"
+    assert request["config"]["enable_thinking"] is False
+    assert "<|im_start|>system\nSystem rules.<|im_end|>" in request["prompt"]
+    assert "<|im_start|>user\nHello<|im_end|>" in request["prompt"]
+    assert request["prompt"].endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n")
+    assert request["stop"] == ["<|im_end|>", "<|endoftext|>"]
+
+
+def test_qwen38_text_builder_consumes_enable_thinking_true(load_nodes_module):
+    module = load_nodes_module()
+
+    request = module._build_text_chat_request(
+        model_path="C:/models/LLM/Qwen-3.8-27B-Q4_K_M.gguf",
+        mmproj_path="",
+        messages=[{"role": "user", "content": "Think if needed."}],
+        text_chat_builder_overrides={"qwen3.5": {"enable_thinking": True}},
+    )
+
+    assert request is not None
+    assert request["model_family"] == "qwen3.5"
+    assert request["config"]["enable_thinking"] is True
+    assert request["prompt"].endswith("<|im_start|>assistant\n<think>\n")
+    assert "</think>" not in request["prompt"]
+
+
+def test_qwen38_summary_forced_override_wins_over_request_override(load_nodes_module):
+    module = load_nodes_module()
+
+    overrides = module._merge_text_chat_builder_overrides(
+        model_path="C:/models/LLM/Qwen3_8-27B-Q4_K_M.gguf",
+        base_overrides={"qwen3.5": {"enable_thinking": True}},
+        forced_overrides_map=module.SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP,
+    )
+
+    request = module._build_text_chat_request(
+        model_path="C:/models/LLM/Qwen3_8-27B-Q4_K_M.gguf",
+        mmproj_path=None,
+        messages=[{"role": "user", "content": "Summarize."}],
+        text_chat_builder_overrides=overrides,
+    )
+
+    assert overrides == {"qwen3.5": {"enable_thinking": False}}
+    assert request is not None
+    assert request["config"]["enable_thinking"] is False
+    assert request["prompt"].endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n")
+
+
 
 def test_gemma4_text_builder_consumes_enable_thinking_false(load_nodes_module):
     module = load_nodes_module()

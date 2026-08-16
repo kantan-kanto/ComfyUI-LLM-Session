@@ -149,7 +149,7 @@ When using Vision-capable models, please follow these rules:
 
 Supported model-family prefixes / aliases:
 
-`llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, minicpm-v-4.6, minicpm-v-4_6, minicpmv46, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen3.6, qwen3_6, qwen36, step3-vl, step3vl`
+`llava-1-5, llava15, llava-v1.5, llava-1-6, llava16, llava-v1.6, moondream2, nanollava, llama-3, llama3, minicpm-v-2.6, minicpm-v-2_6, minicpmv26, minicpm-v-4.0, minicpm-v-4_0, minicpmv40, minicpm-v-4.5, minicpm-v-4_5, minicpmv45, minicpm-v-4.6, minicpm-v-4_6, minicpmv46, gemma3, gemma-3, gemma_3, gemma4, gemma-4, gemma_4, glm4.1v, glm4_1v, glm41v, glm-4.1v, glm4.6v, glm4_6v, glm46v, glm-4.6v, granitedocling, granite-docling, lfm2-vl, lfm2vl, lfm2.5-vl, lfm2.5vl, lfm2_5-vl, lfm2_5vl, paddleocr, qwen2.5-vl, qwen2_5-vl, qwen25vl, qwen3-vl, qwen3vl, qwen3.5, qwen3_5, qwen35, qwen-3.5, qwen-3_5, qwen3.6, qwen3_6, qwen36, qwen-3.6, qwen-3_6, qwen3.8, qwen3_8, qwen38, qwen-3.8, qwen-3_8, step3-vl, step3vl`
 
 ---
 
@@ -260,6 +260,12 @@ builds for the required chat handlers.
 - Qwen3.6 (27B / 35B-A3B)*
 
 **Note:** Entries marked with `*` either do not work on PyPI `llama-cpp-python` or have not been tested on it.
+
+### Node Routing Implemented (Runtime Validation Pending)
+
+- Qwen3.8 (27B)* — routed through the existing Qwen3.5 compatibility path for
+  text, Vision, mmproj discovery, and thinking on/off. Actual GGUF runtime
+  validation with a recent JamePeng backend remains required.
 
 ### MoE Models
 

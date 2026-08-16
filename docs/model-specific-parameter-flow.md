@@ -1,7 +1,7 @@
 # Model-Specific Parameter Flow
 
 - Status: Canonical
-- Last reviewed: 2026-07-05
+- Last reviewed: 2026-08-16
 - Update when: Model-family maps or parameter precedence behavior changes.
 
 This document defines the implementation rules for model-family-specific
@@ -297,9 +297,10 @@ CHAT_HANDLER_KWARGS_MAP["qwen3-vl"] = {"image_min_tokens": 1024}
 
 `image_min_tokens` is not a text-builder or summary-builder setting.
 
-### Qwen3.5
+### Qwen3.5-Compatible Families
 
-Qwen3.5 currently uses all three maps:
+Qwen3.5, Qwen3.6, and Qwen3.8 normalize to the canonical `qwen3.5` family.
+They currently use all three maps:
 
 ```python
 CHAT_HANDLER_KWARGS_MAP["qwen3.5"] = {

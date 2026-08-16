@@ -39,6 +39,13 @@ This document summarizes empirical compatibility results obtained during develop
 
 **Note:** Entries marked with `*` either do not work on PyPI `llama-cpp-python` or have not been tested on it.
 
+### Node Routing Implemented (Runtime Validation Pending)
+
+- Qwen3.8 (27B)* — routed through the existing Qwen3.5 compatibility path
+  because the model declares the `qwen3_5` architecture. Text, Vision, mmproj
+  discovery, and thinking on/off are covered by automated contract tests, but
+  actual Qwen3.8 GGUF runtime validation is still pending.
+
 ---
 
 ## MoE Models (Backend-Dependent)
@@ -102,6 +109,15 @@ Vision handler compatibility fallbacks are applied only in narrow cases.
 For newer Vision model families, please follow the build and installation information provided by the upstream JamePeng llama-cpp-python project and choose a build appropriate for your OS, Python version, and acceleration backend.
 
 `0.3.33+` (JamePeng fork) works for `Qwen3.5` Vision in my environment. Earlier `0.3.30+` builds added support for `Qwen3.5`, but Vision mode was not yet working reliably for me at that stage.
+
+For Qwen3.8, start validation with a current JamePeng build that includes recent
+llama.cpp Qwen3.5-architecture and MTMD updates. Do not treat the Qwen3.5
+minimum above as a confirmed Qwen3.8 minimum until text, Vision, and state/cache
+behavior have been exercised with an actual Qwen3.8 GGUF and matching mmproj.
+
+The first-stage Qwen3.8 integration intentionally does not expose
+`reasoning_effort` or `preserve_thinking`. Video input also remains unsupported
+by this node and the selected `Qwen35ChatHandler` path.
 
 Recent JamePeng MTMD chat handlers use `mmproj_path` as the projector argument.
 Older handlers used `clip_model_path`. The node runtime prefers `mmproj_path`
