@@ -119,7 +119,7 @@ _SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = dict(SUMMARY_HELPER_DEFAULTS)
 _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
-_ADVANCED_GENERATION_ALLOWED_KEYS = {"seed"}
+_ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty"}
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
 _QWEN38_REASONING_EFFORT_DEFAULT = "medium"
 _QWEN38_REASONING_EFFORT_VALUES = {"xhigh", "medium", "low"}
@@ -188,6 +188,47 @@ def _advanced_seed_kwargs(value: Any) -> Dict[str, int]:
         return {"seed": int(value.get("seed"))}
     except Exception:
         return {}
+
+
+def _advanced_generation_kwargs(value: Any, log_level: str) -> Dict[str, Any]:
+    """Validate supported Simple-only generation kwargs without adding defaults."""
+    if not isinstance(value, dict):
+        return {}
+
+    parsed: Dict[str, Any] = _advanced_seed_kwargs(value)
+
+    if value.get("top_k") is not None:
+        try:
+            if isinstance(value.get("top_k"), bool):
+                raise ValueError
+            top_k = int(value.get("top_k"))
+            if top_k < 0 or str(value.get("top_k")).strip() not in {str(top_k), f"+{top_k}"}:
+                raise ValueError
+            parsed["top_k"] = top_k
+        except Exception:
+            _simple_config_log(
+                "Warning: Ignoring invalid advanced_generation_kwargs.top_k; expected an integer >= 0.",
+                log_level,
+            )
+
+    for key, maximum in (("min_p", 1.0), ("present_penalty", 2.0)):
+        if value.get(key) is None:
+            continue
+        try:
+            if isinstance(value.get(key), bool):
+                raise ValueError
+            parsed_value = float(value.get(key))
+            if not np.isfinite(parsed_value) or not 0.0 <= parsed_value <= maximum:
+                raise ValueError
+            parsed[key] = parsed_value
+        except Exception:
+            _simple_config_log(
+                f"Warning: Ignoring invalid advanced_generation_kwargs.{key}; "
+                f"expected a number from 0.0 to {maximum:.1f}.",
+                log_level,
+            )
+
+    return parsed
 
 
 def _warn_unsupported_advanced_keys(
@@ -384,8 +425,9 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["chat_handler_overrides"] = chat_handler_overrides
     defaults["text_chat_builder_overrides"] = text_chat_builder_overrides
     defaults["reasoning_effort"] = reasoning_effort
-    defaults["advanced_generation_kwargs"] = _advanced_seed_kwargs(
-        config_obj.get("advanced_generation_kwargs")
+    defaults["advanced_generation_kwargs"] = _advanced_generation_kwargs(
+        config_obj.get("advanced_generation_kwargs"),
+        defaults["log_level"],
     )
     defaults["advanced_summary_generation_kwargs"] = _advanced_seed_kwargs(
         config_obj.get("advanced_summary_generation_kwargs")

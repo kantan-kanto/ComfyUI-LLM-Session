@@ -8,12 +8,16 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 try:
+    from .logging_utils import get_module_logger, LOG_LEVEL_MINIMAL
     from .turn_types import GenerationRunResult
 except Exception:
+    from core.logging_utils import get_module_logger, LOG_LEVEL_MINIMAL
     from core.turn_types import GenerationRunResult
 
 
 T = TypeVar("T")
+_OPTIONAL_ADVANCED_GENERATION_KWARGS = ("top_k", "min_p", "present_penalty")
+_module_logger = get_module_logger("GenerationRunner")
 
 
 @dataclass(frozen=True)
@@ -182,17 +186,37 @@ def run_with_typeerror_fallback(
     retry_kwargs_with_repeat_last_n_fallback: Callable[[Dict[str, Any], int], Dict[str, Any]],
     repeat_last_n: int,
 ) -> T:
-    """Retry execution with fallback kwargs on TypeError (max 3 attempts total)."""
+    """Retry known compatibility failures without swallowing unrelated TypeErrors."""
     active_kwargs = dict(completion_kwargs)
-    try:
-        return execute_with_kwargs(active_kwargs)
-    except TypeError:
-        active_kwargs = retry_kwargs_with_repeat_last_n_fallback(active_kwargs, repeat_last_n)
+    legacy_fallbacks = 0
+    while True:
         try:
             return execute_with_kwargs(active_kwargs)
-        except TypeError:
+        except TypeError as error:
+            message = str(error).lower()
+            unsupported_key = next(
+                (
+                    key
+                    for key in _OPTIONAL_ADVANCED_GENERATION_KWARGS
+                    if key in active_kwargs
+                    and key in message
+                    and "unexpected keyword" in message
+                ),
+                None,
+            )
+            if unsupported_key is not None:
+                active_kwargs.pop(unsupported_key, None)
+                _module_logger(
+                    "Warning: The installed llama-cpp-python backend rejected "
+                    f"advanced generation kwarg '{unsupported_key}'; retrying without it.",
+                    LOG_LEVEL_MINIMAL,
+                )
+                continue
+
+            if legacy_fallbacks >= 2:
+                raise
             active_kwargs = retry_kwargs_with_repeat_last_n_fallback(active_kwargs, repeat_last_n)
-            return execute_with_kwargs(active_kwargs)
+            legacy_fallbacks += 1
 
 
 def _run_generation_once(

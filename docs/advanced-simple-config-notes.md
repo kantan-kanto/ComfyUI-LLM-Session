@@ -31,17 +31,27 @@ Implemented behavior:
 - Qwen3.8 is an independent config family and never falls back to the
   `qwen3.5` entry.
 
-- `advanced_generation_kwargs.seed` is read from Simple config and passed to
-  normal generation.
+- `advanced_generation_kwargs` accepts `seed`, `top_k`, `min_p`, and
+  `present_penalty` from Simple config and passes explicitly configured values
+  to normal generation.
 - `advanced_summary_generation_kwargs.seed` is read separately and passed to
   summary generation.
-- Summary generation does not inherit `advanced_generation_kwargs.seed`
+- Summary generation does not inherit normal advanced generation kwargs
   implicitly.
-- Missing, `null`, or invalid seed values are omitted.
+- Missing, `null`, or invalid values are omitted. The node does not inject
+  backend defaults for omitted advanced generation kwargs.
+- `top_k` accepts integers greater than or equal to zero, `min_p` accepts
+  `0.0` through `1.0`, and `present_penalty` accepts `0.0` through `2.0`.
 - Other advanced keys in the example are not read yet. They are ignored, with a
   warning when `log_level` is not `minimal`.
-- Applied advanced kwargs are recorded in each turn's history `params`.
-- Unsupported backend-kwarg fallback is not implemented for the seed-only path.
+- Explicit advanced kwargs accepted by node validation are recorded in each
+  turn's history `params`; backend defaults are not synthesized into history.
+  A value remains recorded if runtime compatibility fallback later removes its
+  rejected keyword.
+- If a backend raises an exact unexpected-keyword `TypeError` for `top_k`,
+  `min_p`, or `present_penalty`, generation retries without only the rejected
+  key and logs the compatibility fallback. Other `TypeError` cases retain the
+  existing behavior and are not swallowed.
 
 For strict reproducibility with `advanced_generation_kwargs.seed`, use
 `runtime_cache: "off"`. Real-machine testing showed that `LlamaTrieCache` can
@@ -63,8 +73,9 @@ The intended top-level split is:
   "schema_version": 1,
   "advanced_generation_kwargs": {
     "seed": null,
-    "top_k": null,
-    "min_p": null,
+    "top_k": 40,
+    "min_p": 0.05,
+    "present_penalty": 0.0,
     "typical_p": null,
     "mirostat_mode": null,
     "mirostat_tau": null,
@@ -131,9 +142,9 @@ For each supported key:
 - Warn about unsupported keys when `log_level` is not `minimal`.
 - Keep warning text clear that unsupported example keys are intentionally ignored.
 
-Prefer narrow parsers such as seed-only helpers over generic dictionary
-forwarding. Generic forwarding should be considered only after enough keys share
-the same validation, warning, history, and fallback behavior.
+Prefer narrow, allowlisted parsers over generic dictionary forwarding. Generic
+forwarding should be considered only after enough keys share the same validation,
+warning, history, and fallback behavior.
 
 ## Summary Generation Rules
 
@@ -171,9 +182,11 @@ When fallback is implemented:
 
 Applied advanced kwargs should be recorded in each turn's history `params`.
 
-History records should show only values that were actually accepted and passed to
-the runtime path. Invalid, missing, `null`, or unsupported keys should not appear
-as applied parameters.
+History records should show only explicitly configured values accepted by node
+validation and sent toward the runtime path. Invalid, missing, `null`, or
+unsupported keys should not appear as applied parameters. A compatibility
+fallback may remove a rejected key for the successful retry without rewriting
+the already assembled requested-parameter record.
 
 When a parameter affects summary generation, record it in a summary-specific
 history field or clearly separated summary advanced kwargs entry rather than
@@ -198,7 +211,8 @@ implemented, validated, and tested.
 ## Initial Seed-Only Decision
 
 The first implemented advanced Simple config path intentionally supported only
-`seed`.
+`seed`. It was later expanded narrowly with `top_k`, `min_p`, and
+`present_penalty` for documented Qwen and Gemma sampling recommendations.
 
 Reasons:
 

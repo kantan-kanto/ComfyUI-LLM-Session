@@ -195,7 +195,7 @@ def test_attempt_logger_reports_estimated_completion_tokens(capsys) -> None:
     assert "tokens_per_second_est=2.50" in out
 
 
-def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:
+def test_execute_turn_passes_advanced_generation_kwargs() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()
     observed: dict[str, object] = {}
@@ -213,14 +213,24 @@ def test_execute_turn_passes_advanced_generation_seed_kwargs() -> None:
     request = TurnExecutionRequest(
         **{
             **_make_request(deps, mgr).__dict__,
-            "advanced_generation_kwargs": {"seed": 123},
+            "advanced_generation_kwargs": {
+                "seed": 123,
+                "top_k": 20,
+                "min_p": 0.0,
+                "present_penalty": 1.5,
+            },
         }
     )
 
     result = service.execute_turn(request)
 
     assert result.generation_succeeded is True
-    assert observed["advanced_generation_kwargs"] == {"seed": 123}
+    assert observed["advanced_generation_kwargs"] == {
+        "seed": 123,
+        "top_k": 20,
+        "min_p": 0.0,
+        "present_penalty": 1.5,
+    }
 
 
 def test_execute_turn_passes_advanced_summary_seed_kwargs() -> None:
@@ -251,7 +261,7 @@ def test_execute_turn_passes_advanced_summary_seed_kwargs() -> None:
     assert observed["advanced_generation_kwargs"] == {"seed": 456}
 
 
-def test_execute_turn_records_advanced_seed_kwargs_in_history_params() -> None:
+def test_execute_turn_records_advanced_generation_kwargs_in_history_params() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()
     history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
@@ -269,7 +279,12 @@ def test_execute_turn_records_advanced_seed_kwargs_in_history_params() -> None:
     request = TurnExecutionRequest(
         **{
             **_make_request(deps, mgr).__dict__,
-            "advanced_generation_kwargs": {"seed": 123},
+            "advanced_generation_kwargs": {
+                "seed": 123,
+                "top_k": 20,
+                "min_p": 0.0,
+                "present_penalty": 1.5,
+            },
             "advanced_summary_generation_kwargs": {"seed": 456},
         }
     )
@@ -278,7 +293,12 @@ def test_execute_turn_records_advanced_seed_kwargs_in_history_params() -> None:
 
     assert result.generation_succeeded is True
     params = history["turns"][0]["params"]
-    assert params["advanced_generation_kwargs"] == {"seed": 123}
+    assert params["advanced_generation_kwargs"] == {
+        "seed": 123,
+        "top_k": 20,
+        "min_p": 0.0,
+        "present_penalty": 1.5,
+    }
     assert params["advanced_summary_generation_kwargs"] == {"seed": 456}
 
 

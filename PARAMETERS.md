@@ -152,6 +152,10 @@ Full nodes expose this as an optional UI setting. Simple nodes can override it i
 
 When disabled, the node asks the supported model/chat handler not to expose thinking output. This behavior still depends on the model, chat handler, and `llama-cpp-python` build, so some models may still emit internal channel text.
 
+The node does not automatically change sampling settings with thinking mode.
+For Qwen3.8 and Gemma 4 recommended sampling values and their Simple JSON
+mapping, see [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md).
+
 For Qwen3.8, `reasoning_effort` accepts `xhigh`, `medium`, or `low` in Simple
 JSON config. Its node default is `medium`; the setting has no effect when
 `enable_thinking` is false. Qwen3.5 settings are not used as a fallback for

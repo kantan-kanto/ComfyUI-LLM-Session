@@ -32,6 +32,51 @@ def test_run_with_typeerror_fallback_retries_then_succeeds() -> None:
     assert attempts["n"] == 3
 
 
+def test_run_with_typeerror_fallback_drops_only_rejected_advanced_kwarg() -> None:
+    observed = []
+
+    def _execute(kwargs):
+        observed.append(dict(kwargs))
+        if "min_p" in kwargs:
+            raise TypeError("unexpected keyword argument 'min_p'")
+        return kwargs
+
+    result = run_with_typeerror_fallback(
+        execute_with_kwargs=_execute,
+        completion_kwargs={"top_k": 40, "min_p": 0.05, "present_penalty": 0.0},
+        retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+        repeat_last_n=0,
+    )
+
+    assert result == {"top_k": 40, "present_penalty": 0.0}
+    assert observed == [
+        {"top_k": 40, "min_p": 0.05, "present_penalty": 0.0},
+        {"top_k": 40, "present_penalty": 0.0},
+    ]
+
+
+def test_run_with_typeerror_fallback_does_not_drop_advanced_kwargs_for_unrelated_error() -> None:
+    attempts = {"n": 0}
+
+    def _execute(_kwargs):
+        attempts["n"] += 1
+        raise TypeError("internal sampler failure")
+
+    try:
+        run_with_typeerror_fallback(
+            execute_with_kwargs=_execute,
+            completion_kwargs={"top_k": 40, "min_p": 0.05},
+            retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
+            repeat_last_n=0,
+        )
+    except TypeError as error:
+        assert str(error) == "internal sampler failure"
+    else:
+        raise AssertionError("Expected unrelated TypeError to propagate")
+
+    assert attempts["n"] == 3
+
+
 def test_generation_success_first_attempt() -> None:
     observed_kwargs = {}
 
@@ -70,7 +115,12 @@ def test_generation_success_first_attempt() -> None:
         create_chat_completion_robust=create_chat_completion_robust,
         extract_stream_content=lambda _chunk: "",
         retry_kwargs_with_repeat_last_n_fallback=lambda kwargs, _n: dict(kwargs),
-        advanced_generation_kwargs={"seed": 123},
+        advanced_generation_kwargs={
+            "seed": 123,
+            "top_k": 20,
+            "min_p": 0.0,
+            "present_penalty": 1.5,
+        },
     )
 
     assert result.succeeded is True
@@ -79,6 +129,9 @@ def test_generation_success_first_attempt() -> None:
     assert result.completion_tokens == 7
     assert result.completion_tokens_estimated is False
     assert observed_kwargs["seed"] == 123
+    assert observed_kwargs["top_k"] == 20
+    assert observed_kwargs["min_p"] == 0.0
+    assert observed_kwargs["present_penalty"] == 1.5
 
 
 def test_generation_estimates_completion_tokens_when_usage_is_missing() -> None:

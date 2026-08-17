@@ -23,6 +23,9 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
     signatures, and saved turn parameters without forwarding it to the backend.
   - Kept `preserve_thinking` unsupported and recorded successful manual Qwen3.8
     Vision recognition validation.
+  - Added Simple JSON-only `top_k`, `min_p`, and JamePeng-compatible
+    `present_penalty` generation controls, including validation, history
+    recording, and targeted fallback for older backends that reject a keyword.
 
 - Documentation
   - Refined the English and Japanese project introductions and package metadata
@@ -35,6 +38,8 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
     in the final response unless a separate file is explicitly requested.
   - Standardized commit-message suggestions as one-line summaries covering all
     changes since the previous commit unless a narrower scope is requested.
+  - Documented Qwen3.8 and Gemma 4 sampling recommendations, parameter-name
+    mappings, backend-default behavior, and the supported advanced settings.
 
 ---
 

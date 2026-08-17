@@ -178,14 +178,19 @@ def test_simple_defaults_does_not_use_qwen35_reasoning_effort_for_qwen38(
     assert defaults["reasoning_effort"] == "medium"
 
 
-def test_simple_defaults_reads_only_advanced_seed_kwargs(load_nodes_module, tmp_path):
+def test_simple_defaults_reads_supported_advanced_generation_kwargs(load_nodes_module, tmp_path):
     module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"
     config_path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "advanced_generation_kwargs": {"seed": "123", "top_k": 40},
+                "advanced_generation_kwargs": {
+                    "seed": "123",
+                    "top_k": 40,
+                    "min_p": 0.05,
+                    "present_penalty": 0.0,
+                },
                 "advanced_summary_generation_kwargs": {"seed": 456, "temperature": 0.0},
             }
         ),
@@ -194,8 +199,61 @@ def test_simple_defaults_reads_only_advanced_seed_kwargs(load_nodes_module, tmp_
 
     defaults = module._load_simple_defaults(str(config_path))
 
-    assert defaults["advanced_generation_kwargs"] == {"seed": 123}
+    assert defaults["advanced_generation_kwargs"] == {
+        "seed": 123,
+        "top_k": 40,
+        "min_p": 0.05,
+        "present_penalty": 0.0,
+    }
     assert defaults["advanced_summary_generation_kwargs"] == {"seed": 456}
+
+
+def test_simple_defaults_does_not_inject_advanced_generation_backend_defaults(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["advanced_generation_kwargs"] == {}
+
+
+def test_dialogue_cycle_simple_forwards_shared_advanced_generation_kwargs(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "advanced_generation_kwargs": {
+                    "top_k": 64,
+                    "min_p": 0.05,
+                    "present_penalty": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    defaults = module._load_simple_defaults(str(config_path))
+
+    chat_kwargs = module._build_dialogue_cycle_simple_chat_kwargs(
+        defaults=defaults,
+        force_text_only=False,
+        history_dir="",
+        reset_session=False,
+        chat_handler_overrides=None,
+        text_chat_builder_overrides=None,
+    )
+
+    assert chat_kwargs["advanced_generation_kwargs"] == {
+        "top_k": 64,
+        "min_p": 0.05,
+        "present_penalty": 0.0,
+    }
 
 
 def test_simple_defaults_warns_for_unsupported_advanced_keys(load_nodes_module, tmp_path, capsys):
@@ -206,7 +264,7 @@ def test_simple_defaults_warns_for_unsupported_advanced_keys(load_nodes_module, 
             {
                 "schema_version": 1,
                 "log_level": "timing",
-                "advanced_generation_kwargs": {"seed": 123, "top_k": 40, "min_p": 0.05},
+                "advanced_generation_kwargs": {"seed": 123, "top_k": 40, "typical_p": 0.95},
                 "advanced_summary_generation_kwargs": {"seed": 456, "temperature": 0.0},
             }
         ),
@@ -216,7 +274,7 @@ def test_simple_defaults_warns_for_unsupported_advanced_keys(load_nodes_module, 
     module._load_simple_defaults(str(config_path))
 
     out = capsys.readouterr().out
-    assert "Warning: Ignoring unsupported advanced_generation_kwargs keys: min_p, top_k" in out
+    assert "Warning: Ignoring unsupported advanced_generation_kwargs keys: typical_p" in out
     assert "Warning: Ignoring unsupported advanced_summary_generation_kwargs keys: temperature" in out
 
 
@@ -230,7 +288,7 @@ def test_simple_defaults_suppresses_unsupported_advanced_key_warning_in_minimal_
             {
                 "schema_version": 1,
                 "log_level": "minimal",
-                "advanced_generation_kwargs": {"seed": 123, "top_k": 40},
+                "advanced_generation_kwargs": {"seed": 123, "typical_p": 0.95},
             }
         ),
         encoding="utf-8",
@@ -239,6 +297,34 @@ def test_simple_defaults_suppresses_unsupported_advanced_key_warning_in_minimal_
     module._load_simple_defaults(str(config_path))
 
     assert capsys.readouterr().out == ""
+
+
+def test_simple_defaults_omits_invalid_advanced_sampling_kwargs(
+    load_nodes_module, tmp_path, capsys
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "advanced_generation_kwargs": {
+                    "top_k": 20.5,
+                    "min_p": 1.1,
+                    "present_penalty": -0.1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["advanced_generation_kwargs"] == {}
+    out = capsys.readouterr().out
+    assert "advanced_generation_kwargs.top_k" in out
+    assert "advanced_generation_kwargs.min_p" in out
+    assert "advanced_generation_kwargs.present_penalty" in out
 
 
 def test_simple_defaults_omits_invalid_advanced_seed_kwargs(load_nodes_module, tmp_path):
