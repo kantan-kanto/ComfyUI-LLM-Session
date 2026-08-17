@@ -73,6 +73,7 @@ def test_persist_history_appends_turn_and_writes_file() -> None:
             media=FakeImageBatch(),
             stream_to_console=True,
             advanced_generation_kwargs={"seed": 123},
+            official_sampling_profile="qwen3.8-thinking",
         ),
         deps=_deps(writes=writes),
         history={"turns": []},
@@ -95,6 +96,7 @@ def test_persist_history_appends_turn_and_writes_file() -> None:
     assert turn["params"]["image_count"] == 2
     assert turn["params"]["streamed"] is True
     assert turn["params"]["advanced_generation_kwargs"] == {"seed": 123}
+    assert turn["params"]["official_sampling_profile"] == "qwen3.8-thinking"
     assert result.history["meta"]["last_params"]["runtime_cache"] == "off"
     assert result.history["system_prompt"] == "sys"
 

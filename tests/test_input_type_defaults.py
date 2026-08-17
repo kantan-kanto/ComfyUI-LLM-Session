@@ -178,6 +178,225 @@ def test_simple_defaults_does_not_use_qwen35_reasoning_effort_for_qwen38(
     assert defaults["reasoning_effort"] == "medium"
 
 
+def test_simple_defaults_reads_model_specific_official_sampling_overrides(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "qwen3.8": {"official_sampling_override": True},
+                "gemma4": {"official_sampling_override": "true"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["official_sampling_overrides"] == {
+        "qwen3.8": True,
+        "gemma4": True,
+    }
+
+
+def test_simple_defaults_disables_official_sampling_overrides_by_default(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["official_sampling_overrides"] == {
+        "qwen3.8": False,
+        "gemma4": False,
+    }
+
+
+def test_official_sampling_override_uses_qwen38_thinking_mode(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    base_kwargs = {
+        "temperature": 0.2,
+        "top_p": 0.4,
+        "repeat_penalty": 1.4,
+        "enable_thinking": False,
+        "chat_handler_overrides": {"qwen3.8": {"enable_thinking": True}},
+        "advanced_generation_kwargs": {
+            "seed": 123,
+            "top_k": 40,
+            "min_p": 0.3,
+            "present_penalty": 0.4,
+        },
+    }
+
+    resolved = module._resolve_official_sampling_turn_kwargs(
+        model="Qwen3.8-27B.gguf",
+        turn_kwargs=base_kwargs,
+        official_sampling_overrides={"qwen3.8": True},
+    )
+
+    assert resolved["official_sampling_profile"] == "qwen3.8-thinking"
+    assert resolved["temperature"] == 1.0
+    assert resolved["top_p"] == 0.95
+    assert resolved["repeat_penalty"] == 1.0
+    assert resolved["advanced_generation_kwargs"] == {
+        "seed": 123,
+        "top_k": 20,
+        "min_p": 0.0,
+        "present_penalty": 0.0,
+    }
+    assert base_kwargs["temperature"] == 0.2
+
+
+def test_disabled_official_sampling_override_preserves_manual_values(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    base_kwargs = {
+        "temperature": 0.2,
+        "top_p": 0.4,
+        "repeat_penalty": 1.4,
+        "advanced_generation_kwargs": {"top_k": 40, "min_p": 0.3},
+    }
+
+    resolved = module._resolve_official_sampling_turn_kwargs(
+        model="Qwen3.8-27B.gguf",
+        turn_kwargs=base_kwargs,
+        official_sampling_overrides={"qwen3.8": False},
+    )
+
+    assert resolved == base_kwargs
+    assert "official_sampling_profile" not in resolved
+
+
+def test_session_chat_simple_applies_official_sampling_after_model_selection(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["Qwen3.8-27B.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "temperature": 0.2,
+                "top_p": 0.4,
+                "repeat_penalty": 1.4,
+                "qwen3.8": {
+                    "enable_thinking": True,
+                    "official_sampling_override": True,
+                },
+                "advanced_generation_kwargs": {
+                    "seed": 123,
+                    "top_k": 40,
+                    "min_p": 0.3,
+                    "present_penalty": 0.4,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    defaults = module._load_simple_defaults(str(config_path))
+
+    chat_kwargs = module._build_session_chat_simple_chat_kwargs(
+        defaults=defaults,
+        model="Qwen3.8-27B.gguf",
+        history_dir="",
+        chat_handler_overrides=defaults["chat_handler_overrides"],
+        text_chat_builder_overrides=defaults["text_chat_builder_overrides"],
+    )
+
+    assert chat_kwargs["official_sampling_profile"] == "qwen3.8-thinking"
+    assert chat_kwargs["temperature"] == 1.0
+    assert chat_kwargs["top_p"] == 0.95
+    assert chat_kwargs["repeat_penalty"] == 1.0
+    assert chat_kwargs["advanced_generation_kwargs"] == {
+        "seed": 123,
+        "top_k": 20,
+        "min_p": 0.0,
+        "present_penalty": 0.0,
+    }
+
+
+def test_official_sampling_override_uses_qwen38_non_thinking_mode(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+
+    resolved = module._resolve_official_sampling_turn_kwargs(
+        model="Qwen3.8-27B.gguf",
+        turn_kwargs={
+            "temperature": 1.2,
+            "top_p": 0.5,
+            "repeat_penalty": 1.3,
+            "enable_thinking": False,
+            "advanced_generation_kwargs": {},
+        },
+        official_sampling_overrides={"qwen3.8": True},
+    )
+
+    assert resolved["official_sampling_profile"] == "qwen3.8-non-thinking"
+    assert resolved["temperature"] == 0.7
+    assert resolved["top_p"] == 0.8
+    assert resolved["repeat_penalty"] == 1.0
+    assert resolved["advanced_generation_kwargs"] == {
+        "top_k": 20,
+        "min_p": 0.0,
+        "present_penalty": 1.5,
+    }
+
+
+def test_dialogue_cycle_resolves_official_sampling_per_model(load_nodes_module):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    common_turn_kwargs = {
+        "temperature": 0.2,
+        "top_p": 0.4,
+        "repeat_penalty": 1.4,
+        "enable_thinking": False,
+        "chat_handler_overrides": {"qwen3.8": {"enable_thinking": True}},
+        "advanced_generation_kwargs": {
+            "seed": 123,
+            "top_k": 40,
+            "min_p": 0.3,
+            "present_penalty": 0.4,
+        },
+        "official_sampling_overrides": {"qwen3.8": True, "gemma4": True},
+    }
+
+    request = module._build_dialogue_cycle_request(
+        initial_user_text="hello",
+        session_id="sampling",
+        cycles=1,
+        system_prompt="",
+        system_prompt_A="",
+        system_prompt_B="",
+        runtime_cache="off",
+        stream_to_console=False,
+        reset_session=True,
+        history_dir="",
+        common_turn_kwargs=common_turn_kwargs,
+        model_a="Qwen3.8-27B.gguf",
+        mmproj_a="None",
+        model_b="gemma-4-31b.gguf",
+        mmproj_b="None",
+    )
+
+    assert request.turn_kwargs_A["official_sampling_profile"] == "qwen3.8-thinking"
+    assert request.turn_kwargs_A["temperature"] == 1.0
+    assert request.turn_kwargs_A["advanced_generation_kwargs"]["top_k"] == 20
+    assert request.turn_kwargs_B["official_sampling_profile"] == "gemma4"
+    assert request.turn_kwargs_B["temperature"] == 1.0
+    assert request.turn_kwargs_B["top_p"] == 0.95
+    assert request.turn_kwargs_B["repeat_penalty"] == 1.4
+    assert request.turn_kwargs_B["advanced_generation_kwargs"] == {
+        "seed": 123,
+        "top_k": 64,
+        "min_p": 0.3,
+        "present_penalty": 0.4,
+    }
+    assert "official_sampling_overrides" not in request.turn_kwargs_A
+    assert "official_sampling_overrides" not in request.turn_kwargs_B
+
+
 def test_simple_defaults_reads_supported_advanced_generation_kwargs(load_nodes_module, tmp_path):
     module = load_nodes_module(available_models=["dummy.gguf"])
     config_path = tmp_path / "simple_defaults.json"

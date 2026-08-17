@@ -26,6 +26,9 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Added Simple JSON-only `top_k`, `min_p`, and JamePeng-compatible
     `present_penalty` generation controls, including validation, history
     recording, and targeted fallback for older backends that reject a keyword.
+  - Added model-specific Simple JSON `official_sampling_override` support for
+    Qwen3.8 thinking/non-thinking and Gemma 4, including independent A/B
+    resolution in mixed-model Dialogue Cycles and effective-profile history.
 
 - Documentation
   - Refined the English and Japanese project introductions and package metadata
@@ -40,6 +43,8 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
     changes since the previous commit unless a narrower scope is requested.
   - Documented Qwen3.8 and Gemma 4 sampling recommendations, parameter-name
     mappings, backend-default behavior, and the supported advanced settings.
+  - Documented official sampling override precedence, profile selection, and
+    the parameters intentionally preserved for Gemma 4.
 
 ---
 

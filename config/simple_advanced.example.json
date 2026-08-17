@@ -52,13 +52,15 @@
     "enable_thinking": false
   },
   "qwen3.8": {
-    "enable_thinking": true,
-    "reasoning_effort": "xhigh"
+    "enable_thinking": false,
+    "reasoning_effort": "medium",
+    "official_sampling_override": false
   },
   "minicpm-v-4.6": {
     "enable_thinking": false
   },
   "gemma4": {
-    "enable_thinking": false
+    "enable_thinking": false,
+    "official_sampling_override": false
   }
 }

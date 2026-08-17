@@ -140,10 +140,12 @@ Full nodes expose this as an optional UI setting. Simple nodes can override it i
 },
 "qwen3.8": {
   "enable_thinking": false,
-  "reasoning_effort": "medium"
+  "reasoning_effort": "medium",
+  "official_sampling_override": false
 },
 "gemma4": {
-  "enable_thinking": false
+  "enable_thinking": false,
+  "official_sampling_override": false
 },
 "minicpm-v-4.6": {
   "enable_thinking": false
@@ -152,9 +154,13 @@ Full nodes expose this as an optional UI setting. Simple nodes can override it i
 
 When disabled, the node asks the supported model/chat handler not to expose thinking output. This behavior still depends on the model, chat handler, and `llama-cpp-python` build, so some models may still emit internal channel text.
 
-The node does not automatically change sampling settings with thinking mode.
-For Qwen3.8 and Gemma 4 recommended sampling values and their Simple JSON
-mapping, see [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md).
+By default, the node does not automatically change sampling settings with
+thinking mode. For Qwen3.8 and Gemma 4 recommended sampling values and their
+Simple JSON mapping, see [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md).
+
+Simple JSON can opt into automatic model-specific sampling with
+`official_sampling_override: true`. For Qwen3.8, `enable_thinking` selects the
+thinking or non-thinking recommendation. The default is `false`.
 
 For Qwen3.8, `reasoning_effort` accepts `xhigh`, `medium`, or `low` in Simple
 JSON config. Its node default is `medium`; the setting has no effect when

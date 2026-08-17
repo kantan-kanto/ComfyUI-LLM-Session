@@ -30,6 +30,14 @@ Implemented behavior:
   Qwen3.8 thinking is enabled.
 - Qwen3.8 is an independent config family and never falls back to the
   `qwen3.5` entry.
+- `qwen3.8.official_sampling_override` and
+  `gemma4.official_sampling_override` default to `false`. When enabled, the
+  selected model's documented recommendation is overlaid after model-family
+  detection and before normal generation.
+- Qwen3.8 chooses its official profile from `enable_thinking`; Gemma 4 replaces
+  only the three parameters present in its documented recommendation.
+- Dialogue Cycle resolves official sampling independently for model A and model
+  B. Summary generation and KV-cache prompt signatures are unchanged.
 
 - `advanced_generation_kwargs` accepts `seed`, `top_k`, `min_p`, and
   `present_penalty` from Simple config and passes explicitly configured values
@@ -187,6 +195,10 @@ validation and sent toward the runtime path. Invalid, missing, `null`, or
 unsupported keys should not appear as applied parameters. A compatibility
 fallback may remove a rejected key for the successful retry without rewriting
 the already assembled requested-parameter record.
+
+When an official sampling profile is active, history records the effective
+overridden values and `official_sampling_profile`. This is runtime metadata and
+must not be forwarded to the generation backend.
 
 When a parameter affects summary generation, record it in a summary-specific
 history field or clearly separated summary advanced kwargs entry rather than

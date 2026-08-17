@@ -87,16 +87,21 @@ rather than as a general parameter.
 
 ### Model Recommendations and Node Parameter Names
 
-The node does not automatically replace sampling settings when the model family
-or thinking mode changes. To apply a model recommendation, set the corresponding
-values explicitly in Simple JSON.
+By default, the node does not replace sampling settings when the model family or
+thinking mode changes. Apply a recommendation either by setting the
+corresponding values explicitly or by enabling the model-specific official
+sampling override described below.
 
 Qwen3.8 recommends the following settings:
 
-| Mode | `temperature` | `top_p` | `top_k` | `min_p` | presence penalty | repetition penalty |
+| Mode | `temperature` | `top_p` | `top_k` | `min_p` | `present_penalty` | `repeat_penalty` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Thinking | `1.0` | `0.95` | `20` | `0.0` | `0.0` | `1.0` |
 | Non-thinking | `0.7` | `0.8` | `20` | `0.0` | `1.5` | `1.0` |
+
+Note: Qwen's official `presence_penalty` corresponds to this node's
+`present_penalty`, and the official `repetition_penalty` corresponds to this
+node's `repeat_penalty`.
 
 Gemma 4 recommends `temperature: 1.0`, `top_p: 0.95`, and `top_k: 64`
 across its documented use cases; it does not publish a separate setting table
@@ -105,16 +110,53 @@ for thinking and non-thinking modes.
 The names are mapped into this node as follows:
 
 - `temperature`, `top_p`, and `repeat_penalty` are root-level Simple settings.
-- Model documentation's `repetition_penalty` corresponds to the node's
-  `repeat_penalty`.
-- Qwen documentation's `presence_penalty` corresponds conceptually to
-  JamePeng's backend keyword `present_penalty`. Keep the JamePeng spelling in
-  `advanced_generation_kwargs`.
 - `top_k`, `min_p`, and `present_penalty` are Simple-only advanced generation
   settings.
 
 These sampling controls change token selection, not prompt construction. They
 therefore do not change the node's KV-cache prompt signature.
+
+### Official Sampling Override
+
+Simple nodes can apply the documented model recommendations automatically with
+the model-specific `official_sampling_override` setting. Its default is
+`false`.
+
+```json
+{
+  "qwen3.8": {
+    "enable_thinking": true,
+    "reasoning_effort": "medium",
+    "official_sampling_override": true
+  },
+  "gemma4": {
+    "enable_thinking": false,
+    "official_sampling_override": true
+  }
+}
+```
+
+When enabled, official values take priority over matching root-level settings
+and `advanced_generation_kwargs`, even when those values were explicitly set.
+Only parameters included in the documented recommendation are replaced:
+
+- Qwen3.8 thinking replaces `temperature`, `top_p`, `repeat_penalty`, `top_k`,
+  `min_p`, and `present_penalty` with the thinking row above.
+- Qwen3.8 non-thinking replaces the same six parameters with the non-thinking
+  row above.
+- Gemma 4 replaces `temperature`, `top_p`, and `top_k` only. Explicit
+  `repeat_penalty`, `min_p`, and `present_penalty` values remain unchanged
+  because they are not part of the documented Gemma 4 recommendation.
+
+Qwen3.8 selects its profile from `enable_thinking`; `reasoning_effort` does not
+select a different sampling profile. Dialogue Cycle resolves the setting for A
+and B independently, so mixed Qwen3.8 and Gemma 4 cycles use different values
+for each model. Summary generation is not overridden.
+
+Saved turn parameters contain the effective sampling values and an
+`official_sampling_profile` value such as `qwen3.8-thinking`,
+`qwen3.8-non-thinking`, or `gemma4`. The override does not change the KV-cache
+prompt signature.
 
 ### Other Advanced Parameters
 

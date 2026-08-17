@@ -72,6 +72,7 @@ class DialogueCycleNodeExecutionRequest:
     reasoning_effort: str = "medium"
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None
+    official_sampling_overrides: Optional[Dict[str, bool]] = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,7 @@ class DialogueCycleNodeExecutionService:
             text_chat_builder_overrides=request.text_chat_builder_overrides,
             advanced_generation_kwargs=request.advanced_generation_kwargs,
             advanced_summary_generation_kwargs=request.advanced_summary_generation_kwargs,
+            official_sampling_overrides=request.official_sampling_overrides,
         )
         dialogue_request = dependencies.build_dialogue_cycle_request(
             initial_user_text=request.initial_user_text,
@@ -274,5 +276,4 @@ class ChatTurnService:
                     pass
 
         return "\n".join(transcript_lines)
-
 

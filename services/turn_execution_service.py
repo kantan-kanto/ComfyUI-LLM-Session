@@ -108,6 +108,7 @@ class TurnExecutionRequest:
     stream_to_console: bool = False
     enable_thinking: bool = False
     reasoning_effort: str = "medium"
+    official_sampling_profile: str = ""
     model_manager: Optional[Any] = None
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None
@@ -164,6 +165,7 @@ class TurnExecutionRequest:
         stream_to_console: bool,
         enable_thinking: bool = False,
         reasoning_effort: str = "medium",
+        official_sampling_profile: str = "",
         model_manager: Optional[Any],
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
@@ -211,6 +213,7 @@ class TurnExecutionRequest:
             stream_to_console=bool(stream_to_console),
             enable_thinking=bool(enable_thinking),
             reasoning_effort=str(reasoning_effort or "medium"),
+            official_sampling_profile=str(official_sampling_profile or ""),
             model_manager=model_manager,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,

@@ -92,6 +92,11 @@ class HistoryPersistenceService:
             "turns_limit_used": int(generation_result.turns_limit) if generation_result.turns_limit is not None else None,
             "reasoning_effort": str(getattr(request, "reasoning_effort", "medium") or "medium"),
         }
+        official_sampling_profile = str(
+            getattr(request, "official_sampling_profile", "") or ""
+        )
+        if official_sampling_profile:
+            turn_params["official_sampling_profile"] = official_sampling_profile
         if request.include_media_and_stream_in_turn_params:
             turn_params.update(self._describe_media_inputs(request.media))
             turn_params["streamed"] = bool(request.stream_to_console)

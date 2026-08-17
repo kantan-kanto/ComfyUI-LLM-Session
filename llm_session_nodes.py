@@ -123,6 +123,21 @@ _ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty"
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
 _QWEN38_REASONING_EFFORT_DEFAULT = "medium"
 _QWEN38_REASONING_EFFORT_VALUES = {"xhigh", "medium", "low"}
+_OFFICIAL_SAMPLING_OVERRIDE_FAMILIES = ("qwen3.8", "gemma4")
+_OFFICIAL_SAMPLING_PROFILES = {
+    "qwen3.8-thinking": {
+        "generation": {"temperature": 1.0, "top_p": 0.95, "repeat_penalty": 1.0},
+        "advanced": {"top_k": 20, "min_p": 0.0, "present_penalty": 0.0},
+    },
+    "qwen3.8-non-thinking": {
+        "generation": {"temperature": 0.7, "top_p": 0.8, "repeat_penalty": 1.0},
+        "advanced": {"top_k": 20, "min_p": 0.0, "present_penalty": 1.5},
+    },
+    "gemma4": {
+        "generation": {"temperature": 1.0, "top_p": 0.95},
+        "advanced": {"top_k": 64},
+    },
+}
 _QWEN38_REASONING_INSTRUCTIONS = {
     "xhigh": (
         "Reasoning effort is set to xhigh. Please think carefully through the task, "
@@ -260,6 +275,9 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     cfg_path = _normalize_config_path(config_path) or _simple_config_path()
     defaults = dict(_SIMPLE_DEFAULTS_BUILTIN)
     defaults["reasoning_effort"] = _QWEN38_REASONING_EFFORT_DEFAULT
+    defaults["official_sampling_overrides"] = {
+        family: False for family in _OFFICIAL_SAMPLING_OVERRIDE_FAMILIES
+    }
     log_level_hint = defaults.get("log_level", _SIMPLE_DEFAULTS_BUILTIN["log_level"])
 
     if not cfg_path:
@@ -402,6 +420,15 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["reset_session"] = _as_bool(defaults.get("reset_session"), _SIMPLE_DEFAULTS_BUILTIN["reset_session"])
     defaults["stream_to_console"] = _as_bool(defaults.get("stream_to_console"), _SIMPLE_DEFAULTS_BUILTIN["stream_to_console"])
 
+    official_sampling_overrides = dict(defaults["official_sampling_overrides"])
+    for model_family in _OFFICIAL_SAMPLING_OVERRIDE_FAMILIES:
+        raw_model_config = config_obj.get(model_family)
+        if isinstance(raw_model_config, dict):
+            official_sampling_overrides[model_family] = _as_bool(
+                raw_model_config.get("official_sampling_override"),
+                False,
+            )
+
     for chat_format, overrides in list(chat_handler_overrides.items()):
         if "enable_thinking" in overrides:
             overrides["enable_thinking"] = _as_bool(
@@ -425,6 +452,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["chat_handler_overrides"] = chat_handler_overrides
     defaults["text_chat_builder_overrides"] = text_chat_builder_overrides
     defaults["reasoning_effort"] = reasoning_effort
+    defaults["official_sampling_overrides"] = official_sampling_overrides
     defaults["advanced_generation_kwargs"] = _advanced_generation_kwargs(
         config_obj.get("advanced_generation_kwargs"),
         defaults["log_level"],
@@ -502,17 +530,19 @@ def _build_dialogue_cycle_simple_chat_kwargs(
         "reasoning_effort": str(defaults.get("reasoning_effort", _QWEN38_REASONING_EFFORT_DEFAULT)),
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
+        "official_sampling_overrides": dict(defaults.get("official_sampling_overrides") or {}),
     }
 
 
 def _build_session_chat_simple_chat_kwargs(
     *,
     defaults: Dict[str, Any],
+    model: str,
     history_dir: str,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
 ) -> Dict[str, Any]:
-    return {
+    turn_kwargs = {
         "system_prompt": defaults["system_prompt"],
         "max_tokens": int(defaults["max_tokens"]),
         "temperature": float(defaults["temperature"]),
@@ -544,6 +574,11 @@ def _build_session_chat_simple_chat_kwargs(
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
     }
+    return _resolve_official_sampling_turn_kwargs(
+        model=model,
+        turn_kwargs=turn_kwargs,
+        official_sampling_overrides=defaults.get("official_sampling_overrides"),
+    )
 
 
 # llama-cpp-python imports
@@ -886,6 +921,40 @@ def _detect_model_family(model_path: str) -> Optional[str]:
         if key in model_name_lower:
             return family
     return None
+
+
+def _resolve_official_sampling_turn_kwargs(
+    *,
+    model: str,
+    turn_kwargs: Dict[str, Any],
+    official_sampling_overrides: Optional[Dict[str, bool]],
+) -> Dict[str, Any]:
+    """Overlay the documented model profile after the selected model is known."""
+    resolved = dict(turn_kwargs)
+    model_family = _detect_model_family(model)
+    if not model_family or not bool((official_sampling_overrides or {}).get(model_family, False)):
+        return resolved
+
+    if model_family == "qwen3.8":
+        enable_thinking = bool(resolved.get("enable_thinking", False))
+        chat_handler_overrides = resolved.get("chat_handler_overrides")
+        if isinstance(chat_handler_overrides, dict):
+            family_overrides = chat_handler_overrides.get(model_family)
+            if isinstance(family_overrides, dict) and "enable_thinking" in family_overrides:
+                enable_thinking = bool(family_overrides.get("enable_thinking"))
+        profile_name = "qwen3.8-thinking" if enable_thinking else "qwen3.8-non-thinking"
+    elif model_family == "gemma4":
+        profile_name = "gemma4"
+    else:
+        return resolved
+
+    profile = _OFFICIAL_SAMPLING_PROFILES[profile_name]
+    resolved.update(profile["generation"])
+    advanced_generation_kwargs = dict(resolved.get("advanced_generation_kwargs") or {})
+    advanced_generation_kwargs.update(profile["advanced"])
+    resolved["advanced_generation_kwargs"] = advanced_generation_kwargs
+    resolved["official_sampling_profile"] = profile_name
+    return resolved
 
 
 def _build_effective_system_prompt(
@@ -3521,6 +3590,18 @@ def _build_dialogue_cycle_request(
     model_b: str,
     mmproj_b: str,
 ) -> DialogueCycleRequest:
+    base_turn_kwargs = dict(common_turn_kwargs)
+    official_sampling_overrides = base_turn_kwargs.pop("official_sampling_overrides", None)
+    turn_kwargs_a = _resolve_official_sampling_turn_kwargs(
+        model=model_a,
+        turn_kwargs=base_turn_kwargs,
+        official_sampling_overrides=official_sampling_overrides,
+    )
+    turn_kwargs_b = _resolve_official_sampling_turn_kwargs(
+        model=model_b,
+        turn_kwargs=base_turn_kwargs,
+        official_sampling_overrides=official_sampling_overrides,
+    )
     return DialogueCycleRequest(
         initial_user_text=initial_user_text,
         session_id=session_id,
@@ -3532,8 +3613,8 @@ def _build_dialogue_cycle_request(
         stream_to_console=bool(stream_to_console),
         reset_session=bool(reset_session),
         history_dir=history_dir,
-        turn_kwargs_A={**common_turn_kwargs, "model": model_a, "mmproj": mmproj_a},
-        turn_kwargs_B={**common_turn_kwargs, "model": model_b, "mmproj": mmproj_b},
+        turn_kwargs_A={**turn_kwargs_a, "model": model_a, "mmproj": mmproj_a},
+        turn_kwargs_B={**turn_kwargs_b, "model": model_b, "mmproj": mmproj_b},
     )
 
 
@@ -3566,6 +3647,7 @@ def _build_dialogue_cycle_common_turn_kwargs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    official_sampling_overrides: Optional[Dict[str, bool]],
 ) -> Dict[str, Any]:
     return {
         "max_tokens": max_tokens,
@@ -3595,6 +3677,7 @@ def _build_dialogue_cycle_common_turn_kwargs(
         "text_chat_builder_overrides": text_chat_builder_overrides,
         "advanced_generation_kwargs": advanced_generation_kwargs,
         "advanced_summary_generation_kwargs": advanced_summary_generation_kwargs,
+        "official_sampling_overrides": dict(official_sampling_overrides or {}),
     }
 
 
@@ -3641,6 +3724,7 @@ def _build_session_chat_turn_kwargs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    official_sampling_profile: str,
 ) -> Dict[str, Any]:
     return {
         "user_text": user_text,
@@ -3680,6 +3764,7 @@ def _build_session_chat_turn_kwargs(
         "text_chat_builder_overrides": text_chat_builder_overrides,
         "advanced_generation_kwargs": advanced_generation_kwargs,
         "advanced_summary_generation_kwargs": advanced_summary_generation_kwargs,
+        "official_sampling_profile": str(official_sampling_profile or ""),
     }
 
 
@@ -3770,6 +3855,7 @@ def _build_session_chat_node_execution_request(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    official_sampling_profile: str,
 ) -> SessionChatNodeExecutionRequest:
     return SessionChatNodeExecutionRequest(
         model=model,
@@ -3811,6 +3897,7 @@ def _build_session_chat_node_execution_request(
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+            official_sampling_profile=official_sampling_profile,
         ),
     )
 
@@ -3879,6 +3966,7 @@ def _execute_session_chat_turn(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+    official_sampling_profile: str = "",
 ) -> TurnExecutionResult:
     service = TurnExecutionService()
     return service.execute_session_chat_turn(
@@ -3919,6 +4007,7 @@ def _execute_session_chat_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        official_sampling_profile=official_sampling_profile,
         dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
     )
 
@@ -3963,6 +4052,7 @@ def _execute_dialogue_cycle_turn(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+    official_sampling_profile: str = "",
 ) -> TurnExecutionResult:
     service = TurnExecutionService()
     return service.execute_dialogue_cycle_turn(
@@ -4003,6 +4093,7 @@ def _execute_dialogue_cycle_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        official_sampling_profile=official_sampling_profile,
         log_prefix_override=log_prefix_override,
         dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
     )
@@ -4046,6 +4137,7 @@ def _run_session_chat_from_inputs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    official_sampling_profile: str,
 ) -> tuple:
     request = _build_session_chat_node_execution_request(
         user_text=user_text,
@@ -4084,6 +4176,7 @@ def _run_session_chat_from_inputs(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        official_sampling_profile=official_sampling_profile,
     )
     dependencies = _build_session_chat_node_execution_dependencies()
     service = SessionChatNodeExecutionService()
@@ -4152,6 +4245,7 @@ class LLMSessionChatNode:
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
              advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+             official_sampling_profile: str = "",
              image=None) -> tuple:
         media = _resolve_legacy_image_media(media, image)
         chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
@@ -4202,6 +4296,7 @@ class LLMSessionChatNode:
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+            official_sampling_profile=official_sampling_profile,
         )
 
 
@@ -4248,6 +4343,7 @@ def _chat_one_turn(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+    official_sampling_profile: str = "",
 ) -> str:
     """
     One chat turn using the same history/summary logic as LLMSessionChatNode,
@@ -4293,6 +4389,7 @@ def _chat_one_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        official_sampling_profile=official_sampling_profile,
         log_prefix_override=log_prefix_override,
     )
     if not result.generation_succeeded:
@@ -4353,6 +4450,7 @@ def _run_dialogue_cycle_from_inputs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    official_sampling_overrides: Optional[Dict[str, bool]],
 ) -> str:
     request = _build_dialogue_cycle_node_execution_request(
         initial_user_text=initial_user_text,
@@ -4395,6 +4493,7 @@ def _run_dialogue_cycle_from_inputs(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        official_sampling_overrides=official_sampling_overrides,
     )
     dependencies = _build_dialogue_cycle_node_execution_dependencies(
         runtime_container=_resolve_runtime_container()
@@ -4448,6 +4547,7 @@ def _build_dialogue_cycle_node_execution_request(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    official_sampling_overrides: Optional[Dict[str, bool]],
 ) -> DialogueCycleNodeExecutionRequest:
     return DialogueCycleNodeExecutionRequest(
         initial_user_text=initial_user_text,
@@ -4490,6 +4590,9 @@ def _build_dialogue_cycle_node_execution_request(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        official_sampling_overrides=(
+            dict(official_sampling_overrides) if isinstance(official_sampling_overrides, dict) else None
+        ),
     )
 
 
@@ -4557,6 +4660,7 @@ class LLMDialogueCycleNode:
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
         advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+        official_sampling_overrides: Optional[Dict[str, bool]] = None,
     ) -> tuple:
         chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
             chat_handler_overrides,
@@ -4610,6 +4714,7 @@ class LLMDialogueCycleNode:
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+            official_sampling_overrides=official_sampling_overrides,
         )
         return (transcript_text,)
 
@@ -4657,6 +4762,7 @@ class LLMSessionChatSimpleNode:
         )
         chat_kwargs = _build_session_chat_simple_chat_kwargs(
             defaults=defaults,
+            model=model,
             history_dir=history_dir,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,

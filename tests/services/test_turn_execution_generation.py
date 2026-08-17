@@ -286,6 +286,7 @@ def test_execute_turn_records_advanced_generation_kwargs_in_history_params() -> 
                 "present_penalty": 1.5,
             },
             "advanced_summary_generation_kwargs": {"seed": 456},
+            "official_sampling_profile": "qwen3.8-non-thinking",
         }
     )
 
@@ -300,6 +301,7 @@ def test_execute_turn_records_advanced_generation_kwargs_in_history_params() -> 
         "present_penalty": 1.5,
     }
     assert params["advanced_summary_generation_kwargs"] == {"seed": 456}
+    assert params["official_sampling_profile"] == "qwen3.8-non-thinking"
 
 
 def test_execute_turn_returns_failure_on_non_ctx_error() -> None:
