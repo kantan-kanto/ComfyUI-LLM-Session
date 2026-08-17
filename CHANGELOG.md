@@ -6,29 +6,42 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [Unreleased]
 
-- Compatibility
-  - Added Qwen3.8 model-name aliases and routed them through the existing
-    Qwen3.5 text, Vision, mmproj, and thinking on/off compatibility path.
-  - Added matching hyphenated Qwen3.5 and Qwen3.6 filename aliases for
-    consistent model-family and mmproj discovery.
-  - Added regression coverage for Qwen3.8 family detection, handler defaults,
-    mmproj discovery, text prompt construction, and summary thinking override.
-  - Documented the first-stage exclusions for Qwen3.8 reasoning controls, video,
-    and runtime validation before the second-stage changes below.
-  - Promoted Qwen3.8 to an independent canonical family while continuing to use
-    the compatible `Qwen35ChatHandler`; Qwen3.5 JSON settings no longer affect it.
+---
+
+## [1.4.0] - 2026-08-17
+
+- Added
+  - Added Qwen3.8 as an independent canonical model family while continuing to
+    use the compatible `Qwen35ChatHandler`; Qwen3.5 JSON settings do not carry
+    over to Qwen3.8.
   - Added Simple JSON-only Qwen3.8 `reasoning_effort` support for `xhigh`,
-    `medium`, and `low`, with node default `medium` and no Full-node UI control.
-  - Applied reasoning effort consistently to text, Vision, retry prompts, KV
-    signatures, and saved turn parameters without forwarding it to the backend.
-  - Kept `preserve_thinking` unsupported and recorded successful manual Qwen3.8
-    Vision recognition validation.
+    `medium`, and `low`, with `medium` as the default and no Full-node UI control.
   - Added Simple JSON-only `top_k`, `min_p`, and JamePeng-compatible
-    `present_penalty` generation controls, including validation, history
-    recording, and targeted fallback for older backends that reject a keyword.
-  - Added model-specific Simple JSON `official_sampling_override` support for
-    Qwen3.8 thinking/non-thinking and Gemma 4, including independent A/B
+    `present_penalty` generation controls, including validation and turn-history
+    recording.
+  - Added opt-in Simple JSON `official_sampling_override` profiles for Qwen3.8
+    thinking/non-thinking modes and Gemma 4, including independent A/B profile
     resolution in mixed-model Dialogue Cycles and effective-profile history.
+
+- Compatibility
+  - Routed Qwen3.8 through the existing Qwen3.5 text, Vision, mmproj, and
+    thinking on/off compatibility paths.
+  - Added Qwen3.8 model-name aliases and matching hyphenated Qwen3.5 and Qwen3.6
+    filename aliases for consistent model-family and mmproj discovery.
+  - Applied Qwen3.8 reasoning effort consistently to text, Vision, retry
+    prompts, KV signatures, and saved turn parameters without forwarding it to
+    the backend.
+  - Added targeted fallback for older backends that reject one of the new
+    advanced generation keywords.
+  - Kept Qwen3.8 `preserve_thinking` and video input unsupported. Vision
+    recognition was manually confirmed; the exact minimum backend version and
+    real-runtime KV-cache behavior remain unestablished.
+
+- Tests
+  - Added regression coverage for Qwen3.8 family detection, handler defaults,
+    mmproj discovery, text prompt construction, summary thinking override,
+    advanced generation validation, sampling-profile resolution, history
+    recording, and compatibility fallback.
 
 - Documentation
   - Refined the English and Japanese project introductions and package metadata

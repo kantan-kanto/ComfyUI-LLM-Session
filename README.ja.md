@@ -3,7 +3,7 @@
 
 ---
 
-**Version:** 1.3.0
+**Version:** 1.4.0
 **License:** GPL-3.0
 
 **ComfyUI 上だけで GGUF モデルを llama.cpp 経由で実行するローカル LLM 実行環境**です。  

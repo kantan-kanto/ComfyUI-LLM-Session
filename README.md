@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.3.0
+**Version:** 1.4.0
 **License:** GPL-3.0
 
 A local LLM execution environment that runs GGUF models via llama.cpp entirely inside **ComfyUI**, without external runtimes such as Ollama.
@@ -342,10 +342,10 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.3.0
+### Current Version: 1.4.0
 
-- Renamed the optional `LLM Session Chat` / `LLM Session Chat (Simple)` input from `image` to `media`, with workflow migration and backend compatibility for old `image` inputs.
-- Added IMAGE batch handling and Gemma 4 AUDIO media support, with explicit errors for unsupported media combinations.
-- Improved multimodal handler compatibility across PyPI and JamePeng `llama-cpp-python` builds.
-- Added debug-level runtime diagnostics, generation heartbeat logs, and clearer Dialogue Cycle turn labels.
-- Added service-layer tests and maintainer documentation for agent workflow, verification, and release preparation.
+- Added Qwen3.8 as an independent model family while reusing the compatible Qwen3.5 text, Vision, mmproj, and thinking paths.
+- Added Simple JSON-only Qwen3.8 `reasoning_effort` control with `low`, `medium`, and `xhigh` levels.
+- Added Simple generation controls for `top_k`, `min_p`, and `present_penalty`, with compatibility fallback for older backends.
+- Added opt-in official sampling overrides for Qwen3.8 thinking/non-thinking modes and Gemma 4, including per-model Dialogue Cycle resolution.
+- Expanded compatibility, parameter, and maintainer documentation for the new model-specific behavior.
