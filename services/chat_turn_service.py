@@ -68,6 +68,8 @@ class DialogueCycleNodeExecutionRequest:
     stream_to_console: bool
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]]
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]]
+    enable_thinking: bool = False
+    reasoning_effort: str = "medium"
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None
 
@@ -109,6 +111,8 @@ class DialogueCycleNodeExecutionService:
             runtime_cache=request.runtime_cache,
             log_level=request.log_level,
             suppress_backend_logs=request.suppress_backend_logs,
+            enable_thinking=request.enable_thinking,
+            reasoning_effort=request.reasoning_effort,
             chat_handler_overrides=request.chat_handler_overrides,
             text_chat_builder_overrides=request.text_chat_builder_overrides,
             advanced_generation_kwargs=request.advanced_generation_kwargs,
@@ -270,7 +274,5 @@ class ChatTurnService:
                     pass
 
         return "\n".join(transcript_lines)
-
-
 
 

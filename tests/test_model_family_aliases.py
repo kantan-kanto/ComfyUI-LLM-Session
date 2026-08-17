@@ -18,11 +18,11 @@ import pytest
         ("C:/models/LLM/Qwen-3_5-27B-Q4_K_M.gguf", "qwen3.5"),
         ("C:/models/LLM/Qwen-3.6-27B-Q4_K_M.gguf", "qwen3.5"),
         ("C:/models/LLM/Qwen-3_6-27B-Q4_K_M.gguf", "qwen3.5"),
-        ("C:/models/LLM/Qwen3.8-27B-Q4_K_M.gguf", "qwen3.5"),
-        ("C:/models/LLM/Qwen3_8-27B-Q4_K_M.gguf", "qwen3.5"),
-        ("C:/models/LLM/Qwen38-27B-Q4_K_M.gguf", "qwen3.5"),
-        ("C:/models/LLM/Qwen-3.8-27B-Q4_K_M.gguf", "qwen3.5"),
-        ("C:/models/LLM/Qwen-3_8-27B-Q4_K_M.gguf", "qwen3.5"),
+        ("C:/models/LLM/Qwen3.8-27B-Q4_K_M.gguf", "qwen3.8"),
+        ("C:/models/LLM/Qwen3_8-27B-Q4_K_M.gguf", "qwen3.8"),
+        ("C:/models/LLM/Qwen38-27B-Q4_K_M.gguf", "qwen3.8"),
+        ("C:/models/LLM/Qwen-3.8-27B-Q4_K_M.gguf", "qwen3.8"),
+        ("C:/models/LLM/Qwen-3_8-27B-Q4_K_M.gguf", "qwen3.8"),
     ],
 )
 def test_detect_model_family_aliases(load_nodes_module, model_path, expected_family):
@@ -57,9 +57,9 @@ def test_minicpm_v46_declares_handler_and_generation_defaults(load_nodes_module)
 def test_qwen38_reuses_qwen35_handler_and_generation_defaults(load_nodes_module):
     module = load_nodes_module()
 
-    assert module._detect_model_family("C:/models/Qwen3.8-27B.gguf") == "qwen3.5"
-    assert module.DECLARED_CHAT_HANDLER_MAP["qwen3.5"] == "Qwen35ChatHandler"
-    assert module.CHAT_HANDLER_KWARGS_MAP["qwen3.5"] == {
+    assert module._detect_model_family("C:/models/Qwen3.8-27B.gguf") == "qwen3.8"
+    assert module.DECLARED_CHAT_HANDLER_MAP["qwen3.8"] == "Qwen35ChatHandler"
+    assert module.CHAT_HANDLER_KWARGS_MAP["qwen3.8"] == {
         "enable_thinking": False,
         "image_min_tokens": 1024,
     }
@@ -86,7 +86,8 @@ def test_qwen3x_mmproj_auto_detection_uses_family_aliases(
     mmproj_path.write_text("projector", encoding="utf-8")
 
     manager = module.GGUFModelManager()
-    detected = manager._auto_detect_mmproj(str(model_path), "qwen3.5")
+    family = module._detect_model_family(str(model_path))
+    detected = manager._auto_detect_mmproj(str(model_path), family)
 
     assert detected == manager._normalize_path(str(mmproj_path))
 

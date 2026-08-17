@@ -127,7 +127,8 @@ Default:
 - `false`
 
 Currently supported formats:
-- Qwen3.5 / Qwen3.6 / Qwen3.8 compatibility path
+- Qwen3.5 / Qwen3.6 compatibility path
+- Qwen3.8
 - Gemma 4
 - MiniCPM-V 4.6
 
@@ -136,6 +137,10 @@ Full nodes expose this as an optional UI setting. Simple nodes can override it i
 ```json
 "qwen3.5": {
   "enable_thinking": false
+},
+"qwen3.8": {
+  "enable_thinking": false,
+  "reasoning_effort": "medium"
 },
 "gemma4": {
   "enable_thinking": false
@@ -146,6 +151,11 @@ Full nodes expose this as an optional UI setting. Simple nodes can override it i
 ```
 
 When disabled, the node asks the supported model/chat handler not to expose thinking output. This behavior still depends on the model, chat handler, and `llama-cpp-python` build, so some models may still emit internal channel text.
+
+For Qwen3.8, `reasoning_effort` accepts `xhigh`, `medium`, or `low` in Simple
+JSON config. Its node default is `medium`; the setting has no effect when
+`enable_thinking` is false. Qwen3.5 settings are not used as a fallback for
+Qwen3.8.
 
 Gemma 4 note:
 

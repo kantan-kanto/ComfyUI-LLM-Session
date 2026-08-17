@@ -6,6 +6,28 @@ Use these settings from a JSON file selected by the Simple node `config_path`;
 this lets you override Simple-node defaults without editing
 `config/simple_defaults.json` directly.
 
+## Qwen3.8 Reasoning Effort
+
+Qwen3.8 supports `reasoning_effort` only in Simple-node JSON configuration:
+
+```json
+{
+  "qwen3.8": {
+    "enable_thinking": true,
+    "reasoning_effort": "xhigh"
+  }
+}
+```
+
+Supported values are `xhigh`, `medium`, and `low`. The node default is
+`medium`. Invalid values produce a warning and fall back to `medium`.
+
+The node converts `low` and `xhigh` into Qwen3.8 system instructions before
+prompt construction; it does not pass `reasoning_effort` to
+`llama-cpp-python`. `medium` adds no instruction. The setting is inactive when
+`enable_thinking` is false, is not available in Full-node UI, and does not
+inherit from the `qwen3.5` JSON entry.
+
 ## Supported Advanced Generation Settings
 
 Candidate advanced parameters are listed in the following sample file:

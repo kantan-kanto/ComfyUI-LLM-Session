@@ -13,8 +13,16 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
     consistent model-family and mmproj discovery.
   - Added regression coverage for Qwen3.8 family detection, handler defaults,
     mmproj discovery, text prompt construction, and summary thinking override.
-  - Documented that Qwen3.8 `reasoning_effort`, `preserve_thinking`, video input,
-    and actual GGUF runtime validation remain outside the first-stage support.
+  - Documented the first-stage exclusions for Qwen3.8 reasoning controls, video,
+    and runtime validation before the second-stage changes below.
+  - Promoted Qwen3.8 to an independent canonical family while continuing to use
+    the compatible `Qwen35ChatHandler`; Qwen3.5 JSON settings no longer affect it.
+  - Added Simple JSON-only Qwen3.8 `reasoning_effort` support for `xhigh`,
+    `medium`, and `low`, with node default `medium` and no Full-node UI control.
+  - Applied reasoning effort consistently to text, Vision, retry prompts, KV
+    signatures, and saved turn parameters without forwarding it to the backend.
+  - Kept `preserve_thinking` unsupported and recorded successful manual Qwen3.8
+    Vision recognition validation.
 
 - Documentation
   - Refined the English and Japanese project introductions and package metadata

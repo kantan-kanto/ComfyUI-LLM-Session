@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from core.turn_types import GenerationRunResult
 from services.generation_execution_service import GenerationExecutionService
 from services.turn_execution_service import (
@@ -42,6 +44,55 @@ def test_execute_turn_success_updates_history_and_writes_file() -> None:
     assert result.assistant_text == "assistant reply"
     assert len(history["turns"]) == 1
     assert writes and writes[0][0] == "hist.json"
+
+
+def test_execute_turn_uses_effective_system_prompt_for_initial_retry_and_kv_signature() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    observed_system_prompts = []
+    observed_kv_prompts = []
+    deps["build_effective_system_prompt"] = lambda **_kwargs: "effort instruction\n\nuser system"
+    deps["build_chat_messages"] = lambda **kwargs: (
+        observed_system_prompts.append(kwargs["system_prompt"])
+        or [{"role": "system", "content": kwargs["system_prompt"]}]
+    )
+    deps["build_kv_state_signature"] = lambda **kwargs: (
+        observed_kv_prompts.append(kwargs["system_prompt"]) or "kvsig"
+    )
+    observed_generation = _capture_generation_kwargs(deps)
+    request = replace(
+        _make_request(deps, mgr),
+        runtime_cache="KV_cache",
+        enable_thinking=True,
+        reasoning_effort="xhigh",
+    )
+
+    result = service.execute_turn(request)
+    observed_generation["rebuild_messages_for_turns_limit"](3)
+
+    assert result.generation_succeeded is True
+    assert observed_system_prompts == [
+        "effort instruction\n\nuser system",
+        "effort instruction\n\nuser system",
+    ]
+    assert observed_kv_prompts == [
+        "effort instruction\n\nuser system",
+        "effort instruction\n\nuser system",
+    ]
+    assert history["system_prompt"] == "sys"
+    assert history["turns"][0]["params"]["reasoning_effort"] == "xhigh"
 
 
 def test_execute_turn_does_not_enable_heartbeat_for_timing_log_level() -> None:

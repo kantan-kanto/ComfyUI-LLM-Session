@@ -1,7 +1,7 @@
 # Advanced Simple Config Implementation Rules
 
 - Status: Canonical
-- Last reviewed: 2026-07-05
+- Last reviewed: 2026-08-17
 - Update when: Advanced Simple config support expands, validation rules change, or new advanced parameter categories are added.
 
 This document defines maintainer-facing implementation rules and review points
@@ -24,6 +24,12 @@ tests, and user-facing documentation after it becomes supported.
 ## Current Supported Surface
 
 Implemented behavior:
+
+- `qwen3.8.reasoning_effort` accepts `xhigh`, `medium`, or `low`, defaults to
+  `medium`, and is applied as a node-owned system instruction only when
+  Qwen3.8 thinking is enabled.
+- Qwen3.8 is an independent config family and never falls back to the
+  `qwen3.5` entry.
 
 - `advanced_generation_kwargs.seed` is read from Simple config and passed to
   normal generation.

@@ -90,6 +90,7 @@ class HistoryPersistenceService:
             "dynamic_max_tokens": bool(request.dynamic_max_tokens),
             "max_tokens_used": int(generation_result.gen_tokens),
             "turns_limit_used": int(generation_result.turns_limit) if generation_result.turns_limit is not None else None,
+            "reasoning_effort": str(getattr(request, "reasoning_effort", "medium") or "medium"),
         }
         if request.include_media_and_stream_in_turn_params:
             turn_params.update(self._describe_media_inputs(request.media))

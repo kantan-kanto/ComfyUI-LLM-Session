@@ -1,7 +1,7 @@
 # Model-Specific Parameter Flow
 
 - Status: Canonical
-- Last reviewed: 2026-08-16
+- Last reviewed: 2026-08-17
 - Update when: Model-family maps or parameter precedence behavior changes.
 
 This document defines the implementation rules for model-family-specific
@@ -115,6 +115,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "qwen2.5-vl": {"image_min_tokens": 1024},
     "qwen3-vl": {"image_min_tokens": 1024},
     "qwen3.5": {"enable_thinking": False, "image_min_tokens": 1024},
+    "qwen3.8": {"enable_thinking": False, "image_min_tokens": 1024},
 }
 ```
 
@@ -132,6 +133,7 @@ TEXT_CHAT_BUILDER_CONFIG_MAP = {
     "gemma4": {"enable_thinking": False},
     "minicpm-v-4.6": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
+    "qwen3.8": {"enable_thinking": False},
 }
 ```
 
@@ -148,6 +150,7 @@ SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP = {
     "gemma4": {"enable_thinking": False},
     "minicpm-v-4.6": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
+    "qwen3.8": {"enable_thinking": False},
 }
 ```
 
@@ -299,8 +302,10 @@ CHAT_HANDLER_KWARGS_MAP["qwen3-vl"] = {"image_min_tokens": 1024}
 
 ### Qwen3.5-Compatible Families
 
-Qwen3.5, Qwen3.6, and Qwen3.8 normalize to the canonical `qwen3.5` family.
-They currently use all three maps:
+Qwen3.5 and Qwen3.6 normalize to the canonical `qwen3.5` family. Qwen3.8
+normalizes to the separate canonical `qwen3.8` family so its Simple config does
+not inherit Qwen3.5 settings. Both canonical families use
+`Qwen35ChatHandler` and all three maps:
 
 ```python
 CHAT_HANDLER_KWARGS_MAP["qwen3.5"] = {
@@ -315,10 +320,29 @@ TEXT_CHAT_BUILDER_CONFIG_MAP["qwen3.5"] = {
 SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP["qwen3.5"] = {
     "enable_thinking": False,
 }
+
+CHAT_HANDLER_KWARGS_MAP["qwen3.8"] = {
+    "enable_thinking": False,
+    "image_min_tokens": 1024,
+}
+
+TEXT_CHAT_BUILDER_CONFIG_MAP["qwen3.8"] = {
+    "enable_thinking": False,
+}
+
+SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP["qwen3.8"] = {
+    "enable_thinking": False,
+}
 ```
 
 This combines the Qwen VL-style image token budget with thinking suppression for
 text-only and summary prompt building.
+
+Qwen3.8 `reasoning_effort` is a node-owned prompt policy, not a chat-handler
+kwarg. The service builds a transient effective system prompt for normal and
+retry generation and supplies the same value to the KV-state signature. The
+original system prompt remains in history, and summary generation does not add
+the reasoning instruction because summary thinking is forced off.
 
 ## Checklist For Adding A Model-Specific Parameter
 

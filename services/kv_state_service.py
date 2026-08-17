@@ -26,6 +26,7 @@ class KvStateService:
         model_path: str,
         mmproj_path: Optional[str],
         clear_kv_state_for_session: Callable[[str], None],
+        effective_system_prompt: Optional[str] = None,
     ) -> tuple[Any, Any, Any]:
         build_kv_state_signature = self._dep(deps, "build_kv_state_signature")
         try_restore_kv_state = self._dep(deps, "try_restore_kv_state")
@@ -41,7 +42,7 @@ class KvStateService:
                     history=history,
                     max_turns=request.max_turns,
                     summarize_old_history=bool(request.summarize_old_history),
-                    system_prompt=(request.system_prompt or ""),
+                    system_prompt=(request.system_prompt or "") if effective_system_prompt is None else effective_system_prompt,
                     model_path=model_path,
                     mmproj_path=mmproj_path,
                     n_ctx=int(request.n_ctx),
@@ -86,6 +87,7 @@ class KvStateService:
         mmproj_path: Optional[str],
         kv_state_debug_info: Any,
         get_context_turns: Any,
+        effective_system_prompt: Optional[str] = None,
     ) -> None:
         if (request.runtime_cache or "off") != "KV_cache" or request.media is not None:
             return
@@ -96,7 +98,7 @@ class KvStateService:
                 history=history,
                 max_turns=request.max_turns,
                 summarize_old_history=bool(request.summarize_old_history),
-                system_prompt=(request.system_prompt or ""),
+                system_prompt=(request.system_prompt or "") if effective_system_prompt is None else effective_system_prompt,
                 model_path=model_path,
                 mmproj_path=mmproj_path,
                 n_ctx=int(request.n_ctx),

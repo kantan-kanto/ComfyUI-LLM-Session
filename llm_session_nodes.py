@@ -121,6 +121,19 @@ _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 _ADVANCED_GENERATION_ALLOWED_KEYS = {"seed"}
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
+_QWEN38_REASONING_EFFORT_DEFAULT = "medium"
+_QWEN38_REASONING_EFFORT_VALUES = {"xhigh", "medium", "low"}
+_QWEN38_REASONING_INSTRUCTIONS = {
+    "xhigh": (
+        "Reasoning effort is set to xhigh. Please think carefully through the task, "
+        "validate key assumptions, consider plausible alternatives, and prioritize "
+        "correctness, consistency, and clarity in the final answer."
+    ),
+    "low": (
+        "Reasoning effort is set to low. Keep your thinking brief and focused, moving "
+        "directly to the conclusion without unnecessary elaboration."
+    ),
+}
 
 def _simple_config_log(message: str, log_level: str) -> None:
     try:
@@ -205,6 +218,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load Simple defaults from JSON, falling back to built-in safe defaults."""
     cfg_path = _normalize_config_path(config_path) or _simple_config_path()
     defaults = dict(_SIMPLE_DEFAULTS_BUILTIN)
+    defaults["reasoning_effort"] = _QWEN38_REASONING_EFFORT_DEFAULT
     log_level_hint = defaults.get("log_level", _SIMPLE_DEFAULTS_BUILTIN["log_level"])
 
     if not cfg_path:
@@ -253,6 +267,19 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
         if chat_format in _ENABLE_THINKING_TEXT_CHAT_BUILDER_FORMATS:
             text_chat_builder_overrides.setdefault(chat_format, {})["enable_thinking"] = raw_overrides.get(
                 "enable_thinking"
+            )
+
+    reasoning_effort = str(defaults["reasoning_effort"])
+    qwen38_overrides = config_obj.get("qwen3.8")
+    if isinstance(qwen38_overrides, dict) and "reasoning_effort" in qwen38_overrides:
+        requested_effort = str(qwen38_overrides.get("reasoning_effort") or "").strip().lower()
+        if requested_effort in _QWEN38_REASONING_EFFORT_VALUES:
+            reasoning_effort = requested_effort
+        else:
+            _simple_config_log(
+                "Warning: Invalid qwen3.8.reasoning_effort; using medium. "
+                "Supported values: xhigh, medium, low.",
+                log_level_hint,
             )
 
     # Best-effort type coercion + clamping (never raise)
@@ -356,6 +383,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     defaults["system_prompt_B"] = str(sp_b) if sp_b is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt_B"]
     defaults["chat_handler_overrides"] = chat_handler_overrides
     defaults["text_chat_builder_overrides"] = text_chat_builder_overrides
+    defaults["reasoning_effort"] = reasoning_effort
     defaults["advanced_generation_kwargs"] = _advanced_seed_kwargs(
         config_obj.get("advanced_generation_kwargs")
     )
@@ -429,6 +457,7 @@ def _build_dialogue_cycle_simple_chat_kwargs(
         "stream_to_console": bool(defaults["stream_to_console"]),
         "chat_handler_overrides": chat_handler_overrides,
         "text_chat_builder_overrides": text_chat_builder_overrides,
+        "reasoning_effort": str(defaults.get("reasoning_effort", _QWEN38_REASONING_EFFORT_DEFAULT)),
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
     }
@@ -469,6 +498,7 @@ def _build_session_chat_simple_chat_kwargs(
         "stream_to_console": bool(defaults["stream_to_console"]),
         "chat_handler_overrides": chat_handler_overrides,
         "text_chat_builder_overrides": text_chat_builder_overrides,
+        "reasoning_effort": str(defaults.get("reasoning_effort", _QWEN38_REASONING_EFFORT_DEFAULT)),
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
     }
@@ -504,6 +534,7 @@ chat_handler_map = {
     "qwen2.5-vl": "Qwen25VLChatHandler",
     "qwen3-vl": "Qwen3VLChatHandler",
     "qwen3.5": "Qwen35ChatHandler",
+    "qwen3.8": "Qwen35ChatHandler",
     "step3-vl": "Step3VLChatHandler",
 }
 DECLARED_CHAT_HANDLER_MAP = dict(chat_handler_map)
@@ -534,6 +565,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "qwen2.5-vl": {"image_min_tokens": 1024},
     "qwen3-vl": {"image_min_tokens": 1024},
     "qwen3.5": {"enable_thinking": False, "image_min_tokens": 1024},
+    "qwen3.8": {"enable_thinking": False, "image_min_tokens": 1024},
     "step3-vl": {},
 }
 OPTIONAL_CHAT_HANDLER_KWARGS = {
@@ -545,12 +577,14 @@ TEXT_CHAT_BUILDER_CONFIG_MAP = {
     "gemma4": {"enable_thinking": False},
     "minicpm-v-4.6": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
+    "qwen3.8": {"enable_thinking": False},
 }
 
 SUMMARY_TEXT_CHAT_BUILDER_FORCE_MAP = {
     "gemma4": {"enable_thinking": False},
     "minicpm-v-4.6": {"enable_thinking": False},
     "qwen3.5": {"enable_thinking": False},
+    "qwen3.8": {"enable_thinking": False},
 }
 
 def _chat_formats_with_config_key(
@@ -676,11 +710,11 @@ normalized_chat_format_map = {
     "qwen36": "qwen3.5",
     "qwen-3.6": "qwen3.5",
     "qwen-3_6": "qwen3.5",
-    "qwen3.8": "qwen3.5",
-    "qwen3_8": "qwen3.5",
-    "qwen38": "qwen3.5",
-    "qwen-3.8": "qwen3.5",
-    "qwen-3_8": "qwen3.5",
+    "qwen3.8": "qwen3.8",
+    "qwen3_8": "qwen3.8",
+    "qwen38": "qwen3.8",
+    "qwen-3.8": "qwen3.8",
+    "qwen-3_8": "qwen3.8",
     "step3-vl": "step3-vl",
     "step3vl": "step3-vl",
 }
@@ -810,6 +844,23 @@ def _detect_model_family(model_path: str) -> Optional[str]:
         if key in model_name_lower:
             return family
     return None
+
+
+def _build_effective_system_prompt(
+    *,
+    model_path: str,
+    system_prompt: str,
+    enable_thinking: bool,
+    reasoning_effort: str,
+) -> str:
+    """Apply Qwen3.8 reasoning policy without changing persisted user input."""
+    original_prompt = str(system_prompt or "").strip()
+    if _detect_model_family(model_path) != "qwen3.8" or not bool(enable_thinking):
+        return original_prompt
+
+    normalized_effort = str(reasoning_effort or _QWEN38_REASONING_EFFORT_DEFAULT).strip().lower()
+    instruction = _QWEN38_REASONING_INSTRUCTIONS.get(normalized_effort, "")
+    return "\n\n".join(part for part in (instruction, original_prompt) if part)
 
 
 def _detect_gemma4_variant(model_path: str) -> Optional[str]:
@@ -1691,7 +1742,7 @@ def _build_text_chat_request(
         model_family,
         text_chat_builder_overrides=text_chat_builder_overrides,
     )
-    if model_family == "qwen3.5":
+    if model_family in {"qwen3.5", "qwen3.8"}:
         prompt, stop = _build_qwen35_text_prompt(messages, config)
         return {
             "mode": "completion",
@@ -3343,6 +3394,7 @@ def _build_turn_execution_dependencies(
         "validate_chat_media": validate_chat_media,
         "build_chat_messages": build_chat_messages,
         "build_text_chat_request": _build_text_chat_request,
+        "build_effective_system_prompt": _build_effective_system_prompt,
         "build_kv_state_signature": build_kv_state_signature,
         "try_restore_kv_state": try_restore_kv_state,
         "is_state_data_mismatch_error": _is_state_data_mismatch_error,
@@ -3466,6 +3518,8 @@ def _build_dialogue_cycle_common_turn_kwargs(
     runtime_cache: str,
     log_level: str,
     suppress_backend_logs: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
@@ -3493,6 +3547,8 @@ def _build_dialogue_cycle_common_turn_kwargs(
         "runtime_cache": runtime_cache,
         "log_level": log_level,
         "suppress_backend_logs": suppress_backend_logs,
+        "enable_thinking": bool(enable_thinking),
+        "reasoning_effort": str(reasoning_effort),
         "chat_handler_overrides": chat_handler_overrides,
         "text_chat_builder_overrides": text_chat_builder_overrides,
         "advanced_generation_kwargs": advanced_generation_kwargs,
@@ -3536,6 +3592,8 @@ def _build_session_chat_turn_kwargs(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     model_manager: Optional[Any],
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
@@ -3573,6 +3631,8 @@ def _build_session_chat_turn_kwargs(
         "history_dir": history_dir,
         "reset_session": reset_session,
         "stream_to_console": stream_to_console,
+        "enable_thinking": bool(enable_thinking),
+        "reasoning_effort": str(reasoning_effort),
         "model_manager": model_manager,
         "chat_handler_overrides": chat_handler_overrides,
         "text_chat_builder_overrides": text_chat_builder_overrides,
@@ -3662,6 +3722,8 @@ def _build_session_chat_node_execution_request(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
@@ -3700,6 +3762,8 @@ def _build_session_chat_node_execution_request(
             history_dir=history_dir,
             reset_session=reset_session,
             stream_to_console=stream_to_console,
+            enable_thinking=enable_thinking,
+            reasoning_effort=reasoning_effort,
             model_manager=None,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
@@ -3765,6 +3829,8 @@ def _execute_session_chat_turn(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     model_manager: Optional[Any],
     runtime_container: Optional[RuntimeContainer] = None,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -3804,6 +3870,8 @@ def _execute_session_chat_turn(
         history_dir=history_dir,
         reset_session=reset_session,
         stream_to_console=stream_to_console,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
         model_manager=model_manager,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
@@ -3844,6 +3912,8 @@ def _execute_dialogue_cycle_turn(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     model_manager: Optional[Any],
     runtime_container: Optional[RuntimeContainer] = None,
     log_prefix_override: Optional[str] = None,
@@ -3884,6 +3954,8 @@ def _execute_dialogue_cycle_turn(
         history_dir=history_dir,
         reset_session=reset_session,
         stream_to_console=stream_to_console,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
         model_manager=model_manager,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
@@ -3926,6 +3998,8 @@ def _run_session_chat_from_inputs(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
@@ -3962,6 +4036,8 @@ def _run_session_chat_from_inputs(
         history_dir=history_dir,
         reset_session=reset_session,
         stream_to_console=stream_to_console,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
@@ -4028,6 +4104,7 @@ class LLMSessionChatNode:
              reset_session: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["reset_session"],
              stream_to_console: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["stream_to_console"],
              enable_thinking: bool = _FULL_UI_SESSION_CHAT_DEFAULTS["enable_thinking"],
+             reasoning_effort: str = _QWEN38_REASONING_EFFORT_DEFAULT,
              tensor_split: Optional[List[float]] = None,
              chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -4042,6 +4119,9 @@ class LLMSessionChatNode:
         text_chat_builder_overrides = _merge_enable_thinking_text_chat_builder_overrides(
             text_chat_builder_overrides,
             enable_thinking,
+        )
+        qwen38_enable_thinking = bool(
+            chat_handler_overrides.get("qwen3.8", {}).get("enable_thinking", enable_thinking)
         )
         return _run_session_chat_from_inputs(
             user_text=user_text,
@@ -4074,6 +4154,8 @@ class LLMSessionChatNode:
             history_dir=history_dir,
             reset_session=reset_session,
             stream_to_console=stream_to_console,
+            enable_thinking=qwen38_enable_thinking,
+            reasoning_effort=reasoning_effort,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
@@ -4116,6 +4198,8 @@ def _chat_one_turn(
     history_dir: str = "",
     reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
     stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
+    enable_thinking: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["enable_thinking"],
+    reasoning_effort: str = _QWEN38_REASONING_EFFORT_DEFAULT,
     model_manager: Optional[GGUFModelManager] = None,
     log_prefix_override: Optional[str] = None,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -4160,6 +4244,8 @@ def _chat_one_turn(
         history_dir=history_dir,
         reset_session=reset_session,
         stream_to_console=stream_to_console,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
         model_manager=mgr,
         chat_handler_overrides=chat_handler_overrides,
         text_chat_builder_overrides=text_chat_builder_overrides,
@@ -4219,6 +4305,8 @@ def _run_dialogue_cycle_from_inputs(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
@@ -4257,6 +4345,8 @@ def _run_dialogue_cycle_from_inputs(
         log_level=log_level,
         suppress_backend_logs=suppress_backend_logs,
         stream_to_console=stream_to_console,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
         reset_session=reset_session,
         history_dir=history_dir,
         chat_handler_overrides=chat_handler_overrides,
@@ -4310,6 +4400,8 @@ def _build_dialogue_cycle_node_execution_request(
     history_dir: str,
     reset_session: bool,
     stream_to_console: bool,
+    enable_thinking: bool,
+    reasoning_effort: str,
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
@@ -4348,6 +4440,8 @@ def _build_dialogue_cycle_node_execution_request(
         log_level=log_level,
         suppress_backend_logs=suppress_backend_logs,
         stream_to_console=stream_to_console,
+        enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
         reset_session=reset_session,
         history_dir=history_dir,
         chat_handler_overrides=chat_handler_overrides,
@@ -4415,6 +4509,7 @@ class LLMDialogueCycleNode:
         reset_session: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["reset_session"],
         stream_to_console: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["stream_to_console"],
         enable_thinking: bool = _FULL_UI_DIALOGUE_CYCLE_DEFAULTS["enable_thinking"],
+        reasoning_effort: str = _QWEN38_REASONING_EFFORT_DEFAULT,
         tensor_split: Optional[List[float]] = None,
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -4428,6 +4523,9 @@ class LLMDialogueCycleNode:
         text_chat_builder_overrides = _merge_enable_thinking_text_chat_builder_overrides(
             text_chat_builder_overrides,
             enable_thinking,
+        )
+        qwen38_enable_thinking = bool(
+            chat_handler_overrides.get("qwen3.8", {}).get("enable_thinking", enable_thinking)
         )
         transcript_text = _run_dialogue_cycle_from_inputs(
             initial_user_text=initial_user_text,
@@ -4464,6 +4562,8 @@ class LLMDialogueCycleNode:
             history_dir=history_dir,
             reset_session=reset_session,
             stream_to_console=stream_to_console,
+            enable_thinking=qwen38_enable_thinking,
+            reasoning_effort=reasoning_effort,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,

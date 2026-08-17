@@ -26,6 +26,8 @@ def test_session_chat_input_types_default_values(load_nodes_module):
     assert optional["persistent_cache"][0] == list(PERSISTENT_CACHE_OPTIONS)
     assert optional["runtime_cache"][0] == list(RUNTIME_CACHE_OPTIONS)
     assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
+    assert "reasoning_effort" not in required
+    assert "reasoning_effort" not in optional
 
 
 def test_dialogue_cycle_input_types_default_values(load_nodes_module):
@@ -47,6 +49,8 @@ def test_dialogue_cycle_input_types_default_values(load_nodes_module):
     assert optional["persistent_cache"][0] == list(PERSISTENT_CACHE_OPTIONS)
     assert optional["runtime_cache"][0] == list(RUNTIME_CACHE_OPTIONS)
     assert optional["log_level"][0] == list(LOG_LEVEL_OPTIONS)
+    assert "reasoning_effort" not in required
+    assert "reasoning_effort" not in optional
 
 
 def test_session_chat_simple_uses_media_input(load_nodes_module):
@@ -118,6 +122,60 @@ def test_simple_defaults_enable_thinking_overrides_supported_chat_formats(load_n
     assert defaults["text_chat_builder_overrides"]["minicpm-v-4.6"]["enable_thinking"] is False
     assert defaults["chat_handler_overrides"]["gemma4"]["enable_thinking"] is True
     assert defaults["text_chat_builder_overrides"]["gemma4"]["enable_thinking"] is True
+
+
+def test_simple_defaults_reads_qwen38_reasoning_effort_without_qwen35_fallback(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "qwen3.5": {"enable_thinking": True, "reasoning_effort": "low"},
+                "qwen3.8": {"enable_thinking": True, "reasoning_effort": "xhigh"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["reasoning_effort"] == "xhigh"
+    assert defaults["chat_handler_overrides"]["qwen3.8"]["enable_thinking"] is True
+    assert defaults["text_chat_builder_overrides"]["qwen3.8"]["enable_thinking"] is True
+
+
+def test_simple_defaults_invalid_qwen38_reasoning_effort_warns_and_uses_medium(
+    load_nodes_module, tmp_path, capsys
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps({"schema_version": 1, "qwen3.8": {"reasoning_effort": "maximum"}}),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["reasoning_effort"] == "medium"
+    assert "Invalid qwen3.8.reasoning_effort" in capsys.readouterr().out
+
+
+def test_simple_defaults_does_not_use_qwen35_reasoning_effort_for_qwen38(
+    load_nodes_module, tmp_path
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+    config_path = tmp_path / "simple_defaults.json"
+    config_path.write_text(
+        json.dumps({"schema_version": 1, "qwen3.5": {"reasoning_effort": "xhigh"}}),
+        encoding="utf-8",
+    )
+
+    defaults = module._load_simple_defaults(str(config_path))
+
+    assert defaults["reasoning_effort"] == "medium"
 
 
 def test_simple_defaults_reads_only_advanced_seed_kwargs(load_nodes_module, tmp_path):

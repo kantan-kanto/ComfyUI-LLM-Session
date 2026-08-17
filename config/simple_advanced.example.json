@@ -50,6 +50,10 @@
   "qwen3.5": {
     "enable_thinking": false
   },
+  "qwen3.8": {
+    "enable_thinking": true,
+    "reasoning_effort": "xhigh"
+  },
   "minicpm-v-4.6": {
     "enable_thinking": false
   },

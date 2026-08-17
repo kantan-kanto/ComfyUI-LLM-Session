@@ -258,14 +258,13 @@ builds for the required chat handlers.
 - Qwen3-VL (4B / 8B)
 - Qwen3.5 (9B / 27B / 35B-A3B)*
 - Qwen3.6 (27B / 35B-A3B)*
+- Qwen3.8 (27B)*
 
 **Note:** Entries marked with `*` either do not work on PyPI `llama-cpp-python` or have not been tested on it.
 
-### Node Routing Implemented (Runtime Validation Pending)
-
-- Qwen3.8 (27B)* — routed through the existing Qwen3.5 compatibility path for
-  text, Vision, mmproj discovery, and thinking on/off. Actual GGUF runtime
-  validation with a recent JamePeng backend remains required.
+Qwen3.8 is detected as its own model family while reusing the compatible
+`Qwen35ChatHandler`. Vision recognition has been manually confirmed. Simple
+nodes also support Qwen3.8 `reasoning_effort` through JSON configuration.
 
 ### MoE Models
 

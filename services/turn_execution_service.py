@@ -47,6 +47,7 @@ class TurnExecutionDependencies(TypedDict):
     validate_chat_media: Callable[..., None]
     build_chat_messages: Callable[..., List[Dict[str, Any]]]
     build_text_chat_request: Callable[..., Optional[Dict[str, Any]]]
+    build_effective_system_prompt: Callable[..., str]
     build_kv_state_signature: Callable[..., str]
     try_restore_kv_state: Callable[..., None]
     is_state_data_mismatch_error: Callable[[Exception], bool]
@@ -105,6 +106,8 @@ class TurnExecutionRequest:
     history_dir: str = ""
     reset_session: bool = False
     stream_to_console: bool = False
+    enable_thinking: bool = False
+    reasoning_effort: str = "medium"
     model_manager: Optional[Any] = None
     chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None
@@ -159,6 +162,8 @@ class TurnExecutionRequest:
         history_dir: str,
         reset_session: bool,
         stream_to_console: bool,
+        enable_thinking: bool = False,
+        reasoning_effort: str = "medium",
         model_manager: Optional[Any],
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]],
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
@@ -204,6 +209,8 @@ class TurnExecutionRequest:
             history_dir=history_dir or "",
             reset_session=bool(reset_session),
             stream_to_console=bool(stream_to_console),
+            enable_thinking=bool(enable_thinking),
+            reasoning_effort=str(reasoning_effort or "medium"),
             model_manager=model_manager,
             chat_handler_overrides=chat_handler_overrides,
             text_chat_builder_overrides=text_chat_builder_overrides,
@@ -553,6 +560,7 @@ class TurnExecutionService:
         user_text_for_model: str,
         model_path: str,
         mmproj_path: Optional[str],
+        effective_system_prompt: str,
     ) -> tuple[Any, Any]:
         build_chat_messages = self._dep(deps, "build_chat_messages")
         build_text_chat_request = self._dep(deps, "build_text_chat_request")
@@ -563,7 +571,7 @@ class TurnExecutionService:
             model_path=model_path,
             max_turns=int(request.max_turns) if request.max_turns is not None else None,
             summarize_old_history=bool(request.summarize_old_history),
-            system_prompt=request.system_prompt or "",
+            system_prompt=effective_system_prompt,
         )
         text_chat_request = build_text_chat_request(
             model_path=model_path,
@@ -584,6 +592,7 @@ class TurnExecutionService:
         model_path: str,
         mmproj_path: Optional[str],
         clear_kv_state_for_session: Any,
+        effective_system_prompt: str,
     ) -> tuple[Any, Any, Any]:
         return self._kv_state_service.restore_state(
             request=request,
@@ -594,6 +603,7 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
             clear_kv_state_for_session=clear_kv_state_for_session,
+            effective_system_prompt=effective_system_prompt,
         )
 
     def _persist_history_and_summary(
@@ -632,6 +642,7 @@ class TurnExecutionService:
         mmproj_path: Optional[str],
         kv_state_debug_info: Any,
         get_context_turns: Any,
+        effective_system_prompt: str,
     ) -> None:
         self._kv_state_service.save_state(
             request=request,
@@ -642,6 +653,7 @@ class TurnExecutionService:
             mmproj_path=mmproj_path,
             kv_state_debug_info=kv_state_debug_info,
             get_context_turns=get_context_turns,
+            effective_system_prompt=effective_system_prompt,
         )
 
     def execute_turn(self, request: TurnExecutionRequest) -> TurnExecutionResult:
@@ -670,6 +682,16 @@ class TurnExecutionService:
         if early_result is not None:
             return early_result
         assert mgr is not None and model_path is not None
+
+        build_effective_system_prompt = deps.get("build_effective_system_prompt")
+        effective_system_prompt = request.system_prompt or ""
+        if callable(build_effective_system_prompt):
+            effective_system_prompt = build_effective_system_prompt(
+                model_path=model_path,
+                system_prompt=request.system_prompt or "",
+                enable_thinking=bool(request.enable_thinking),
+                reasoning_effort=request.reasoning_effort,
+            )
 
         model_sig = self._build_model_sig(
             deps=deps,
@@ -720,6 +742,7 @@ class TurnExecutionService:
                 user_text_for_model=user_text_for_model,
                 model_path=model_path,
                 mmproj_path=mmproj_path,
+                effective_system_prompt=effective_system_prompt,
             )
         except Exception as err:
             return TurnExecutionResult(
@@ -775,6 +798,7 @@ class TurnExecutionService:
             model_path=model_path,
             mmproj_path=mmproj_path,
             clear_kv_state_for_session=clear_kv_state_for_session,
+            effective_system_prompt=effective_system_prompt,
         )
         _record_debug_timing("kv_restore", t_kv_restore)
         _log_debug_timings("before generation")
@@ -819,7 +843,7 @@ class TurnExecutionService:
                 model_path=model_path,
                 max_turns=new_turns_limit,
                 summarize_old_history=bool(request.summarize_old_history),
-                system_prompt=request.system_prompt or "",
+                system_prompt=effective_system_prompt,
             )
             rebuilt_text_chat_request = build_text_chat_request(
                 model_path=model_path,
@@ -879,6 +903,7 @@ class TurnExecutionService:
             mmproj_path=mmproj_path,
             kv_state_debug_info=kv_state_debug_info,
             get_context_turns=get_context_turns,
+            effective_system_prompt=effective_system_prompt,
         )
         _record_debug_timing("kv_save", t_kv_save)
         _log_debug_timings("complete")
