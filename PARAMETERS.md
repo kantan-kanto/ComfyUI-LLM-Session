@@ -175,8 +175,11 @@ When using Gemma 4 E2B / E4B with an mmproj loaded, the current JamePeng `Gemma4
 
 ## Media Input
 
-`LLM Session Chat` and `LLM Session Chat (Simple)` expose an optional `media`
-input for the current user turn.
+`LLM Session Chat` and `LLM Session Chat (Simple)` expose optional Autogrow
+media inputs for the current user turn. `media_0` is initially visible;
+connecting it reveals `media_1`, and the sequence can grow to nine connectors.
+Inputs are processed in numeric connector order. ComfyUI builds without the V3
+Autogrow API retain the legacy single `media` connector.
 
 Supported inputs:
 
@@ -185,6 +188,29 @@ Supported inputs:
 - ComfyUI `AUDIO`: accepted only when the selected model is detected as
   Gemma 4; the node encodes the audio object as WAV and sends it as an
   `input_audio` message part
+
+Multiple connectors may contain separate IMAGE batches or a mixture of IMAGE
+and AUDIO inputs. IMAGE batches are flattened into individual `image_url`
+parts. For turns containing AUDIO, the text part is placed before all media
+parts; the media parts otherwise preserve connector order.
+
+### Referring To Connected Media In Prompts
+
+Connector names such as `media_0` and `media_1` are UI/workflow identifiers;
+they are not inserted into the prompt or sent to the model as labels. Refer to
+media by its presented order and type instead:
+
+- `Compare the first image with the second image.`
+- `Describe the image, then summarize the first audio clip.`
+- `1枚目の画像と2枚目の画像の違いを説明してください。`
+- `画像の内容を踏まえて、最初の音声を要約してください。`
+
+Images are numbered after IMAGE batches are flattened. For example, if
+`media_0` contains a three-image batch and `media_1` contains one image, the
+image from `media_1` is the fourth image presented to the model. Audio clips
+follow the connector order among AUDIO inputs. Do not rely on writing
+`media_0` in the prompt unless the prompt itself separately defines what that
+name means; the model does not otherwise know the connector name.
 
 For Gemma 4 media turns, the current JamePeng `Gemma4ChatHandler` still expects
 a valid `clip_model_path`, so configure a matching mmproj file even when testing
@@ -196,6 +222,10 @@ non-Gemma 4 models is also rejected explicitly.
 Media input is turn-local. Raw media is not saved to session history. When media
 is present, KV state restore/save is disabled for that turn to avoid reusing
 state across different multimodal contexts.
+
+When an older workflow is loaded on an Autogrow-capable ComfyUI build, linked
+`image` or `media` inputs are migrated to `media_0`. Save the workflow after
+loading to persist the updated connector name.
 
 Compatibility depends on the selected `llama-cpp-python` backend and chat
 handler. See [COMPATIBILITY.md](COMPATIBILITY.md) before relying on AUDIO input.

@@ -6,6 +6,13 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ## [Unreleased]
 
+- Session Chat media Autogrow
+  - Added V3 adapters for `LLM Session Chat` and `LLM Session Chat (Simple)` that expose `media_0` and reveal subsequent IMAGE/AUDIO connectors as links are added.
+  - Aggregate multiple media connectors in numeric order while preserving existing IMAGE-batch and Gemma 4 AUDIO handling.
+  - Migrate saved `image` and `media` workflow links to `media_0` on Autogrow-capable ComfyUI builds.
+  - Retain the legacy single `media` node implementation as a fallback when the ComfyUI V3 Autogrow API is unavailable.
+  - Document that connector names are not sent to the model and that prompts should refer to media by presentation order and type.
+
 ---
 
 ## [1.4.0] - 2026-08-17

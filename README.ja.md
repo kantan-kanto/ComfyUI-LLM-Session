@@ -36,12 +36,19 @@ Llama、Mistral、Qwen、DeepSeek、GLM、Gemma、Phi、LLaVA、gpt-oss など�
 LLM Session Chat からパラメータ設定の UI 項目を減らした簡易ノードです。
 UI は少なく保ちつつ、JSON 設定ファイルでは標準ノードにない advanced parameters も指定できます。
 
-どちらの Session Chat ノードも、現在ターン用の任意入力として `media` を
-受け取れます。`media` は IMAGE、IMAGE バッチ、ComfyUI の AUDIO を受け付けます。
-AUDIO は Gemma 4 モデルの場合だけ許可され、WAV として backend に渡されます。
-メディア本体は session history には保存されません。
-古い workflow に `image` input が残っている場合は、読み込み時に UI 上で
-`media` へ移行されます。読み込み後に一度保存すると workflow JSON も正常化されます。
+どちらの Session Chat ノードも、現在ターン用の Autogrow media input を
+受け取れます。最初は `media_0` が表示され、接続すると `media_1` が現れ、
+最大9個まで追加できます。各コネクタは IMAGE、IMAGE バッチ、ComfyUI の AUDIO を
+受け付けます。AUDIO は Gemma 4 モデルの場合だけ許可され、WAV として backend に
+渡されます。メディアはコネクタ番号順に処理され、session history には保存されません。
+V3 Autogrow に対応していない古い ComfyUI では、従来の単一 `media` コネクタへ
+フォールバックします。古い workflow の `image` または `media` input は、Autogrow
+対応環境で読み込むと UI 上で `media_0` へ移行されます。読み込み後に一度保存すると
+workflow JSON も正常化されます。
+`media_0` などのコネクタ名はモデルへ送られないため、プロンプトでは
+「1枚目の画像」「2番目の音声」のように順序と種類で参照してください。
+IMAGE バッチを含む数え方と例は
+[PARAMETERS.md](PARAMETERS.md#referring-to-connected-media-in-prompts)を参照してください。
 
 ### LLM Dialogue Cycle
 モデル同士を対話させるためのノードです。

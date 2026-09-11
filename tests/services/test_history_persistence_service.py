@@ -169,6 +169,10 @@ def test_persist_history_reports_write_failure_without_losing_history() -> None:
             {"waveform": object(), "sample_rate": 16000},
             {"image_used": False, "image_count": 0, "audio_used": True},
         ),
+        (
+            (FakeImageBatch(), {"waveform": object(), "sample_rate": 16000}),
+            {"image_used": True, "image_count": 2, "audio_used": True},
+        ),
         (object(), {"image_used": False, "image_count": 0, "audio_used": False}),
     ],
 )

@@ -24,45 +24,29 @@ class HistoryPersistenceService:
         return deps[key]
 
     def _describe_media_inputs(self, media: Any) -> Dict[str, Any]:
-        if media is None:
-            return {
-                "image_used": False,
-                "image_count": 0,
-                "audio_used": False,
-                "audio_format": "",
-            }
-        if isinstance(media, dict) and "waveform" in media and "sample_rate" in media:
-            return {
-                "image_used": False,
-                "image_count": 0,
-                "audio_used": True,
-                "audio_format": "wav",
-            }
-        shape = getattr(media, "shape", None)
-        try:
-            shape_tuple = tuple(int(x) for x in shape) if shape is not None else ()
-        except Exception:
-            shape_tuple = ()
-        if len(shape_tuple) == 4 and shape_tuple[-1] in {1, 3, 4}:
-            image_count = int(shape_tuple[0])
-            return {
-                "image_used": image_count > 0,
-                "image_count": image_count,
-                "audio_used": False,
-                "audio_format": "",
-            }
-        if len(shape_tuple) == 3 and shape_tuple[-1] in {1, 3, 4}:
-            return {
-                "image_used": True,
-                "image_count": 1,
-                "audio_used": False,
-                "audio_format": "",
-            }
+        media_items = media if isinstance(media, (list, tuple)) else [media]
+        image_count = 0
+        audio_used = False
+        for media_item in media_items:
+            if media_item is None:
+                continue
+            if isinstance(media_item, dict) and "waveform" in media_item and "sample_rate" in media_item:
+                audio_used = True
+                continue
+            shape = getattr(media_item, "shape", None)
+            try:
+                shape_tuple = tuple(int(x) for x in shape) if shape is not None else ()
+            except Exception:
+                shape_tuple = ()
+            if len(shape_tuple) == 4 and shape_tuple[-1] in {1, 3, 4}:
+                image_count += max(0, int(shape_tuple[0]))
+            elif len(shape_tuple) == 3 and shape_tuple[-1] in {1, 3, 4}:
+                image_count += 1
         return {
-            "image_used": False,
-            "image_count": 0,
-            "audio_used": False,
-            "audio_format": "",
+            "image_used": image_count > 0,
+            "image_count": image_count,
+            "audio_used": audio_used,
+            "audio_format": "wav" if audio_used else "",
         }
 
     def persist_history_and_summary(

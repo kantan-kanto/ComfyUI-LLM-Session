@@ -61,6 +61,44 @@ def test_build_chat_messages_accepts_gemma4_audio_media(load_nodes_module):
     assert base64.b64decode(audio_part["input_audio"]["data"]).startswith(b"RIFF")
 
 
+def test_build_chat_messages_accepts_multiple_autogrow_media_inputs(load_nodes_module):
+    module = load_nodes_module()
+    first_image = FakeTensor(np.zeros((1, 2, 2, 3), dtype=np.float32))
+    second_image_batch = FakeTensor(np.zeros((2, 2, 2, 3), dtype=np.float32))
+
+    messages = module.build_chat_messages(
+        history={"turns": []},
+        user_text="compare",
+        media={"media_1": second_image_batch, "media_0": first_image},
+        model_path="C:/models/qwen3-vl.gguf",
+    )
+
+    content = messages[-1]["content"]
+    assert [part["type"] for part in content] == [
+        "image_url",
+        "image_url",
+        "image_url",
+        "text",
+    ]
+    assert content[-1] == {"type": "text", "text": "compare"}
+
+
+def test_build_chat_messages_preserves_mixed_media_connector_order(load_nodes_module):
+    module = load_nodes_module()
+    image = FakeTensor(np.zeros((1, 2, 2, 3), dtype=np.float32))
+    audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
+
+    messages = module.build_chat_messages(
+        history={"turns": []},
+        user_text="compare",
+        media=(image, audio),
+        model_path="C:/models/gemma-4-12B-it.gguf",
+    )
+
+    content = messages[-1]["content"]
+    assert [part["type"] for part in content] == ["text", "image_url", "input_audio"]
+
+
 def test_build_chat_messages_rejects_audio_for_non_gemma4(load_nodes_module):
     module = load_nodes_module()
     audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
@@ -90,6 +128,15 @@ def test_validate_chat_media_rejects_invalid_audio_shape(load_nodes_module):
         module.validate_chat_media(media=audio, model_path="C:/models/gemma-4-12B.gguf")
 
 
+def test_validate_chat_media_identifies_invalid_autogrow_connector(load_nodes_module):
+    module = load_nodes_module()
+    image = FakeTensor(np.zeros((1, 2, 2, 3), dtype=np.float32))
+    audio = {"waveform": np.zeros((1, 1, 160), dtype=np.float32), "sample_rate": 16000}
+
+    with pytest.raises(ValueError, match=r"media_1:.*Gemma 4"):
+        module.validate_chat_media(media=(image, audio), model_path="C:/models/qwen3-vl.gguf")
+
+
 def test_build_chat_messages_rejects_unsupported_media(load_nodes_module):
     module = load_nodes_module()
 
@@ -109,6 +156,21 @@ def test_legacy_image_media_shim_prefers_media_when_present(load_nodes_module):
 
     assert module._resolve_legacy_image_media(media, image) is media
     assert module._resolve_legacy_image_media(None, image) is image
+
+
+def test_resolve_session_chat_media_prefers_autogrow_then_legacy(load_nodes_module):
+    module = load_nodes_module()
+    first = object()
+    second = object()
+    legacy = object()
+
+    resolved = module._resolve_session_chat_media(
+        media_inputs={"media_1": second, "media_0": first},
+        media=legacy,
+    )
+
+    assert resolved == (first, second)
+    assert module._resolve_session_chat_media(media_inputs={}, media=legacy) is legacy
 
 
 def test_session_chat_methods_still_accept_legacy_image_kwarg(load_nodes_module):

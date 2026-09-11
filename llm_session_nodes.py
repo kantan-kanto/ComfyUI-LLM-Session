@@ -25,6 +25,18 @@ import hashlib
 import traceback
 from importlib import import_module
 
+try:
+    from comfy_api.latest import io as _comfy_io
+except ImportError:
+    _comfy_io = None
+
+
+_COMFY_V3_AUTOGROW_AVAILABLE = bool(
+    _comfy_io is not None
+    and hasattr(_comfy_io, "Autogrow")
+    and hasattr(_comfy_io, "MultiType")
+)
+
 
 def _import_layer_module(module_name: str):
     if __package__:
@@ -1441,7 +1453,53 @@ def _encode_audio_dict_as_wav_base64(audio: Dict[str, Any]) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[str, Any]]]:
+_AUTOGROW_MEDIA_KEY_RE = re.compile(r"^media_(\d+)$")
+
+
+def _ordered_media_items(media: Any) -> List[Any]:
+    if media is None:
+        return []
+    if _looks_like_image_tensor(media) or _looks_like_audio_dict(media):
+        return [media]
+    if isinstance(media, dict):
+        indexed_items = []
+        for name, value in media.items():
+            match = _AUTOGROW_MEDIA_KEY_RE.fullmatch(str(name))
+            if match is not None and value is not None:
+                indexed_items.append((int(match.group(1)), value))
+        if indexed_items:
+            indexed_items.sort(key=lambda item: item[0])
+            return [value for _, value in indexed_items]
+        return [media]
+    if isinstance(media, (list, tuple)):
+        return [value for value in media if value is not None]
+    return [media]
+
+
+def _normalize_media_collection(media: Any) -> Any:
+    items = _ordered_media_items(media)
+    if not items:
+        return None
+    if len(items) == 1:
+        return items[0]
+    return tuple(items)
+
+
+def _resolve_session_chat_media(
+    *,
+    media_inputs: Any = None,
+    media: Any = None,
+    image: Any = None,
+) -> Any:
+    autogrow_items = _ordered_media_items(media_inputs)
+    if isinstance(media_inputs, dict) and not media_inputs:
+        autogrow_items = []
+    if autogrow_items:
+        return _normalize_media_collection(autogrow_items)
+    return _normalize_media_collection(_resolve_legacy_image_media(media, image))
+
+
+def _single_media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[str, Any]]]:
     if _looks_like_image_tensor(media):
         pil_list = tensor2pil(media)
         if not pil_list:
@@ -1463,10 +1521,7 @@ def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[st
     raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
 
 
-def validate_chat_media(media: Any = None, model_path: str = "") -> None:
-    if media is None:
-        return
-
+def _validate_single_chat_media(media: Any, model_path: str) -> None:
     if _looks_like_image_tensor(media):
         shape = _shape_tuple(media)
         if len(shape) == 4 and shape[0] <= 0:
@@ -1481,6 +1536,43 @@ def validate_chat_media(media: Any = None, model_path: str = "") -> None:
         return
 
     raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
+
+
+def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[str, Any]]]:
+    media_items = _ordered_media_items(media)
+    if not media_items:
+        raise ValueError("At least one media input is required.")
+
+    media_types: List[str] = []
+    parts: List[Dict[str, Any]] = []
+    for index, media_item in enumerate(media_items):
+        try:
+            media_type, item_parts = _single_media_to_chat_parts(media_item, model_path)
+        except ValueError as err:
+            if len(media_items) == 1:
+                raise
+            raise ValueError(f"media_{index}: {err}") from err
+        media_types.append(media_type)
+        parts.extend(item_parts)
+
+    has_audio = any(media_type == "audio" for media_type in media_types)
+    has_image = any(media_type != "audio" for media_type in media_types)
+    if has_audio and has_image:
+        return "mixed", parts
+    if has_audio:
+        return "audio", parts
+    return ("image_batch" if len(parts) > 1 else "image"), parts
+
+
+def validate_chat_media(media: Any = None, model_path: str = "") -> None:
+    media_items = _ordered_media_items(media)
+    for index, media_item in enumerate(media_items):
+        try:
+            _validate_single_chat_media(media_item, model_path)
+        except ValueError as err:
+            if len(media_items) == 1:
+                raise
+            raise ValueError(f"media_{index}: {err}") from err
 
 
 def _resolve_legacy_image_media(media: Any, image: Any) -> Any:
@@ -1669,7 +1761,7 @@ def build_chat_messages(history: Dict[str, Any],
         text_part = {"type": "text", "text": user_text or ""}
         content = (
             [text_part] + media_parts
-            if media_type == "audio"
+            if media_type in {"audio", "mixed"}
             else media_parts + [text_part]
         )
         messages.append({"role": "user", "content": content})
@@ -3177,6 +3269,109 @@ def _ui_bool_input(default: bool, *, tooltip: Optional[str] = None) -> tuple:
     return ("BOOLEAN", options)
 
 
+def _v3_input_from_legacy(name: str, spec: tuple, *, optional: bool):
+    if _comfy_io is None:
+        raise RuntimeError("ComfyUI V3 node API is unavailable.")
+
+    input_type = spec[0]
+    options = dict(spec[1]) if len(spec) > 1 else {}
+    common = {
+        "optional": optional,
+        "tooltip": options.pop("tooltip", None),
+        "display_name": options.pop("display_name", None),
+        "advanced": options.pop("advanced", None),
+    }
+
+    if isinstance(input_type, (list, tuple)):
+        return _comfy_io.Combo.Input(
+            name,
+            options=list(input_type),
+            default=options.pop("default", None),
+            control_after_generate=options.pop("control_after_generate", None),
+            extra_dict=options or None,
+            **common,
+        )
+
+    if input_type == "STRING":
+        return _comfy_io.String.Input(
+            name,
+            default=options.pop("default", None),
+            multiline=options.pop("multiline", False),
+            placeholder=options.pop("placeholder", None),
+            dynamic_prompts=options.pop("dynamicPrompts", None),
+            extra_dict=options or None,
+            **common,
+        )
+    if input_type == "INT":
+        return _comfy_io.Int.Input(
+            name,
+            default=options.pop("default", None),
+            min=options.pop("min", None),
+            max=options.pop("max", None),
+            step=options.pop("step", None),
+            extra_dict=options or None,
+            **common,
+        )
+    if input_type == "FLOAT":
+        return _comfy_io.Float.Input(
+            name,
+            default=options.pop("default", None),
+            min=options.pop("min", None),
+            max=options.pop("max", None),
+            step=options.pop("step", None),
+            extra_dict=options or None,
+            **common,
+        )
+    if input_type == "BOOLEAN":
+        return _comfy_io.Boolean.Input(
+            name,
+            default=options.pop("default", None),
+            label_on=options.pop("label_on", None),
+            label_off=options.pop("label_off", None),
+            extra_dict=options or None,
+            **common,
+        )
+
+    comfy_type = _comfy_io.AnyType if input_type == "*" else _comfy_io.Custom(str(input_type))
+    return comfy_type.Input(name, extra_dict=options or None, **common)
+
+
+def _session_chat_v3_inputs(legacy_input_types: Dict[str, Dict[str, tuple]]) -> List[Any]:
+    if not _COMFY_V3_AUTOGROW_AVAILABLE:
+        raise RuntimeError("ComfyUI V3 Autogrow API is unavailable.")
+
+    inputs: List[Any] = []
+    media_tooltip = "Optional IMAGE tensor/batch or AUDIO input for this turn only (never saved to history)"
+    for input_category in ("required", "optional"):
+        for name, spec in legacy_input_types.get(input_category, {}).items():
+            if name == "media":
+                inputs.append(
+                    _comfy_io.Autogrow.Input(
+                        "media_inputs",
+                        optional=True,
+                        template=_comfy_io.Autogrow.TemplatePrefix(
+                            input=_comfy_io.MultiType.Input(
+                                "media",
+                                types=[_comfy_io.Image, _comfy_io.Audio],
+                                tooltip=media_tooltip,
+                            ),
+                            prefix="media_",
+                            min=0,
+                            max=9,
+                        ),
+                    )
+                )
+                continue
+            inputs.append(
+                _v3_input_from_legacy(
+                    name,
+                    spec,
+                    optional=input_category == "optional",
+                )
+            )
+    return inputs
+
+
 def _input_types_session_chat_simple() -> dict:
     available_models, mmproj_options = _get_available_models_and_mmprojs()
     return {
@@ -4247,7 +4442,7 @@ class LLMSessionChatNode:
              advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
              official_sampling_profile: str = "",
              image=None) -> tuple:
-        media = _resolve_legacy_image_media(media, image)
+        media = _resolve_session_chat_media(media=media, image=image)
         chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
             chat_handler_overrides,
             enable_thinking,
@@ -4756,7 +4951,7 @@ class LLMSessionChatSimpleNode:
         stream_to_console: bool = _SIMPLE_WRAPPER_DEFAULTS["stream_to_console"],
         image=None,
     ) -> tuple:
-        media = _resolve_legacy_image_media(media, image)
+        media = _resolve_session_chat_media(media=media, image=image)
         defaults, chat_handler_overrides, text_chat_builder_overrides = _load_simple_defaults_bundle(
             config_path=config_path
         )
@@ -4891,14 +5086,78 @@ class UnloadLLMModelNode:
         return (trigger,)
 
 
+if _COMFY_V3_AUTOGROW_AVAILABLE:
+    class LLMSessionChatV3Adapter(_comfy_io.ComfyNode):
+        @classmethod
+        def define_schema(cls):
+            return _comfy_io.Schema(
+                node_id="LLMSessionChatNode",
+                display_name="LLM Session Chat",
+                category=_LLM_SESSION_CATEGORY,
+                description=LLMSessionChatNode.DESCRIPTION,
+                inputs=_session_chat_v3_inputs(_input_types_session_chat()),
+                outputs=[_comfy_io.String.Output(display_name="assistant_text")],
+                accept_all_inputs=True,
+            )
+
+        @classmethod
+        def execute(
+            cls,
+            media_inputs=None,
+            media=None,
+            image=None,
+            **kwargs,
+        ):
+            resolved_media = _resolve_session_chat_media(
+                media_inputs=media_inputs,
+                media=media,
+                image=image,
+            )
+            result = LLMSessionChatNode().chat_stream(media=resolved_media, **kwargs)
+            return _comfy_io.NodeOutput(*result)
+
+
+    class LLMSessionChatSimpleV3Adapter(_comfy_io.ComfyNode):
+        @classmethod
+        def define_schema(cls):
+            return _comfy_io.Schema(
+                node_id="LLMSessionChatSimpleNode",
+                display_name="LLM Session Chat (Simple)",
+                category=_LLM_SESSION_CATEGORY,
+                description=LLMSessionChatSimpleNode.DESCRIPTION,
+                inputs=_session_chat_v3_inputs(_input_types_session_chat_simple()),
+                outputs=[_comfy_io.String.Output(display_name="assistant_text")],
+                accept_all_inputs=True,
+            )
+
+        @classmethod
+        def execute(
+            cls,
+            media_inputs=None,
+            media=None,
+            image=None,
+            **kwargs,
+        ):
+            resolved_media = _resolve_session_chat_media(
+                media_inputs=media_inputs,
+                media=media,
+                image=image,
+            )
+            result = LLMSessionChatSimpleNode().chat_stream(media=resolved_media, **kwargs)
+            return _comfy_io.NodeOutput(*result)
+else:
+    LLMSessionChatV3Adapter = None
+    LLMSessionChatSimpleV3Adapter = None
+
+
 # ============================================================================
 # ComfyUI Node Registration
 # ============================================================================
 
 NODE_CLASS_MAPPINGS = {
-    "LLMSessionChatSimpleNode": LLMSessionChatSimpleNode,
+    "LLMSessionChatSimpleNode": LLMSessionChatSimpleV3Adapter or LLMSessionChatSimpleNode,
     "LLMDialogueCycleSimpleNode": LLMDialogueCycleSimpleNode,
-    "LLMSessionChatNode": LLMSessionChatNode,
+    "LLMSessionChatNode": LLMSessionChatV3Adapter or LLMSessionChatNode,
     "LLMDialogueCycleNode": LLMDialogueCycleNode,
     "UnloadLLMModelNode": UnloadLLMModelNode,
 }

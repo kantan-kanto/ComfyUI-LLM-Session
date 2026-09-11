@@ -22,9 +22,9 @@ The following notes are intended for existing users upgrading to the `1.1.x` / `
 - `reset_session` now clears history and per-session KV state, while keeping the session's disk cache so the same session can restart efficiently.
 - Older history JSON files are normalized automatically, but the tracking model for summarized ranges has changed. Long-lived sessions may therefore behave somewhat differently from previous versions.
 - When using Vision models, both mmproj auto-detection and handler selection logic have changed. Even combinations that worked before may need to be rechecked depending on backend behavior and filename conventions.
-- The optional `LLM Session Chat` / `LLM Session Chat (Simple)` media input is now named `media` instead of `image`.
-- Old workflows that still contain an `image` input are migrated in the ComfyUI UI when loaded. Save the workflow once after loading to persist the normalized `media` input in the workflow JSON.
-- IMAGE batches connected to `media` are now sent as multiple image message parts.
+- On ComfyUI builds with V3 Autogrow support, the optional Session Chat media input starts at `media_0` and adds the next connector when one is linked. Older ComfyUI builds retain the single `media` connector.
+- Old workflows containing `image` or `media` inputs are migrated in the ComfyUI UI to `media_0` when Autogrow is available. Save the workflow once after loading to persist the normalized input in the workflow JSON.
+- IMAGE batches and multiple IMAGE connectors are sent as multiple image message parts.
 - ComfyUI `AUDIO` media is accepted only for Gemma 4 models. Unsupported media inputs, including AUDIO for other model families, now fail with explicit errors before model loading.
 - `LLM Dialogue Cycle` now keeps model managers loaded when `runtime_cache` is `KV_cache` or `LlamaTrieCache`.
 - Added `Unload LLM Model` output node for explicit manual VRAM release after keep-loaded runs.
@@ -62,10 +62,17 @@ A simplified node with fewer parameter controls in the UI than
 LLM Session Chat. The UI stays minimal, while the JSON config file can also set
 advanced parameters that are not available on the standard node.
 
-Both Session Chat nodes accept an optional `media` input for the current turn.
-It supports IMAGE tensors, IMAGE batches, and ComfyUI AUDIO objects. AUDIO input
-is only accepted for Gemma 4 models and is encoded as WAV before being passed to
-the backend. Media is not saved in the session history.
+Both Session Chat nodes accept optional Autogrow media inputs for the current
+turn. The first connector is `media_0`; connecting it reveals `media_1`, up to
+nine connectors. Each connector accepts IMAGE tensors, IMAGE batches, and
+ComfyUI AUDIO objects. AUDIO input is only accepted for Gemma 4 models and is
+encoded as WAV before being passed to the backend. Media is processed in
+connector-number order and is not saved in the session history. On older
+ComfyUI builds without V3 Autogrow, the nodes fall back to one `media` connector.
+The connector names are not sent to the model, so prompts should refer to
+attachments by order and type, such as "the first image" or "the second audio
+clip." See [PARAMETERS.md](PARAMETERS.md#referring-to-connected-media-in-prompts)
+for IMAGE-batch numbering details and examples.
 
 ### LLM Dialogue Cycle
 A node for running dialogue between models.

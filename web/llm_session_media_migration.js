@@ -4,6 +4,7 @@ const SESSION_CHAT_NODE_TYPES = new Set([
   "LLMSessionChatNode",
   "LLMSessionChatSimpleNode",
 ]);
+const LITEGRAPH_INPUT = 1;
 
 function hasLink(input) {
   if (!input) {
@@ -15,10 +16,10 @@ function hasLink(input) {
   return Array.isArray(input.links) && input.links.length > 0;
 }
 
-function renameInputToMedia(input) {
-  input.name = "media";
-  input.localized_name = "media";
-  input.type = "*";
+function renameInput(input, name, targetInput = null, localizedName = name) {
+  input.name = name;
+  input.localized_name = localizedName;
+  input.type = targetInput?.type ?? "*";
 }
 
 function removeInput(node, slot) {
@@ -39,7 +40,42 @@ function findInputSlot(node, name) {
   return node.inputs?.findIndex((input) => input?.name === name) ?? -1;
 }
 
-function migrateLegacyImageInput(node) {
+function migrateInputName(node, fromName, toName, localizedName = toName) {
+  let fromSlot = findInputSlot(node, fromName);
+  let toSlot = findInputSlot(node, toName);
+  if (fromSlot < 0) {
+    return false;
+  }
+
+  if (toSlot < 0) {
+    renameInput(node.inputs[fromSlot], toName, null, localizedName);
+    return true;
+  }
+
+  const fromInput = node.inputs[fromSlot];
+  const toInput = node.inputs[toSlot];
+  const fromHasLink = hasLink(fromInput);
+  const toHasLink = hasLink(toInput);
+
+  if (fromHasLink && !toHasLink) {
+    removeInput(node, toSlot);
+    fromSlot = findInputSlot(node, fromName);
+    if (fromSlot >= 0) {
+      renameInput(node.inputs[fromSlot], toName, toInput, localizedName);
+    }
+  } else {
+    if (fromHasLink && toHasLink) {
+      console.warn(
+        `[ComfyUI-LLM-Session] Both ${fromName} and ${toName} inputs had links; keeping ${toName} and removing ${fromName}.`,
+        node,
+      );
+    }
+    removeInput(node, fromSlot);
+  }
+  return true;
+}
+
+function migrateLegacyMediaInputs(node, usesAutogrow) {
   if (!node || !SESSION_CHAT_NODE_TYPES.has(node.comfyClass || node.type)) {
     return;
   }
@@ -47,44 +83,39 @@ function migrateLegacyImageInput(node) {
     return;
   }
 
-  let imageSlot = findInputSlot(node, "image");
-  let mediaSlot = findInputSlot(node, "media");
-  if (imageSlot < 0) {
-    return;
+  let changed = migrateInputName(node, "image", "media");
+  if (usesAutogrow) {
+    changed = migrateInputName(node, "media", "media_inputs.media_0", "media_0") || changed;
   }
-
-  if (mediaSlot < 0) {
-    renameInputToMedia(node.inputs[imageSlot]);
+  if (changed) {
     node.setDirtyCanvas?.(true, true);
-    return;
   }
+}
 
-  const imageInput = node.inputs[imageSlot];
-  const mediaInput = node.inputs[mediaSlot];
-  const imageHasLink = hasLink(imageInput);
-  const mediaHasLink = hasLink(mediaInput);
+function hasMediaAutogrow(nodeData) {
+  const inputGroups = [nodeData?.input?.required, nodeData?.input?.optional];
+  return inputGroups.some((group) =>
+    Object.values(group ?? {}).some((spec) => spec?.[0] === "COMFY_AUTOGROW_V3"),
+  );
+}
 
-  if (imageHasLink && !mediaHasLink) {
-    removeInput(node, mediaSlot);
-    imageSlot = findInputSlot(node, "image");
-    if (imageSlot >= 0) {
-      renameInputToMedia(node.inputs[imageSlot]);
+function notifyAutogrowOfMigratedLink(node) {
+  const notify = () => {
+    const slot = findInputSlot(node, "media_inputs.media_0");
+    const input = slot >= 0 ? node.inputs[slot] : null;
+    const graphLinks = node.graph?.links;
+    const link = input?.link != null
+      ? (graphLinks?.get?.(input.link) ?? graphLinks?.[input.link])
+      : null;
+    if (input && link) {
+      node.onConnectionsChange?.(LITEGRAPH_INPUT, slot, true, link, input);
     }
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(notify);
   } else {
-    if (imageHasLink && mediaHasLink) {
-      console.warn(
-        "[ComfyUI-LLM-Session] Both legacy image and media inputs had links; keeping media and removing image.",
-        node,
-      );
-    }
-    removeInput(node, imageSlot);
-    mediaSlot = findInputSlot(node, "media");
-    if (mediaSlot >= 0) {
-      renameInputToMedia(node.inputs[mediaSlot]);
-    }
+    notify();
   }
-
-  node.setDirtyCanvas?.(true, true);
 }
 
 app.registerExtension({
@@ -93,22 +124,31 @@ app.registerExtension({
     if (!SESSION_CHAT_NODE_TYPES.has(nodeData.name)) {
       return;
     }
+    const usesAutogrow = hasMediaAutogrow(nodeData);
+    nodeType.prototype.__llmSessionUsesMediaAutogrow = usesAutogrow;
 
     const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function (...args) {
       const result = originalOnNodeCreated?.apply(this, args);
-      migrateLegacyImageInput(this);
+      migrateLegacyMediaInputs(this, usesAutogrow);
       return result;
     };
 
     const originalConfigure = nodeType.prototype.configure;
     nodeType.prototype.configure = function (...args) {
       const result = originalConfigure?.apply(this, args);
-      migrateLegacyImageInput(this);
+      migrateLegacyMediaInputs(this, usesAutogrow);
+      if (usesAutogrow) {
+        notifyAutogrowOfMigratedLink(this);
+      }
       return result;
     };
   },
   loadedGraphNode(node) {
-    migrateLegacyImageInput(node);
+    const usesAutogrow = Boolean(node.__llmSessionUsesMediaAutogrow);
+    migrateLegacyMediaInputs(node, usesAutogrow);
+    if (usesAutogrow) {
+      notifyAutogrowOfMigratedLink(node);
+    }
   },
 });
