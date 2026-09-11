@@ -66,6 +66,27 @@ Do not copy detailed policy into this file. When a rule changes, update its
 canonical document in `docs/`; change this file only when routing or a genuinely
 cross-cutting rule changes.
 
+## Development Environment
+
+- Use `C:\ComfyUI\comfyui_venv_sycl` as the Python virtual environment for this
+  repository. Invoke its interpreter directly; do not create another virtual
+  environment unless the user explicitly requests one.
+- Before importing `llama_cpp` or running pytest, prepend the bundled DLL
+  directories to `PATH` for the current process. In PowerShell 7:
+
+  ```powershell
+  $llamaDllDirs = @(
+      'C:\ComfyUI\comfyui_venv_sycl\Lib\site-packages\llama_cpp\lib'
+      'C:\ComfyUI\comfyui_venv_sycl\Lib\site-packages\llama_cpp\bin'
+      'C:\ComfyUI\comfyui_venv_sycl\Library\bin'
+  )
+  $env:PATH = ($llamaDllDirs + $env:PATH) -join [IO.Path]::PathSeparator
+  & 'C:\ComfyUI\comfyui_venv_sycl\Scripts\python.exe' -m pytest
+  ```
+
+  This is a process-scoped `PATH` change; it does not modify the system or user
+  environment permanently.
+
 ## Definition of Done
 
 A change is ready to report when:
