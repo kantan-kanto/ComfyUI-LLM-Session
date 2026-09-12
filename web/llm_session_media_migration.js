@@ -5,6 +5,7 @@ const SESSION_CHAT_NODE_TYPES = new Set([
   "LLMSessionChatSimpleNode",
 ]);
 const LITEGRAPH_INPUT = 1;
+const AUTOGROW_MEDIA_INPUT_RE = /^media_inputs\.(media_\d+)$/;
 
 function hasLink(input) {
   if (!input) {
@@ -18,8 +19,22 @@ function hasLink(input) {
 
 function renameInput(input, name, targetInput = null, localizedName = name) {
   input.name = name;
-  input.localized_name = localizedName;
+  input.label = localizedName;
+  input.localized_name = targetInput?.localized_name ?? name;
   input.type = targetInput?.type ?? "*";
+}
+
+function normalizeAutogrowMediaLabels(node) {
+  let changed = false;
+  for (const input of node.inputs) {
+    const match = AUTOGROW_MEDIA_INPUT_RE.exec(input?.name ?? "");
+    if (!match || input.label === match[1]) {
+      continue;
+    }
+    input.label = match[1];
+    changed = true;
+  }
+  return changed;
 }
 
 function removeInput(node, slot) {
@@ -85,7 +100,13 @@ function migrateLegacyMediaInputs(node, usesAutogrow) {
 
   let changed = migrateInputName(node, "image", "media");
   if (usesAutogrow) {
-    changed = migrateInputName(node, "media", "media_inputs.media_0", "media_0") || changed;
+    changed = migrateInputName(
+      node,
+      "media",
+      "media_inputs.media_0",
+      "media_0",
+    ) || changed;
+    changed = normalizeAutogrowMediaLabels(node) || changed;
   }
   if (changed) {
     node.setDirtyCanvas?.(true, true);
