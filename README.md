@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.4.0
+**Version:** 1.5.0
 **License:** GPL-3.0
 
 A local LLM execution environment that runs GGUF models via llama.cpp entirely inside **ComfyUI**, without external runtimes such as Ollama.
@@ -349,10 +349,9 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.4.0
+### Current Version: 1.5.0
 
-- Added Qwen3.8 as an independent model family while reusing the compatible Qwen3.5 text, Vision, mmproj, and thinking paths.
-- Added Simple JSON-only Qwen3.8 `reasoning_effort` control with `low`, `medium`, and `xhigh` levels.
-- Added Simple generation controls for `top_k`, `min_p`, and `present_penalty`, with compatibility fallback for older backends.
-- Added opt-in official sampling overrides for Qwen3.8 thinking/non-thinking modes and Gemma 4, including per-model Dialogue Cycle resolution.
-- Expanded compatibility, parameter, and maintainer documentation for the new model-specific behavior.
+- Added V3 Autogrow media adapters for `LLM Session Chat` and `LLM Session Chat (Simple)`, exposing `media_0` and revealing subsequent IMAGE/AUDIO connectors as links are added.
+- Aggregate multiple media connectors in numeric order while preserving existing IMAGE-batch and Gemma 4 AUDIO handling.
+- Migrate saved `image` and `media` workflow links to `media_0` on Autogrow-capable ComfyUI builds.
+- Retain the legacy single `media` node implementation as a fallback when the ComfyUI V3 Autogrow API is unavailable.

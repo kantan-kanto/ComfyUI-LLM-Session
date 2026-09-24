@@ -4,7 +4,7 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.5.0] - 2026-09-24
 
 - Session Chat media Autogrow
   - Added V3 adapters for `LLM Session Chat` and `LLM Session Chat (Simple)` that expose `media_0` and reveal subsequent IMAGE/AUDIO connectors as links are added.
