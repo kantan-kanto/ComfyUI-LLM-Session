@@ -114,6 +114,7 @@ class TurnExecutionRequest:
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None
+    image_max_pixels: Optional[int] = None
 
     # Behavior switches to preserve subtle differences between legacy call paths.
     strip_assistant_before_reasoning_filter: bool = False
@@ -171,6 +172,7 @@ class TurnExecutionRequest:
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
         advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
         advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+        image_max_pixels: Optional[int] = None,
         strip_assistant_before_reasoning_filter: bool,
         include_media_and_stream_in_turn_params: bool,
         kv_log_saved_when_not_minimal: bool,
@@ -225,6 +227,7 @@ class TurnExecutionRequest:
                 if isinstance(advanced_summary_generation_kwargs, dict)
                 else None
             ),
+            image_max_pixels=(int(image_max_pixels) if image_max_pixels is not None else None),
             strip_assistant_before_reasoning_filter=bool(strip_assistant_before_reasoning_filter),
             include_media_and_stream_in_turn_params=bool(include_media_and_stream_in_turn_params),
             kv_log_saved_when_not_minimal=bool(kv_log_saved_when_not_minimal),
@@ -575,6 +578,7 @@ class TurnExecutionService:
             max_turns=int(request.max_turns) if request.max_turns is not None else None,
             summarize_old_history=bool(request.summarize_old_history),
             system_prompt=effective_system_prompt,
+            image_max_pixels=request.image_max_pixels,
         )
         text_chat_request = build_text_chat_request(
             model_path=model_path,
@@ -847,6 +851,7 @@ class TurnExecutionService:
                 max_turns=new_turns_limit,
                 summarize_old_history=bool(request.summarize_old_history),
                 system_prompt=effective_system_prompt,
+                image_max_pixels=request.image_max_pixels,
             )
             rebuilt_text_chat_request = build_text_chat_request(
                 model_path=model_path,

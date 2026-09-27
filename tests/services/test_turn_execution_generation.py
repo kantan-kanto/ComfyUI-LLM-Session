@@ -46,6 +46,36 @@ def test_execute_turn_success_updates_history_and_writes_file() -> None:
     assert writes and writes[0][0] == "hist.json"
 
 
+def test_execute_turn_passes_image_max_pixels_to_initial_and_retry_messages() -> None:
+    service = TurnExecutionService()
+    mgr = DummyManager()
+    history = {"turns": [], "summary": {"enabled": False, "text": ""}, "meta": {}}
+    deps, _writes = _base_deps(
+        history,
+        run_generation_result=GenerationRunResult(
+            assistant_text="assistant reply",
+            gen_tokens=64,
+            turns_limit=12,
+            last_err=None,
+            succeeded=True,
+            non_ctx_error=False,
+        ),
+    )
+    observed_image_max_pixels = []
+    deps["build_chat_messages"] = lambda **kwargs: (
+        observed_image_max_pixels.append(kwargs["image_max_pixels"])
+        or [{"role": "user", "content": "hello"}]
+    )
+    observed_generation = _capture_generation_kwargs(deps)
+    request = replace(_make_request(deps, mgr), image_max_pixels=1048576)
+
+    result = service.execute_turn(request)
+    observed_generation["rebuild_messages_for_turns_limit"](3)
+
+    assert result.generation_succeeded is True
+    assert observed_image_max_pixels == [1048576, 1048576]
+
+
 def test_execute_turn_uses_effective_system_prompt_for_initial_retry_and_kv_signature() -> None:
     service = TurnExecutionService()
     mgr = DummyManager()

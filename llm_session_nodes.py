@@ -133,6 +133,12 @@ _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 _ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty"}
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
+_DEFAULT_IMAGE_MAX_PIXELS = 262144
+_IMAGE_MAX_PIXELS_MIN = 65536
+_IMAGE_MAX_PIXELS_MAX = 4194304
+# Gemma 4 image tokens use non-causal attention; llama.cpp aborts the process when
+# one image exceeds n_ubatch, which is the llama-cpp-python default of 512 here.
+_GEMMA4_IMAGE_MAX_TOKENS_LIMIT = 512
 _QWEN38_REASONING_EFFORT_DEFAULT = "medium"
 _QWEN38_REASONING_EFFORT_VALUES = {"xhigh", "medium", "low"}
 _OFFICIAL_SAMPLING_OVERRIDE_FAMILIES = ("qwen3.8", "gemma4")
@@ -287,6 +293,7 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     cfg_path = _normalize_config_path(config_path) or _simple_config_path()
     defaults = dict(_SIMPLE_DEFAULTS_BUILTIN)
     defaults["reasoning_effort"] = _QWEN38_REASONING_EFFORT_DEFAULT
+    defaults["image_max_pixels"] = _DEFAULT_IMAGE_MAX_PIXELS
     defaults["official_sampling_overrides"] = {
         family: False for family in _OFFICIAL_SAMPLING_OVERRIDE_FAMILIES
     }
@@ -454,6 +461,38 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
                 TEXT_CHAT_BUILDER_CONFIG_MAP.get(chat_format, {}).get("enable_thinking", False),
             )
 
+    if config_obj.get("image_max_pixels") is not None:
+        image_max_pixels = _as_int(config_obj.get("image_max_pixels"), None)
+        if image_max_pixels is None:
+            _simple_config_log(
+                f"Warning: Invalid image_max_pixels; using {_DEFAULT_IMAGE_MAX_PIXELS}.",
+                defaults["log_level"],
+            )
+        else:
+            defaults["image_max_pixels"] = min(
+                _IMAGE_MAX_PIXELS_MAX,
+                max(_IMAGE_MAX_PIXELS_MIN, image_max_pixels),
+            )
+
+    gemma4_config = config_obj.get("gemma4")
+    if isinstance(gemma4_config, dict) and gemma4_config.get("image_max_tokens") is not None:
+        image_max_tokens = _as_int(gemma4_config.get("image_max_tokens"), None)
+        if image_max_tokens is None or image_max_tokens < 1:
+            _simple_config_log(
+                "Warning: Invalid gemma4.image_max_tokens; using the mmproj default.",
+                defaults["log_level"],
+            )
+        else:
+            if image_max_tokens > _GEMMA4_IMAGE_MAX_TOKENS_LIMIT:
+                _simple_config_log(
+                    f"Warning: gemma4.image_max_tokens is limited to {_GEMMA4_IMAGE_MAX_TOKENS_LIMIT}.",
+                    defaults["log_level"],
+                )
+            chat_handler_overrides.setdefault("gemma4", {})["image_max_tokens"] = min(
+                _GEMMA4_IMAGE_MAX_TOKENS_LIMIT,
+                image_max_tokens,
+            )
+
     # System prompt(s)
     sp = defaults.get("system_prompt")
     defaults["system_prompt"] = str(sp) if sp is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt"]
@@ -585,6 +624,7 @@ def _build_session_chat_simple_chat_kwargs(
         "reasoning_effort": str(defaults.get("reasoning_effort", _QWEN38_REASONING_EFFORT_DEFAULT)),
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
+        "image_max_pixels": int(defaults.get("image_max_pixels", _DEFAULT_IMAGE_MAX_PIXELS)),
     }
     return _resolve_official_sampling_turn_kwargs(
         model=model,
@@ -660,6 +700,7 @@ CHAT_HANDLER_KWARGS_MAP = {
 OPTIONAL_CHAT_HANDLER_KWARGS = {
     "enable_thinking",
     "image_min_tokens",
+    "image_max_tokens",
 }
 
 TEXT_CHAT_BUILDER_CONFIG_MAP = {
@@ -1325,7 +1366,7 @@ def _resolve_model_and_mmproj(roots: list[str], model: str, mmproj: str) -> tupl
 # Image + Language Utilities
 # ============================================================================
 
-def encode_image_base64(pil_image: Image.Image, max_pixels: int = 262144) -> str:
+def encode_image_base64(pil_image: Image.Image, max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS) -> str:
     """
     Convert PIL image to base64 encoded string
     
@@ -1499,14 +1540,18 @@ def _resolve_session_chat_media(
     return _normalize_media_collection(_resolve_legacy_image_media(media, image))
 
 
-def _single_media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[str, Any]]]:
+def _single_media_to_chat_parts(
+    media: Any,
+    model_path: str,
+    image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
+) -> tuple[str, List[Dict[str, Any]]]:
     if _looks_like_image_tensor(media):
         pil_list = tensor2pil(media)
         if not pil_list:
             raise ValueError("IMAGE media batch is empty.")
         parts: List[Dict[str, Any]] = []
         for pil_image in pil_list:
-            img_b64 = encode_image_base64(pil_image)
+            img_b64 = encode_image_base64(pil_image, max_pixels=image_max_pixels)
             parts.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
         media_type = "image_batch" if len(parts) > 1 else "image"
         return media_type, parts
@@ -1538,7 +1583,11 @@ def _validate_single_chat_media(media: Any, model_path: str) -> None:
     raise ValueError("Unsupported media input. Provide an IMAGE tensor/batch or an AUDIO object.")
 
 
-def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[str, Any]]]:
+def _media_to_chat_parts(
+    media: Any,
+    model_path: str,
+    image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
+) -> tuple[str, List[Dict[str, Any]]]:
     media_items = _ordered_media_items(media)
     if not media_items:
         raise ValueError("At least one media input is required.")
@@ -1547,7 +1596,7 @@ def _media_to_chat_parts(media: Any, model_path: str) -> tuple[str, List[Dict[st
     parts: List[Dict[str, Any]] = []
     for index, media_item in enumerate(media_items):
         try:
-            media_type, item_parts = _single_media_to_chat_parts(media_item, model_path)
+            media_type, item_parts = _single_media_to_chat_parts(media_item, model_path, image_max_pixels)
         except ValueError as err:
             if len(media_items) == 1:
                 raise
@@ -1727,7 +1776,8 @@ def build_chat_messages(history: Dict[str, Any],
                         model_path: str = "",
                         max_turns: Optional[int] = None,
                         summarize_old_history: bool = True,
-                        system_prompt: str = "") -> List[Dict[str, Any]]:
+                        system_prompt: str = "",
+                        image_max_pixels: Optional[int] = None) -> List[Dict[str, Any]]:
     """Build chat-completion messages. Media is included only for this turn."""
     sys = (system_prompt or "").strip() or (history.get("system_prompt") or "").strip()
     summary = ""
@@ -1757,7 +1807,11 @@ def build_chat_messages(history: Dict[str, Any],
 
     # Current turn
     if media is not None:
-        media_type, media_parts = _media_to_chat_parts(media, model_path)
+        media_type, media_parts = _media_to_chat_parts(
+            media,
+            model_path,
+            _DEFAULT_IMAGE_MAX_PIXELS if image_max_pixels is None else int(image_max_pixels),
+        )
         text_part = {"type": "text", "text": user_text or ""}
         content = (
             [text_part] + media_parts
@@ -3920,6 +3974,7 @@ def _build_session_chat_turn_kwargs(
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
     official_sampling_profile: str,
+    image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> Dict[str, Any]:
     return {
         "user_text": user_text,
@@ -3960,6 +4015,7 @@ def _build_session_chat_turn_kwargs(
         "advanced_generation_kwargs": advanced_generation_kwargs,
         "advanced_summary_generation_kwargs": advanced_summary_generation_kwargs,
         "official_sampling_profile": str(official_sampling_profile or ""),
+        "image_max_pixels": int(image_max_pixels),
     }
 
 
@@ -4051,6 +4107,7 @@ def _build_session_chat_node_execution_request(
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
     official_sampling_profile: str,
+    image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> SessionChatNodeExecutionRequest:
     return SessionChatNodeExecutionRequest(
         model=model,
@@ -4093,6 +4150,7 @@ def _build_session_chat_node_execution_request(
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
             official_sampling_profile=official_sampling_profile,
+            image_max_pixels=image_max_pixels,
         ),
     )
 
@@ -4162,6 +4220,7 @@ def _execute_session_chat_turn(
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str = "",
+    image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> TurnExecutionResult:
     service = TurnExecutionService()
     return service.execute_session_chat_turn(
@@ -4203,6 +4262,7 @@ def _execute_session_chat_turn(
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
         official_sampling_profile=official_sampling_profile,
+        image_max_pixels=image_max_pixels,
         dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
     )
 
@@ -4333,6 +4393,7 @@ def _run_session_chat_from_inputs(
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
     official_sampling_profile: str,
+    image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> tuple:
     request = _build_session_chat_node_execution_request(
         user_text=user_text,
@@ -4372,6 +4433,7 @@ def _run_session_chat_from_inputs(
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
         official_sampling_profile=official_sampling_profile,
+        image_max_pixels=image_max_pixels,
     )
     dependencies = _build_session_chat_node_execution_dependencies()
     service = SessionChatNodeExecutionService()
@@ -4441,6 +4503,7 @@ class LLMSessionChatNode:
              advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
              advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
              official_sampling_profile: str = "",
+             image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
              image=None) -> tuple:
         media = _resolve_session_chat_media(media=media, image=image)
         chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
@@ -4492,6 +4555,7 @@ class LLMSessionChatNode:
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
             official_sampling_profile=official_sampling_profile,
+            image_max_pixels=image_max_pixels,
         )
 
 

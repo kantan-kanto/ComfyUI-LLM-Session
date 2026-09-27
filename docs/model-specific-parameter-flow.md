@@ -1,7 +1,7 @@
 # Model-Specific Parameter Flow
 
 - Status: Canonical
-- Last reviewed: 2026-08-17
+- Last reviewed: 2026-09-27
 - Update when: Model-family maps or parameter precedence behavior changes.
 
 This document defines the implementation rules for model-family-specific
@@ -180,6 +180,20 @@ or summary path explicitly consumes it.
 Unsupported `image_min_tokens` should be handled by targeted backend fallback
 only when the error clearly identifies that kwarg as unsupported.
 
+### `image_max_tokens`
+
+`image_max_tokens` is a chat-handler kwarg with no built-in map entry. Simple
+config may set it only as `gemma4.image_max_tokens`; `_load_simple_defaults()`
+validates it and places it in `chat_handler_overrides["gemma4"]`. It is not a
+text-builder or summary-builder setting.
+
+The value is limited to 512. Gemma 4 image tokens use non-causal attention, and
+llama.cpp aborts the process when one image exceeds `n_ubatch`, which the node
+leaves at the llama-cpp-python default of 512.
+
+Unsupported `image_max_tokens` is handled by the same targeted optional-kwarg
+fallback as `image_min_tokens`.
+
 ### Future Parameters
 
 For future parameters, first identify the runtime path:
@@ -217,8 +231,9 @@ Allowed compatibility behavior:
 - Prefer `mmproj_path` for new handlers.
 - Fall back to `clip_model_path` only when the TypeError clearly indicates
   `mmproj_path` is unsupported.
-- Drop unsupported optional kwargs such as `enable_thinking` or
-  `image_min_tokens` only when the TypeError clearly identifies that kwarg.
+- Drop unsupported optional kwargs such as `enable_thinking`,
+  `image_min_tokens`, or `image_max_tokens` only when the TypeError clearly
+  identifies that kwarg.
 - Preserve unrelated TypeErrors and surface them as real failures.
 
 Do not catch all handler construction failures and retry with silently reduced

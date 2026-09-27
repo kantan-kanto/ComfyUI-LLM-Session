@@ -126,8 +126,8 @@ API stages.
 
 Some PyPI `llama-cpp-python` handlers accept newer model families while omitting
 JamePeng-specific optional kwargs. If a Vision chat handler rejects known
-optional kwargs such as Gemma 4 `enable_thinking` or Qwen2.5-VL
-`image_min_tokens`, the node runtime logs a warning, removes the rejected kwarg,
+optional kwargs such as Gemma 4 `enable_thinking` or `image_max_tokens`, or
+Qwen2.5-VL `image_min_tokens`, the node runtime logs a warning, removes the rejected kwarg,
 and retries handler initialization.
 
 Some PyPI `llama-cpp-python` builds do not provide `Gemma3ChatHandler` even

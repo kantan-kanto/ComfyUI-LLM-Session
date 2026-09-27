@@ -28,6 +28,35 @@ prompt construction; it does not pass `reasoning_effort` to
 `enable_thinking` is false, is not available in Full-node UI, and does not
 inherit from the `qwen3.5` JSON entry.
 
+## Vision Image Resolution
+
+Simple-node JSON can raise how much image detail reaches a Vision model:
+
+```json
+{
+  "image_max_pixels": 1048576,
+  "gemma4": {
+    "image_max_tokens": 512
+  }
+}
+```
+
+- `image_max_pixels`: `LLM Session Chat (Simple)` downscales IMAGE inputs
+  larger than this pixel count before sending them to the model. The default is
+  `262144` (about 512x512). Values are clamped to `65536`-`4194304`; invalid
+  values produce a warning and use the default.
+- `gemma4.image_max_tokens`: maximum vision tokens per image for Gemma 4 Vision
+  models, passed to `Gemma4ChatHandler`. When omitted, the mmproj default is
+  used. Values above `512` are limited to `512` with a warning, because
+  llama.cpp aborts the process when one Gemma 4 image exceeds the default
+  512-token micro-batch. Changing this value reloads the model.
+
+Raise both settings to give Gemma 4 finer detail. In local testing with a Gemma
+4 mmproj, one square image used about 121 tokens at the default 512x512, about
+256 tokens at 1024x1024 with the mmproj default token limit, and about 441
+tokens at 1024x1024 with `image_max_tokens: 512`. More image tokens increase
+prompt processing time and context usage.
+
 ## Supported Advanced Generation Settings
 
 Advanced parameters are listed in the following sample file:
