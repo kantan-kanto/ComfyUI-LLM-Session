@@ -32,7 +32,8 @@
     "typical_p": null,
     "mirostat_mode": null,
     "mirostat_tau": null,
-    "mirostat_eta": null
+    "mirostat_eta": null,
+    "image_max_pixels": 262144
   },
   "advanced_summary_generation_kwargs": {
     "seed": null,
@@ -61,6 +62,7 @@
   },
   "gemma4": {
     "enable_thinking": false,
-    "official_sampling_override": false
+    "official_sampling_override": false,
+    "image_max_tokens": null
   }
 }

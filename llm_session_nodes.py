@@ -131,7 +131,7 @@ _SUMMARY_HELPER_DEFAULTS: Dict[str, Any] = dict(SUMMARY_HELPER_DEFAULTS)
 _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
-_ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty"}
+_ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty", "image_max_pixels"}
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
 _DEFAULT_IMAGE_MAX_PIXELS = 262144
 _IMAGE_MAX_PIXELS_MIN = 65536
@@ -461,11 +461,15 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
                 TEXT_CHAT_BUILDER_CONFIG_MAP.get(chat_format, {}).get("enable_thinking", False),
             )
 
-    if config_obj.get("image_max_pixels") is not None:
-        image_max_pixels = _as_int(config_obj.get("image_max_pixels"), None)
+    # image_max_pixels is node-side IMAGE preprocessing; _advanced_generation_kwargs
+    # does not forward it to the backend.
+    advanced_generation_config = config_obj.get("advanced_generation_kwargs")
+    if isinstance(advanced_generation_config, dict) and advanced_generation_config.get("image_max_pixels") is not None:
+        image_max_pixels = _as_int(advanced_generation_config.get("image_max_pixels"), None)
         if image_max_pixels is None:
             _simple_config_log(
-                f"Warning: Invalid image_max_pixels; using {_DEFAULT_IMAGE_MAX_PIXELS}.",
+                "Warning: Invalid advanced_generation_kwargs.image_max_pixels; "
+                f"using {_DEFAULT_IMAGE_MAX_PIXELS}.",
                 defaults["log_level"],
             )
         else:

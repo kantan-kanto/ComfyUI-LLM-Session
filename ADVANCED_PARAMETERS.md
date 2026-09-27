@@ -34,17 +34,20 @@ Simple-node JSON can raise how much image detail reaches a Vision model:
 
 ```json
 {
-  "image_max_pixels": 1048576,
+  "advanced_generation_kwargs": {
+    "image_max_pixels": 1048576
+  },
   "gemma4": {
     "image_max_tokens": 512
   }
 }
 ```
 
-- `image_max_pixels`: `LLM Session Chat (Simple)` downscales IMAGE inputs
-  larger than this pixel count before sending them to the model. The default is
-  `262144` (about 512x512). Values are clamped to `65536`-`4194304`; invalid
-  values produce a warning and use the default.
+- `advanced_generation_kwargs.image_max_pixels`: `LLM Session Chat (Simple)`
+  downscales IMAGE inputs larger than this pixel count before sending them to
+  the model. The default is `262144` (about 512x512). Values are clamped to
+  `65536`-`4194304`; invalid values produce a warning and use the default. The
+  node applies this value itself and does not pass it to `llama-cpp-python`.
 - `gemma4.image_max_tokens`: maximum vision tokens per image for Gemma 4 Vision
   models, passed to `Gemma4ChatHandler`. When omitted, the mmproj default is
   used. Values above `512` are limited to `512` with a warning, because
@@ -288,7 +291,7 @@ If summary advanced settings are applied, they are also recorded:
 
 `config/simple_advanced.example.json` includes experimental fields for future
 advanced backend or generation settings. Supported normal-generation keys are
-`seed`, `top_k`, `min_p`, and `present_penalty`; summary generation supports
+`seed`, `top_k`, `min_p`, `present_penalty`, and `image_max_pixels`; summary generation supports
 `seed` only. Other advanced keys remain inactive.
 
 `tensor_split` is an advanced backend-style setting, but it is intentionally

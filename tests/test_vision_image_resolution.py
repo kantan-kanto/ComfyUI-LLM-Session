@@ -59,7 +59,9 @@ def test_simple_defaults_keep_legacy_image_max_pixels_when_unset(load_nodes_modu
 def test_simple_defaults_clamp_image_max_pixels(load_nodes_module, tmp_path, configured, expected):
     module = load_nodes_module(available_models=["dummy.gguf"])
 
-    defaults = module._load_simple_defaults(_write_config(tmp_path, {"image_max_pixels": configured}))
+    defaults = module._load_simple_defaults(
+        _write_config(tmp_path, {"advanced_generation_kwargs": {"image_max_pixels": configured}})
+    )
 
     assert defaults["image_max_pixels"] == expected
 
@@ -69,10 +71,37 @@ def test_simple_defaults_invalid_image_max_pixels_warns_and_uses_legacy_budget(
 ):
     module = load_nodes_module(available_models=["dummy.gguf"])
 
-    defaults = module._load_simple_defaults(_write_config(tmp_path, {"image_max_pixels": "large"}))
+    defaults = module._load_simple_defaults(
+        _write_config(tmp_path, {"advanced_generation_kwargs": {"image_max_pixels": "large"}})
+    )
 
     assert defaults["image_max_pixels"] == 262144
-    assert "Invalid image_max_pixels" in capsys.readouterr().out
+    assert "Invalid advanced_generation_kwargs.image_max_pixels" in capsys.readouterr().out
+
+
+def test_simple_defaults_keep_image_max_pixels_out_of_backend_generation_kwargs(
+    load_nodes_module, tmp_path, capsys
+):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+
+    defaults = module._load_simple_defaults(
+        _write_config(
+            tmp_path,
+            {"advanced_generation_kwargs": {"seed": 7, "image_max_pixels": 1048576}},
+        )
+    )
+
+    assert defaults["image_max_pixels"] == 1048576
+    assert defaults["advanced_generation_kwargs"] == {"seed": 7}
+    assert "unsupported" not in capsys.readouterr().out
+
+
+def test_simple_defaults_ignore_top_level_image_max_pixels(load_nodes_module, tmp_path):
+    module = load_nodes_module(available_models=["dummy.gguf"])
+
+    defaults = module._load_simple_defaults(_write_config(tmp_path, {"image_max_pixels": 1048576}))
+
+    assert defaults["image_max_pixels"] == 262144
 
 
 def test_simple_defaults_read_gemma4_image_max_tokens_with_enable_thinking(load_nodes_module, tmp_path):
@@ -131,7 +160,7 @@ def test_session_chat_simple_forwards_image_max_pixels(load_nodes_module, tmp_pa
         model="dummy.gguf",
         mmproj="(Auto-detect)",
         history_dir="",
-        config_path=_write_config(tmp_path, {"image_max_pixels": 1048576}),
+        config_path=_write_config(tmp_path, {"advanced_generation_kwargs": {"image_max_pixels": 1048576}}),
     )
 
     assert observed["image_max_pixels"] == 1048576

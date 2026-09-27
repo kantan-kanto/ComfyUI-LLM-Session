@@ -38,8 +38,10 @@ Implemented behavior:
   only the three parameters present in its documented recommendation.
 - Dialogue Cycle resolves official sampling independently for model A and model
   B. Summary generation and KV-cache prompt signatures are unchanged.
-- Top-level `image_max_pixels` sets the IMAGE downscale limit for Session Chat
-  (Simple). It defaults to `262144`, is clamped to `65536`-`4194304`, and falls
+- `advanced_generation_kwargs.image_max_pixels` sets the IMAGE downscale limit
+  for Session Chat (Simple). It is node-side preprocessing, so it is read
+  separately and never forwarded to the backend with the other generation
+  kwargs. It defaults to `262144`, is clamped to `65536`-`4194304`, and falls
   back to the default with a warning when it is not an integer. The value is
   threaded to `build_chat_messages()`; Dialogue Cycle does not read it. KV state
   is unaffected because KV restore and save are skipped for media turns.
@@ -118,7 +120,8 @@ Section meanings:
 
 - `advanced_generation_kwargs`: runtime generation options for
   `create_completion()` / `create_chat_completion()`, such as `seed` and
-  sampling controls.
+  sampling controls. `image_max_pixels` is the exception: it controls
+  node-side IMAGE downscaling and is not forwarded.
 - `advanced_summary_generation_kwargs`: summary-generation options needed for
   reproducibility or future summary-specific sampling behavior.
 - `advanced_backend_kwargs`: model-load/backend options passed to `Llama(...)`,
