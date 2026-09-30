@@ -10,7 +10,8 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Added Simple JSON-only `advanced_generation_kwargs.image_max_pixels` for
     `LLM Session Chat (Simple)` to raise the IMAGE downscale limit from the
     default 262144 pixels.
-  - Added the setting to `config/simple_advanced.example.json`.
+  - Added the setting to `config/simple_advanced.example.json` with the
+    recommended value `1048576` for Gemma 4 and Qwen3.x.
 
 - Compatibility
   - Gemma 4 Vision now passes a fixed `image_max_tokens: 512` to

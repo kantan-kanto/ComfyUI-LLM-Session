@@ -46,8 +46,10 @@ Simple-node JSON can raise how much image detail reaches a Vision model:
   `65536`-`4194304`; invalid values produce a warning and use the default. The
   node applies this value itself and does not pass it to `llama-cpp-python`.
 
-`1048576` (about 1024x1024) is a practical value for both Gemma 4 and Qwen3.x.
-The chat handler also applies a fixed per-image token range:
+`1048576` (about 1024x1024) is the recommended value for Gemma 4 and Qwen3.x
+and is used in `config/simple_advanced.example.json`. The built-in default stays
+`262144` to avoid higher image token counts for other model families and on CPU
+setups. The chat handler also applies a fixed per-image token range:
 
 | Model family | Fixed handler setting | Approx. pixels |
 | --- | --- | --- |
