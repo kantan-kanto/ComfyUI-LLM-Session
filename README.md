@@ -1,7 +1,7 @@
 # ComfyUI-LLM-Session
 [en | [ja](README.ja.md)]
 
-**Version:** 1.5.0
+**Version:** 1.6.0
 **License:** GPL-3.0
 
 A local LLM execution environment that runs GGUF models via llama.cpp entirely inside **ComfyUI**, without external runtimes such as Ollama.
@@ -349,9 +349,8 @@ Areas needing help:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-### Current Version: 1.5.0
+### Current Version: 1.6.0
 
-- Added V3 Autogrow media adapters for `LLM Session Chat` and `LLM Session Chat (Simple)`, exposing `media_0` and revealing subsequent IMAGE/AUDIO connectors as links are added.
-- Aggregate multiple media connectors in numeric order while preserving existing IMAGE-batch and Gemma 4 AUDIO handling.
-- Migrate saved `image` and `media` workflow links to `media_0` on Autogrow-capable ComfyUI builds.
-- Retain the legacy single `media` node implementation as a fallback when the ComfyUI V3 Autogrow API is unavailable.
+- Added Simple-node JSON config `advanced_generation_kwargs.image_max_pixels` to control how much IMAGE detail reaches Vision models; `1048576` is recommended for Gemma 4 and Qwen3.x.
+- Gemma 4 Vision now uses a fixed 512-token per-image limit, so it uses finer detail when `image_max_pixels` is raised without risking a llama.cpp abort.
+- See [ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md) for per-model token and pixel guidance.

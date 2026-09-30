@@ -4,7 +4,7 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.6.0] - 2026-09-30
 
 - Added
   - Added Simple JSON-only `advanced_generation_kwargs.image_max_pixels` for
