@@ -1,7 +1,7 @@
 # Model-Specific Parameter Flow
 
 - Status: Canonical
-- Last reviewed: 2026-09-27
+- Last reviewed: 2026-09-30
 - Update when: Model-family maps or parameter precedence behavior changes.
 
 This document defines the implementation rules for model-family-specific
@@ -110,7 +110,7 @@ Current examples:
 
 ```python
 CHAT_HANDLER_KWARGS_MAP = {
-    "gemma4": {"enable_thinking": False},
+    "gemma4": {"enable_thinking": False, "image_max_tokens": 512},
     "minicpm-v-4.6": {"enable_thinking": False},
     "qwen2.5-vl": {"image_min_tokens": 1024},
     "qwen3-vl": {"image_min_tokens": 1024},
@@ -182,12 +182,12 @@ only when the error clearly identifies that kwarg as unsupported.
 
 ### `image_max_tokens`
 
-`image_max_tokens` is a chat-handler kwarg with no built-in map entry. Simple
-config may set it only as `gemma4.image_max_tokens`; `_load_simple_defaults()`
-validates it and places it in `chat_handler_overrides["gemma4"]`. It is not a
-text-builder or summary-builder setting.
+`image_max_tokens` is a chat-handler kwarg fixed at 512 for Gemma 4 in
+`CHAT_HANDLER_KWARGS_MAP`. It is not configurable from Simple config; users
+control image detail with `advanced_generation_kwargs.image_max_pixels`. It is
+not a text-builder or summary-builder setting.
 
-The value is limited to 512. Gemma 4 image tokens use non-causal attention, and
+The value is 512 because Gemma 4 image tokens use non-causal attention, and
 llama.cpp aborts the process when one image exceeds `n_ubatch`, which the node
 leaves at the llama-cpp-python default of 512.
 

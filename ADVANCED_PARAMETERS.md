@@ -36,9 +36,6 @@ Simple-node JSON can raise how much image detail reaches a Vision model:
 {
   "advanced_generation_kwargs": {
     "image_max_pixels": 1048576
-  },
-  "gemma4": {
-    "image_max_tokens": 512
   }
 }
 ```
@@ -48,17 +45,27 @@ Simple-node JSON can raise how much image detail reaches a Vision model:
   the model. The default is `262144` (about 512x512). Values are clamped to
   `65536`-`4194304`; invalid values produce a warning and use the default. The
   node applies this value itself and does not pass it to `llama-cpp-python`.
-- `gemma4.image_max_tokens`: maximum vision tokens per image for Gemma 4 Vision
-  models, passed to `Gemma4ChatHandler`. When omitted, the mmproj default is
-  used. Values above `512` are limited to `512` with a warning, because
-  llama.cpp aborts the process when one Gemma 4 image exceeds the default
-  512-token micro-batch. Changing this value reloads the model.
 
-Raise both settings to give Gemma 4 finer detail. In local testing with a Gemma
-4 mmproj, one square image used about 121 tokens at the default 512x512, about
-256 tokens at 1024x1024 with the mmproj default token limit, and about 441
-tokens at 1024x1024 with `image_max_tokens: 512`. More image tokens increase
-prompt processing time and context usage.
+`1048576` (about 1024x1024) is a practical value for both Gemma 4 and Qwen3.x.
+The chat handler also applies a fixed per-image token range:
+
+| Model family | Fixed handler setting | Approx. pixels |
+| --- | --- | --- |
+| Gemma 4 | `image_max_tokens: 512` | up to about 1,180,000 |
+| Qwen3-VL / Qwen3.5 / Qwen3.6 / Qwen3.8 | `image_min_tokens: 1024` | from about 1,050,000 |
+
+- Gemma 4 images above about 1,180,000 pixels are reduced to 512 tokens by the
+  backend, so larger `image_max_pixels` values add no detail. The limit is fixed
+  because llama.cpp aborts the process when one Gemma 4 image exceeds the
+  default 512-token micro-batch. In local testing, one square image used 121
+  tokens at 512x512 and 441 tokens at 1024x1024; a non-square image used 399
+  tokens at `1048576`.
+- Qwen images below the minimum are upscaled by the backend, so values below
+  about `1048576` lose detail without reducing image tokens. In local testing
+  with Qwen3.6, one square image used 1024 tokens at both the default and
+  `1048576`.
+
+More image tokens increase prompt processing time and context usage.
 
 ## Supported Advanced Generation Settings
 

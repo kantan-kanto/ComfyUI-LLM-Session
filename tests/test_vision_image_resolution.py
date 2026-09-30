@@ -45,7 +45,6 @@ def test_simple_defaults_keep_legacy_image_max_pixels_when_unset(load_nodes_modu
     defaults = module._load_simple_defaults(_write_config(tmp_path, {}))
 
     assert defaults["image_max_pixels"] == 262144
-    assert "image_max_tokens" not in defaults["chat_handler_overrides"].get("gemma4", {})
 
 
 @pytest.mark.parametrize(
@@ -104,45 +103,23 @@ def test_simple_defaults_ignore_top_level_image_max_pixels(load_nodes_module, tm
     assert defaults["image_max_pixels"] == 262144
 
 
-def test_simple_defaults_read_gemma4_image_max_tokens_with_enable_thinking(load_nodes_module, tmp_path):
+def test_gemma4_chat_handler_kwargs_fix_image_max_tokens_to_ubatch_size(load_nodes_module):
     module = load_nodes_module(available_models=["dummy.gguf"])
 
-    defaults = module._load_simple_defaults(
-        _write_config(tmp_path, {"gemma4": {"enable_thinking": True, "image_max_tokens": 448}})
-    )
+    kwargs = module._get_chat_handler_kwargs("gemma4", {"gemma4": {"enable_thinking": True}})
 
-    assert defaults["chat_handler_overrides"]["gemma4"] == {
-        "enable_thinking": True,
-        "image_max_tokens": 448,
-    }
-    assert "image_max_tokens" not in defaults["text_chat_builder_overrides"]["gemma4"]
+    assert kwargs == {"enable_thinking": True, "image_max_tokens": 512}
 
 
-def test_simple_defaults_limit_gemma4_image_max_tokens_to_ubatch_size(
-    load_nodes_module, tmp_path, capsys
-):
+def test_simple_defaults_ignore_gemma4_image_max_tokens(load_nodes_module, tmp_path):
     module = load_nodes_module(available_models=["dummy.gguf"])
 
     defaults = module._load_simple_defaults(
         _write_config(tmp_path, {"gemma4": {"image_max_tokens": 1120}})
     )
+    kwargs = module._get_chat_handler_kwargs("gemma4", defaults["chat_handler_overrides"])
 
-    assert defaults["chat_handler_overrides"]["gemma4"]["image_max_tokens"] == 512
-    assert "limited to 512" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("configured", [0, -1, "many"])
-def test_simple_defaults_ignore_invalid_gemma4_image_max_tokens(
-    load_nodes_module, tmp_path, capsys, configured
-):
-    module = load_nodes_module(available_models=["dummy.gguf"])
-
-    defaults = module._load_simple_defaults(
-        _write_config(tmp_path, {"gemma4": {"image_max_tokens": configured}})
-    )
-
-    assert "image_max_tokens" not in defaults["chat_handler_overrides"].get("gemma4", {})
-    assert "Invalid gemma4.image_max_tokens" in capsys.readouterr().out
+    assert kwargs["image_max_tokens"] == 512
 
 
 def test_session_chat_simple_forwards_image_max_pixels(load_nodes_module, tmp_path, monkeypatch):

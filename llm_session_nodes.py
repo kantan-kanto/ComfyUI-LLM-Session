@@ -136,9 +136,6 @@ _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
 _DEFAULT_IMAGE_MAX_PIXELS = 262144
 _IMAGE_MAX_PIXELS_MIN = 65536
 _IMAGE_MAX_PIXELS_MAX = 4194304
-# Gemma 4 image tokens use non-causal attention; llama.cpp aborts the process when
-# one image exceeds n_ubatch, which is the llama-cpp-python default of 512 here.
-_GEMMA4_IMAGE_MAX_TOKENS_LIMIT = 512
 _QWEN38_REASONING_EFFORT_DEFAULT = "medium"
 _QWEN38_REASONING_EFFORT_VALUES = {"xhigh", "medium", "low"}
 _OFFICIAL_SAMPLING_OVERRIDE_FAMILIES = ("qwen3.8", "gemma4")
@@ -478,25 +475,6 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
                 max(_IMAGE_MAX_PIXELS_MIN, image_max_pixels),
             )
 
-    gemma4_config = config_obj.get("gemma4")
-    if isinstance(gemma4_config, dict) and gemma4_config.get("image_max_tokens") is not None:
-        image_max_tokens = _as_int(gemma4_config.get("image_max_tokens"), None)
-        if image_max_tokens is None or image_max_tokens < 1:
-            _simple_config_log(
-                "Warning: Invalid gemma4.image_max_tokens; using the mmproj default.",
-                defaults["log_level"],
-            )
-        else:
-            if image_max_tokens > _GEMMA4_IMAGE_MAX_TOKENS_LIMIT:
-                _simple_config_log(
-                    f"Warning: gemma4.image_max_tokens is limited to {_GEMMA4_IMAGE_MAX_TOKENS_LIMIT}.",
-                    defaults["log_level"],
-                )
-            chat_handler_overrides.setdefault("gemma4", {})["image_max_tokens"] = min(
-                _GEMMA4_IMAGE_MAX_TOKENS_LIMIT,
-                image_max_tokens,
-            )
-
     # System prompt(s)
     sp = defaults.get("system_prompt")
     defaults["system_prompt"] = str(sp) if sp is not None else _SIMPLE_DEFAULTS_BUILTIN["system_prompt"]
@@ -688,7 +666,9 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-4.5": {},
     "minicpm-v-4.6": {"enable_thinking": False},
     "gemma3": {},
-    "gemma4": {"enable_thinking": False},
+    # Gemma 4 image tokens use non-causal attention; llama.cpp aborts the process when
+    # one image exceeds n_ubatch, which is the llama-cpp-python default of 512 here.
+    "gemma4": {"enable_thinking": False, "image_max_tokens": 512},
     "glm4.1v": {},
     "glm4.6v": {},
     "granite-docling": {},

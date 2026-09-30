@@ -62,7 +62,6 @@
   },
   "gemma4": {
     "enable_thinking": false,
-    "official_sampling_override": false,
-    "image_max_tokens": null
+    "official_sampling_override": false
   }
 }

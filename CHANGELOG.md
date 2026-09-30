@@ -10,12 +10,13 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
   - Added Simple JSON-only `advanced_generation_kwargs.image_max_pixels` for
     `LLM Session Chat (Simple)` to raise the IMAGE downscale limit from the
     default 262144 pixels.
-  - Added Simple JSON-only `gemma4.image_max_tokens` to raise the Gemma 4 vision
-    token limit per image, capped at 512 to avoid a llama.cpp abort. See
-    `ADVANCED_PARAMETERS.md`.
-  - Added both settings to `config/simple_advanced.example.json`.
+  - Added the setting to `config/simple_advanced.example.json`.
 
 - Compatibility
+  - Gemma 4 Vision now passes a fixed `image_max_tokens: 512` to
+    `Gemma4ChatHandler`, so raising `image_max_pixels` gives Gemma 4 finer
+    detail up to about 1,180,000 pixels. The limit avoids a llama.cpp abort. See
+    `ADVANCED_PARAMETERS.md`.
   - Retry Vision chat handler initialization without `image_max_tokens` when
     the installed `llama-cpp-python` handler rejects it.
 

@@ -1,7 +1,7 @@
 # Advanced Simple Config Implementation Rules
 
 - Status: Canonical
-- Last reviewed: 2026-09-27
+- Last reviewed: 2026-09-30
 - Update when: Advanced Simple config support expands, validation rules change, or new advanced parameter categories are added.
 
 This document defines maintainer-facing implementation rules and review points
@@ -45,9 +45,9 @@ Implemented behavior:
   back to the default with a warning when it is not an integer. The value is
   threaded to `build_chat_messages()`; Dialogue Cycle does not read it. KV state
   is unaffected because KV restore and save are skipped for media turns.
-- `gemma4.image_max_tokens` becomes a Gemma 4 chat-handler override. Values
-  below 1 or non-integers are ignored with a warning; values above 512 are
-  limited to 512 with a warning. See `model-specific-parameter-flow.md`.
+- Per-image vision token limits are not Simple config keys. Gemma 4 uses a
+  fixed `image_max_tokens: 512` chat-handler kwarg, so `image_max_pixels` is the
+  single user-facing image detail control. See `model-specific-parameter-flow.md`.
 
 - `advanced_generation_kwargs` accepts `seed`, `top_k`, `min_p`, and
   `present_penalty` from Simple config and passes explicitly configured values
