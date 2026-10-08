@@ -13,6 +13,13 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
     load. Values below 512 are raised to 512, explicit values are recorded in
     turn history, and changing them reloads the model. See
     `ADVANCED_PARAMETERS.md`.
+  - Added Simple JSON-only `advanced_backend_kwargs.verbosity` (0-5) for native
+    llama.cpp log verbosity and `advanced_backend_kwargs.logits_all` to override
+    the Vision-load default of `true`. Unset values keep the previous behavior.
+
+- Compatibility
+  - Retry model loading without `verbosity` when the installed
+    `llama-cpp-python` rejects it.
 
 - Changed
   - Unsupported `advanced_backend_kwargs` keys now produce the same ignored-key

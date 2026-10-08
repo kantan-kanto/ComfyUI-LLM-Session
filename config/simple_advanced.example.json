@@ -46,9 +46,10 @@
   "advanced_backend_kwargs": {
     "n_batch": 2048,
     "n_ubatch": 512,
+    "verbosity": 1,
+    "logits_all": null,
     "ctx_checkpoints": null,
     "checkpoint_on_device": null,
-    "verbosity": null,
     "log_filters": null
   },
   "qwen3.5": {

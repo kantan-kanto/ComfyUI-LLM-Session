@@ -58,8 +58,16 @@ Implemented behavior:
 - Backend kwargs are part of the model-load signature, so changing them reloads
   the model. They are not part of the history model signature, the KV-state
   signature, or the disk-cache key, and they are never forwarded to generation.
-- No unsupported-keyword fallback exists for `n_batch` or `n_ubatch`; both are
-  long-standing `Llama(...)` arguments.
+- `advanced_backend_kwargs.verbosity` accepts JSON integers `0`-`5` and
+  `advanced_backend_kwargs.logits_all` accepts JSON booleans; other values are
+  omitted with a warning. When unset, `load_model()` keeps `verbose=False` and
+  `logits_all=True` for Vision loads only. An explicit `logits_all` applies to
+  Vision and text-only loads.
+- No unsupported-keyword fallback exists for `n_batch`, `n_ubatch`, or
+  `logits_all`; they are long-standing `Llama(...)` arguments. `verbosity` is
+  JamePeng-specific, so an exact unexpected-keyword `TypeError` naming it
+  retries the load without it and logs the fallback. Other `TypeError` cases
+  are not swallowed.
 - Explicit backend kwargs are recorded in each turn's history `params` as
   `advanced_backend_kwargs`.
 
@@ -124,9 +132,10 @@ The intended top-level split is:
   "advanced_backend_kwargs": {
     "n_batch": null,
     "n_ubatch": null,
+    "verbosity": null,
+    "logits_all": null,
     "ctx_checkpoints": null,
     "checkpoint_on_device": null,
-    "verbosity": null,
     "log_filters": null
   }
 }

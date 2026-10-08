@@ -109,6 +109,41 @@ configured `n_ubatch` will be limited.
 A larger `n_ubatch` increases backend compute-buffer memory. Changing either
 value reloads the model on the next run.
 
+## Backend Log Verbosity and `logits_all`
+
+Two more model-load settings are available in `advanced_backend_kwargs` for
+both Simple nodes:
+
+```json
+{
+  "suppress_backend_logs": false,
+  "advanced_backend_kwargs": {
+    "verbosity": 3,
+    "logits_all": false
+  }
+}
+```
+
+- `advanced_backend_kwargs.verbosity`: native llama.cpp log level as an integer
+  from `0` to `5` (`0` output only, `1` error, `2` warning, `3` info, `4`
+  trace, `5` debug). When it is missing or `null`, the node keeps its previous
+  error-only logging. `3` is the usual llama.cpp log level and is enough to
+  check device and layer-offload information. Model-load logs are always
+  printed; `suppress_backend_logs: true` can still hide logs written during
+  generation, so set it to `false` when you need those.
+- `advanced_backend_kwargs.logits_all`: `true` or `false`. When it is missing
+  or `null`, the node keeps its previous behavior: `true` for Vision loads and
+  the backend default (`false`) for text-only loads. An explicit value applies
+  to both. `false` avoids keeping and copying logits for every prompt token,
+  which lowers memory use and can speed up prompt processing. Vision with
+  `logits_all: false` depends on the backend and model family, so verify it
+  with your model before relying on it.
+
+Invalid values are ignored with a warning. `verbosity` is specific to the
+JamePeng `llama-cpp-python` build; if the installed backend rejects it, the
+node prints a warning and loads the model without it. Changing either value
+reloads the model on the next run.
+
 ## Supported Advanced Generation Settings
 
 Advanced parameters are listed in the following sample file:
@@ -242,7 +277,8 @@ prompt signature.
 ### Other Advanced Parameters
 
 Unsupported parameters such as `typical_p`, the Mirostat fields, and the
-`advanced_backend_kwargs` keys other than `n_batch` and `n_ubatch` that are
+`advanced_backend_kwargs` keys other than `n_batch`, `n_ubatch`, `verbosity`,
+and `logits_all` that are
 listed in `config/simple_advanced.example.json` are currently ignored. When
 `log_level` is not `minimal`, the node prints a warning for those unsupported
 keys.
@@ -355,8 +391,8 @@ Explicit `advanced_backend_kwargs` values are recorded the same way:
 `config/simple_advanced.example.json` includes experimental fields for future
 advanced backend or generation settings. Supported normal-generation keys are
 `seed`, `top_k`, `min_p`, `present_penalty`, and `image_max_pixels`; summary generation supports
-`seed` only; backend loading supports `n_batch` and `n_ubatch`. Other advanced
-keys remain inactive.
+`seed` only; backend loading supports `n_batch`, `n_ubatch`, `verbosity`, and
+`logits_all`. Other advanced keys remain inactive.
 
 `tensor_split` is an advanced backend-style setting, but it is intentionally
 kept outside `advanced_backend_kwargs` for now to avoid breaking existing

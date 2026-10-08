@@ -318,6 +318,10 @@ Current Dialogue Cycle inputs are text-only. For ordinary text dialogue, choose
 ### suppress_backend_logs
 Suppresses verbose llama.cpp backend logs.
 
+To raise the native log level from Simple-node JSON config, see
+`advanced_backend_kwargs.verbosity` in
+[ADVANCED_PARAMETERS.md](ADVANCED_PARAMETERS.md).
+
 ---
 
 ## Simple Node Overrides

@@ -133,7 +133,7 @@ _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 _ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty", "image_max_pixels"}
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
-_ADVANCED_BACKEND_ALLOWED_KEYS = {"n_batch", "n_ubatch"}
+_ADVANCED_BACKEND_ALLOWED_KEYS = {"n_batch", "n_ubatch", "verbosity", "logits_all"}
 # Gemma 4 image_max_tokens is fixed at 512; llama.cpp aborts when one image exceeds n_ubatch.
 _ADVANCED_BACKEND_BATCH_MIN = 512
 _DEFAULT_IMAGE_MAX_PIXELS = 262144
@@ -264,12 +264,33 @@ def _advanced_generation_kwargs(value: Any, log_level: str) -> Dict[str, Any]:
     return parsed
 
 
-def _advanced_backend_kwargs(value: Any, n_ctx: int, log_level: str) -> Dict[str, int]:
+def _advanced_backend_kwargs(value: Any, n_ctx: int, log_level: str) -> Dict[str, Any]:
     """Validate supported Simple-only Llama(...) load kwargs without adding defaults."""
     if not isinstance(value, dict):
         return {}
 
-    parsed: Dict[str, int] = {}
+    parsed: Dict[str, Any] = {}
+
+    verbosity = value.get("verbosity")
+    if verbosity is not None:
+        if isinstance(verbosity, bool) or not isinstance(verbosity, int) or not 0 <= verbosity <= 5:
+            _simple_config_log(
+                "Warning: Ignoring invalid advanced_backend_kwargs.verbosity; expected an integer from 0 to 5.",
+                log_level,
+            )
+        else:
+            parsed["verbosity"] = verbosity
+
+    logits_all = value.get("logits_all")
+    if logits_all is not None:
+        if not isinstance(logits_all, bool):
+            _simple_config_log(
+                "Warning: Ignoring invalid advanced_backend_kwargs.logits_all; expected true or false.",
+                log_level,
+            )
+        else:
+            parsed["logits_all"] = logits_all
+
     for key in ("n_batch", "n_ubatch"):
         raw = value.get(key)
         if raw is None:
@@ -2822,19 +2843,25 @@ class GGUFModelManager:
 
         if use_vision and self.chat_handler is not None:
             print("[GGUFModelManager] Loading with vision support")
-            self.model = Llama(
-                **llama_kwargs,
-                chat_handler=self.chat_handler,
-                chat_format=self.chat_format,
-                # Vision models often need this; safe default for vision path.
-                logits_all=True,
-            )
+            llama_kwargs["chat_handler"] = self.chat_handler
+            llama_kwargs["chat_format"] = self.chat_format
+            # Vision models often need this; safe default for vision path.
+            llama_kwargs.setdefault("logits_all", True)
         else:
             print("[GGUFModelManager] Loading in text-only mode")
-            self.model = Llama(
-                **llama_kwargs,
-                # chat_format=self.chat_format,
+
+        try:
+            self.model = Llama(**llama_kwargs)
+        except TypeError as e:
+            message = str(e).lower()
+            if "verbosity" not in llama_kwargs or "unexpected keyword" not in message or "verbosity" not in message:
+                raise
+            print(
+                "[GGUFModelManager] Warning: Installed llama-cpp-python rejected "
+                "'verbosity'; retrying without it."
             )
+            del llama_kwargs["verbosity"]
+            self.model = Llama(**llama_kwargs)
 
         self.current_model_path = model_path
         self.current_mmproj_path = self._normalize_path(mmproj_path)
