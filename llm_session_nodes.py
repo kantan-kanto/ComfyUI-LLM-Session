@@ -133,6 +133,9 @@ _SIMPLE_WRAPPER_DEFAULTS: Dict[str, Any] = dict(SIMPLE_WRAPPER_DEFAULTS)
 _SIMPLE_ALLOWED_KEYS = set(_SIMPLE_DEFAULTS_BUILTIN.keys()) - {"schema_version"}
 _ADVANCED_GENERATION_ALLOWED_KEYS = {"seed", "top_k", "min_p", "present_penalty", "image_max_pixels"}
 _ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS = {"seed"}
+_ADVANCED_BACKEND_ALLOWED_KEYS = {"n_batch", "n_ubatch"}
+# Gemma 4 image_max_tokens is fixed at 512; llama.cpp aborts when one image exceeds n_ubatch.
+_ADVANCED_BACKEND_BATCH_MIN = 512
 _DEFAULT_IMAGE_MAX_PIXELS = 262144
 _IMAGE_MAX_PIXELS_MIN = 65536
 _IMAGE_MAX_PIXELS_MAX = 4194304
@@ -255,6 +258,44 @@ def _advanced_generation_kwargs(value: Any, log_level: str) -> Dict[str, Any]:
             _simple_config_log(
                 f"Warning: Ignoring invalid advanced_generation_kwargs.{key}; "
                 f"expected a number from 0.0 to {maximum:.1f}.",
+                log_level,
+            )
+
+    return parsed
+
+
+def _advanced_backend_kwargs(value: Any, n_ctx: int, log_level: str) -> Dict[str, int]:
+    """Validate supported Simple-only Llama(...) load kwargs without adding defaults."""
+    if not isinstance(value, dict):
+        return {}
+
+    parsed: Dict[str, int] = {}
+    for key in ("n_batch", "n_ubatch"):
+        raw = value.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            _simple_config_log(
+                f"Warning: Ignoring invalid advanced_backend_kwargs.{key}; "
+                f"expected an integer >= {_ADVANCED_BACKEND_BATCH_MIN}.",
+                log_level,
+            )
+            continue
+        if raw < _ADVANCED_BACKEND_BATCH_MIN:
+            _simple_config_log(
+                f"Warning: advanced_backend_kwargs.{key}={raw} is too small; "
+                f"using {_ADVANCED_BACKEND_BATCH_MIN}.",
+                log_level,
+            )
+        parsed[key] = max(_ADVANCED_BACKEND_BATCH_MIN, raw)
+
+    # llama-cpp-python limits n_batch to n_ctx and n_ubatch to n_batch.
+    if "n_ubatch" in parsed:
+        n_ubatch_limit = min(int(n_ctx), parsed.get("n_batch", int(n_ctx)))
+        if parsed["n_ubatch"] > n_ubatch_limit:
+            _simple_config_log(
+                f"Warning: advanced_backend_kwargs.n_ubatch={parsed['n_ubatch']} exceeds "
+                f"n_ctx/n_batch; the backend limits it to {n_ubatch_limit}.",
                 log_level,
             )
 
@@ -427,6 +468,12 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
         allowed_keys=_ADVANCED_SUMMARY_GENERATION_ALLOWED_KEYS,
         log_level=defaults["log_level"],
     )
+    _warn_unsupported_advanced_keys(
+        section_name="advanced_backend_kwargs",
+        value=config_obj.get("advanced_backend_kwargs"),
+        allowed_keys=_ADVANCED_BACKEND_ALLOWED_KEYS,
+        log_level=defaults["log_level"],
+    )
 
     # Booleans
     defaults["summarize_old_history"] = _as_bool(defaults.get("summarize_old_history"), _SIMPLE_DEFAULTS_BUILTIN["summarize_old_history"])
@@ -492,6 +539,11 @@ def _load_simple_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
     )
     defaults["advanced_summary_generation_kwargs"] = _advanced_seed_kwargs(
         config_obj.get("advanced_summary_generation_kwargs")
+    )
+    defaults["advanced_backend_kwargs"] = _advanced_backend_kwargs(
+        config_obj.get("advanced_backend_kwargs"),
+        defaults["n_ctx"],
+        defaults["log_level"],
     )
 
     return defaults
@@ -563,6 +615,7 @@ def _build_dialogue_cycle_simple_chat_kwargs(
         "reasoning_effort": str(defaults.get("reasoning_effort", _QWEN38_REASONING_EFFORT_DEFAULT)),
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
+        "advanced_backend_kwargs": dict(defaults.get("advanced_backend_kwargs") or {}),
         "official_sampling_overrides": dict(defaults.get("official_sampling_overrides") or {}),
     }
 
@@ -606,6 +659,7 @@ def _build_session_chat_simple_chat_kwargs(
         "reasoning_effort": str(defaults.get("reasoning_effort", _QWEN38_REASONING_EFFORT_DEFAULT)),
         "advanced_generation_kwargs": dict(defaults.get("advanced_generation_kwargs") or {}),
         "advanced_summary_generation_kwargs": dict(defaults.get("advanced_summary_generation_kwargs") or {}),
+        "advanced_backend_kwargs": dict(defaults.get("advanced_backend_kwargs") or {}),
         "image_max_pixels": int(defaults.get("image_max_pixels", _DEFAULT_IMAGE_MAX_PIXELS)),
     }
     return _resolve_official_sampling_turn_kwargs(
@@ -667,7 +721,7 @@ CHAT_HANDLER_KWARGS_MAP = {
     "minicpm-v-4.6": {"enable_thinking": False},
     "gemma3": {},
     # Gemma 4 image tokens use non-causal attention; llama.cpp aborts the process when
-    # one image exceeds n_ubatch, which is the llama-cpp-python default of 512 here.
+    # one image exceeds n_ubatch, which is at least 512 here (_ADVANCED_BACKEND_BATCH_MIN).
     "gemma4": {"enable_thinking": False, "image_max_tokens": 512},
     "glm4.1v": {},
     "glm4.6v": {},
@@ -2575,6 +2629,7 @@ class GGUFModelManager:
         tensor_split: Optional[List[float]],
         use_vision: bool,
         chat_handler_kwargs: Optional[Dict[str, Any]] = None,
+        advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         return (
             self._normalize_path(model_path),
@@ -2584,6 +2639,7 @@ class GGUFModelManager:
             tuple(float(x) for x in tensor_split) if tensor_split is not None else None,
             bool(use_vision),
             json.dumps(chat_handler_kwargs or {}, sort_keys=True, ensure_ascii=True),
+            json.dumps(advanced_backend_kwargs or {}, sort_keys=True, ensure_ascii=True),
         )
 
     def load_model(
@@ -2596,6 +2652,7 @@ class GGUFModelManager:
         chat_handler_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         vision_required: bool = False,
         verbose: bool = False,
+        advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Llama:
         """Load GGUF model."""
         _require_llama_cpp_available()
@@ -2727,6 +2784,7 @@ class GGUFModelManager:
             tensor_split=tensor_split,
             use_vision=use_vision,
             chat_handler_kwargs=active_chat_handler_kwargs,
+            advanced_backend_kwargs=advanced_backend_kwargs,
         )
 
         # If signature matches, reuse
@@ -2743,6 +2801,8 @@ class GGUFModelManager:
         print(f"[GGUFModelManager] n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}")
         if tensor_split is not None:
             print(f"[GGUFModelManager] tensor_split={tensor_split}")
+        if advanced_backend_kwargs:
+            print(f"[GGUFModelManager] advanced_backend_kwargs={advanced_backend_kwargs}")
 
         # Store handler on manager (used later to decide if images are supported)
         self.chat_handler = chat_handler
@@ -2757,6 +2817,8 @@ class GGUFModelManager:
         }
         if tensor_split is not None:
             llama_kwargs["tensor_split"] = tensor_split
+        if advanced_backend_kwargs:
+            llama_kwargs.update(advanced_backend_kwargs)
 
         if use_vision and self.chat_handler is not None:
             print("[GGUFModelManager] Loading with vision support")
@@ -3880,6 +3942,7 @@ def _build_dialogue_cycle_common_turn_kwargs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_overrides: Optional[Dict[str, bool]],
 ) -> Dict[str, Any]:
     return {
@@ -3910,6 +3973,7 @@ def _build_dialogue_cycle_common_turn_kwargs(
         "text_chat_builder_overrides": text_chat_builder_overrides,
         "advanced_generation_kwargs": advanced_generation_kwargs,
         "advanced_summary_generation_kwargs": advanced_summary_generation_kwargs,
+        "advanced_backend_kwargs": advanced_backend_kwargs,
         "official_sampling_overrides": dict(official_sampling_overrides or {}),
     }
 
@@ -3957,6 +4021,7 @@ def _build_session_chat_turn_kwargs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str,
     image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> Dict[str, Any]:
@@ -3998,6 +4063,7 @@ def _build_session_chat_turn_kwargs(
         "text_chat_builder_overrides": text_chat_builder_overrides,
         "advanced_generation_kwargs": advanced_generation_kwargs,
         "advanced_summary_generation_kwargs": advanced_summary_generation_kwargs,
+        "advanced_backend_kwargs": advanced_backend_kwargs,
         "official_sampling_profile": str(official_sampling_profile or ""),
         "image_max_pixels": int(image_max_pixels),
     }
@@ -4090,6 +4156,7 @@ def _build_session_chat_node_execution_request(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str,
     image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> SessionChatNodeExecutionRequest:
@@ -4133,6 +4200,7 @@ def _build_session_chat_node_execution_request(
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+            advanced_backend_kwargs=advanced_backend_kwargs,
             official_sampling_profile=official_sampling_profile,
             image_max_pixels=image_max_pixels,
         ),
@@ -4203,6 +4271,7 @@ def _execute_session_chat_turn(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str = "",
     image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> TurnExecutionResult:
@@ -4245,6 +4314,7 @@ def _execute_session_chat_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        advanced_backend_kwargs=advanced_backend_kwargs,
         official_sampling_profile=official_sampling_profile,
         image_max_pixels=image_max_pixels,
         dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
@@ -4291,6 +4361,7 @@ def _execute_dialogue_cycle_turn(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str = "",
 ) -> TurnExecutionResult:
     service = TurnExecutionService()
@@ -4332,6 +4403,7 @@ def _execute_dialogue_cycle_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        advanced_backend_kwargs=advanced_backend_kwargs,
         official_sampling_profile=official_sampling_profile,
         log_prefix_override=log_prefix_override,
         dependencies=_build_turn_execution_dependencies(runtime_container=runtime_container),
@@ -4376,6 +4448,7 @@ def _run_session_chat_from_inputs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str,
     image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
 ) -> tuple:
@@ -4416,6 +4489,7 @@ def _run_session_chat_from_inputs(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        advanced_backend_kwargs=advanced_backend_kwargs,
         official_sampling_profile=official_sampling_profile,
         image_max_pixels=image_max_pixels,
     )
@@ -4486,6 +4560,7 @@ class LLMSessionChatNode:
              text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
              advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
              advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+             advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
              official_sampling_profile: str = "",
              image_max_pixels: int = _DEFAULT_IMAGE_MAX_PIXELS,
              image=None) -> tuple:
@@ -4538,6 +4613,7 @@ class LLMSessionChatNode:
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+            advanced_backend_kwargs=advanced_backend_kwargs,
             official_sampling_profile=official_sampling_profile,
             image_max_pixels=image_max_pixels,
         )
@@ -4586,6 +4662,7 @@ def _chat_one_turn(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_profile: str = "",
 ) -> str:
     """
@@ -4632,6 +4709,7 @@ def _chat_one_turn(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        advanced_backend_kwargs=advanced_backend_kwargs,
         official_sampling_profile=official_sampling_profile,
         log_prefix_override=log_prefix_override,
     )
@@ -4693,6 +4771,7 @@ def _run_dialogue_cycle_from_inputs(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_overrides: Optional[Dict[str, bool]],
 ) -> str:
     request = _build_dialogue_cycle_node_execution_request(
@@ -4736,6 +4815,7 @@ def _run_dialogue_cycle_from_inputs(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        advanced_backend_kwargs=advanced_backend_kwargs,
         official_sampling_overrides=official_sampling_overrides,
     )
     dependencies = _build_dialogue_cycle_node_execution_dependencies(
@@ -4790,6 +4870,7 @@ def _build_dialogue_cycle_node_execution_request(
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
     advanced_generation_kwargs: Optional[Dict[str, Any]],
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]],
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
     official_sampling_overrides: Optional[Dict[str, bool]],
 ) -> DialogueCycleNodeExecutionRequest:
     return DialogueCycleNodeExecutionRequest(
@@ -4833,6 +4914,7 @@ def _build_dialogue_cycle_node_execution_request(
         text_chat_builder_overrides=text_chat_builder_overrides,
         advanced_generation_kwargs=advanced_generation_kwargs,
         advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+        advanced_backend_kwargs=advanced_backend_kwargs,
         official_sampling_overrides=(
             dict(official_sampling_overrides) if isinstance(official_sampling_overrides, dict) else None
         ),
@@ -4903,6 +4985,7 @@ class LLMDialogueCycleNode:
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
         advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
         advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+        advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
         official_sampling_overrides: Optional[Dict[str, bool]] = None,
     ) -> tuple:
         chat_handler_overrides = _merge_enable_thinking_chat_handler_overrides(
@@ -4957,6 +5040,7 @@ class LLMDialogueCycleNode:
             text_chat_builder_overrides=text_chat_builder_overrides,
             advanced_generation_kwargs=advanced_generation_kwargs,
             advanced_summary_generation_kwargs=advanced_summary_generation_kwargs,
+            advanced_backend_kwargs=advanced_backend_kwargs,
             official_sampling_overrides=official_sampling_overrides,
         )
         return (transcript_text,)

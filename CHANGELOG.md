@@ -4,6 +4,22 @@ All notable changes to ComfyUI-LLM-Session will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+- Added
+  - Added Simple JSON-only `advanced_backend_kwargs.n_batch` and
+    `advanced_backend_kwargs.n_ubatch` for `LLM Session Chat (Simple)` and
+    `LLM Dialogue Cycle (Simple)` to set the llama.cpp batch sizes at model
+    load. Values below 512 are raised to 512, explicit values are recorded in
+    turn history, and changing them reloads the model. See
+    `ADVANCED_PARAMETERS.md`.
+
+- Changed
+  - Unsupported `advanced_backend_kwargs` keys now produce the same ignored-key
+    warning as the other advanced sections when `log_level` is not `minimal`.
+
+---
+
 ## [1.6.0] - 2026-09-30
 
 - Added

@@ -114,6 +114,7 @@ class TurnExecutionRequest:
     text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     advanced_generation_kwargs: Optional[Dict[str, Any]] = None
     advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None
+    advanced_backend_kwargs: Optional[Dict[str, Any]] = None
     image_max_pixels: Optional[int] = None
 
     # Behavior switches to preserve subtle differences between legacy call paths.
@@ -172,6 +173,7 @@ class TurnExecutionRequest:
         text_chat_builder_overrides: Optional[Dict[str, Dict[str, Any]]],
         advanced_generation_kwargs: Optional[Dict[str, Any]] = None,
         advanced_summary_generation_kwargs: Optional[Dict[str, Any]] = None,
+        advanced_backend_kwargs: Optional[Dict[str, Any]] = None,
         image_max_pixels: Optional[int] = None,
         strip_assistant_before_reasoning_filter: bool,
         include_media_and_stream_in_turn_params: bool,
@@ -226,6 +228,9 @@ class TurnExecutionRequest:
                 dict(advanced_summary_generation_kwargs)
                 if isinstance(advanced_summary_generation_kwargs, dict)
                 else None
+            ),
+            advanced_backend_kwargs=(
+                dict(advanced_backend_kwargs) if isinstance(advanced_backend_kwargs, dict) else None
             ),
             image_max_pixels=(int(image_max_pixels) if image_max_pixels is not None else None),
             strip_assistant_before_reasoning_filter=bool(strip_assistant_before_reasoning_filter),
@@ -506,6 +511,7 @@ class TurnExecutionService:
                 chat_handler_overrides=request.chat_handler_overrides,
                 vision_required=vision_required,
                 verbose=False,
+                advanced_backend_kwargs=request.advanced_backend_kwargs,
             )
             _record("model_load", t_load_model)
         except Exception as err:

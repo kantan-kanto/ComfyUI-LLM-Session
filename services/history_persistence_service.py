@@ -88,6 +88,8 @@ class HistoryPersistenceService:
             turn_params["advanced_generation_kwargs"] = dict(request.advanced_generation_kwargs)
         if isinstance(request.advanced_summary_generation_kwargs, dict) and request.advanced_summary_generation_kwargs:
             turn_params["advanced_summary_generation_kwargs"] = dict(request.advanced_summary_generation_kwargs)
+        if isinstance(request.advanced_backend_kwargs, dict) and request.advanced_backend_kwargs:
+            turn_params["advanced_backend_kwargs"] = dict(request.advanced_backend_kwargs)
 
         history.setdefault("turns", []).append(
             {

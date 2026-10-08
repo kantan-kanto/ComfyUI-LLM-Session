@@ -1,7 +1,7 @@
 # Model-Specific Parameter Flow
 
 - Status: Canonical
-- Last reviewed: 2026-09-30
+- Last reviewed: 2026-10-08
 - Update when: Model-family maps or parameter precedence behavior changes.
 
 This document defines the implementation rules for model-family-specific
@@ -188,8 +188,10 @@ control image detail with `advanced_generation_kwargs.image_max_pixels`. It is
 not a text-builder or summary-builder setting.
 
 The value is 512 because Gemma 4 image tokens use non-causal attention, and
-llama.cpp aborts the process when one image exceeds `n_ubatch`, which the node
-leaves at the llama-cpp-python default of 512.
+llama.cpp aborts the process when one image exceeds `n_ubatch`, which defaults
+to 512 in llama-cpp-python. Simple config `advanced_backend_kwargs.n_batch` and
+`n_ubatch` can raise the batch sizes but are clamped to at least 512, so the
+fixed value stays safe.
 
 Unsupported `image_max_tokens` is handled by the same targeted optional-kwarg
 fallback as `image_min_tokens`.

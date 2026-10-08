@@ -69,6 +69,46 @@ setups. The chat handler also applies a fixed per-image token range:
 
 More image tokens increase prompt processing time and context usage.
 
+## Backend Batch Size
+
+Simple-node JSON can set the llama.cpp prompt-processing batch sizes that
+`llama-cpp-python` receives when the model is loaded:
+
+```json
+{
+  "n_ctx": 8192,
+  "advanced_backend_kwargs": {
+    "n_batch": 2048,
+    "n_ubatch": 2048
+  }
+}
+```
+
+- `advanced_backend_kwargs.n_batch`: logical batch size, the most tokens
+  submitted to the backend in one decode call.
+- `advanced_backend_kwargs.n_ubatch`: physical batch size, the most tokens the
+  backend computes in one pass. Raising it reduces the number of passes needed
+  to process a long prompt, which is the setting that usually affects prompt
+  processing speed on GPU backends such as SYCL.
+
+Both apply to `LLM Session Chat (Simple)` and `LLM Dialogue Cycle (Simple)`; in
+Dialogue Cycle the same values are used for model A and model B. Full nodes do
+not expose them.
+
+Missing or `null` values are omitted, so the installed backend keeps its own
+defaults (`n_batch: 2048` and `n_ubatch: 512` in the `llama-cpp-python` build
+used for testing). Values must be JSON integers; other values are ignored with a
+warning. Values below `512` are raised to `512`, because llama.cpp aborts the
+process when one Gemma 4 image exceeds `n_ubatch`.
+
+`llama-cpp-python` limits `n_batch` to `n_ctx` and `n_ubatch` to `n_batch`, so
+`n_ubatch` only takes effect up to the smaller of the two. Set `n_batch` and
+`n_ctx` at least as large as `n_ubatch`; the node prints a warning when the
+configured `n_ubatch` will be limited.
+
+A larger `n_ubatch` increases backend compute-buffer memory. Changing either
+value reloads the model on the next run.
+
 ## Supported Advanced Generation Settings
 
 Advanced parameters are listed in the following sample file:
@@ -201,7 +241,8 @@ prompt signature.
 
 ### Other Advanced Parameters
 
-Unsupported parameters such as `typical_p` and the Mirostat fields that are
+Unsupported parameters such as `typical_p`, the Mirostat fields, and the
+`advanced_backend_kwargs` keys other than `n_batch` and `n_ubatch` that are
 listed in `config/simple_advanced.example.json` are currently ignored. When
 `log_level` is not `minimal`, the node prints a warning for those unsupported
 keys.
@@ -296,12 +337,26 @@ If summary advanced settings are applied, they are also recorded:
 }
 ```
 
+Explicit `advanced_backend_kwargs` values are recorded the same way:
+
+```json
+{
+  "params": {
+    "advanced_backend_kwargs": {
+      "n_batch": 2048,
+      "n_ubatch": 2048
+    }
+  }
+}
+```
+
 ## Not Yet Active
 
 `config/simple_advanced.example.json` includes experimental fields for future
 advanced backend or generation settings. Supported normal-generation keys are
 `seed`, `top_k`, `min_p`, `present_penalty`, and `image_max_pixels`; summary generation supports
-`seed` only. Other advanced keys remain inactive.
+`seed` only; backend loading supports `n_batch` and `n_ubatch`. Other advanced
+keys remain inactive.
 
 `tensor_split` is an advanced backend-style setting, but it is intentionally
 kept outside `advanced_backend_kwargs` for now to avoid breaking existing

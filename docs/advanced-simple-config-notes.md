@@ -1,7 +1,7 @@
 # Advanced Simple Config Implementation Rules
 
 - Status: Canonical
-- Last reviewed: 2026-09-30
+- Last reviewed: 2026-10-08
 - Update when: Advanced Simple config support expands, validation rules change, or new advanced parameter categories are added.
 
 This document defines maintainer-facing implementation rules and review points
@@ -48,6 +48,20 @@ Implemented behavior:
 - Per-image vision token limits are not Simple config keys. Gemma 4 uses a
   fixed `image_max_tokens: 512` chat-handler kwarg, so `image_max_pixels` is the
   single user-facing image detail control. See `model-specific-parameter-flow.md`.
+- `advanced_backend_kwargs` accepts `n_batch` and `n_ubatch` as JSON integers
+  and passes explicitly configured values to `Llama(...)` through
+  `GGUFModelManager.load_model()` for both Simple nodes; Dialogue Cycle uses
+  the same values for model A and model B. Values below `512` are raised to
+  `512` because Gemma 4 `image_max_tokens` is fixed at 512. Non-integer values
+  are omitted with a warning, and the node warns when the backend will limit
+  `n_ubatch` to `n_ctx` or `n_batch`.
+- Backend kwargs are part of the model-load signature, so changing them reloads
+  the model. They are not part of the history model signature, the KV-state
+  signature, or the disk-cache key, and they are never forwarded to generation.
+- No unsupported-keyword fallback exists for `n_batch` or `n_ubatch`; both are
+  long-standing `Llama(...)` arguments.
+- Explicit backend kwargs are recorded in each turn's history `params` as
+  `advanced_backend_kwargs`.
 
 - `advanced_generation_kwargs` accepts `seed`, `top_k`, `min_p`, and
   `present_penalty` from Simple config and passes explicitly configured values
@@ -108,6 +122,8 @@ The intended top-level split is:
     "typical_p": null
   },
   "advanced_backend_kwargs": {
+    "n_batch": null,
+    "n_ubatch": null,
     "ctx_checkpoints": null,
     "checkpoint_on_device": null,
     "verbosity": null,
@@ -125,7 +141,7 @@ Section meanings:
 - `advanced_summary_generation_kwargs`: summary-generation options needed for
   reproducibility or future summary-specific sampling behavior.
 - `advanced_backend_kwargs`: model-load/backend options passed to `Llama(...)`,
-  such as checkpoint or backend logging controls.
+  such as batch sizes, checkpoint, or backend logging controls.
 
 Example-only keys are not supported until they are explicitly read, validated,
 tested, and documented.
